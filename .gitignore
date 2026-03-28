@@ -1,0 +1,14 @@
+bin/
+obj/
+artifacts/
+publish/
+TestResults/
+.vs/
+.idea/
+*.user
+*.suo
+*.nupkg
+*.snupkg
+*.cache
+*.tmp
+*.log

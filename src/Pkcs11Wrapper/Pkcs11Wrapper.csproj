@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Pkcs11Wrapper</AssemblyName>
+    <RootNamespace>Pkcs11Wrapper</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pkcs11Wrapper.Native\Pkcs11Wrapper.Native.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Pkcs11Wrapper.Native</AssemblyName>
+    <RootNamespace>Pkcs11Wrapper.Native</RootNamespace>
+  </PropertyGroup>
+</Project>

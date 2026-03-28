@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible Condition="'$(IsTestProject)' != 'true'">true</IsAotCompatible>
+    <EnableTrimAnalyzer Condition="'$(IsTestProject)' != 'true'">true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer Condition="'$(IsTestProject)' != 'true'">true</EnableAotAnalyzer>
+    <WarningsAsErrors>$(WarningsAsErrors);IL*;CA1416</WarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.Smoke'">
+    <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
+  </PropertyGroup>
+</Project>
