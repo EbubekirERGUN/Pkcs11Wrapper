@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 using System.Text;
 using Pkcs11Wrapper;
 using Pkcs11Wrapper.Native;
@@ -587,6 +588,49 @@ public sealed class SoftHsmCryptRegressionTests
         {
             return;
         }
+    }
+
+    [Fact]
+    public void InvalidMechanismAttemptDoesNotPoisonSubsequentEncryptDecryptFlow()
+    {
+        if (!TryCreateCryptContext(out TestContext? context))
+        {
+            return;
+        }
+
+        using TestContext activeContext = context!;
+        if (!SupportsMechanism(activeContext.Module, activeContext.SlotId, Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt) ||
+            !SupportsMechanism(activeContext.Module, activeContext.SlotId, Pkcs11MechanismTypes.AesCbc, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt))
+        {
+            return;
+        }
+
+        byte[] plaintext = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_RECOVERY_PLAINTEXT_HEX") ?? "0102030405060708090A0B0C0D0E0F10", 16);
+        byte[] gcmIv = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_RECOVERY_GCM_IV_HEX") ?? "00112233445566778899AABB", 12);
+        byte[] aad = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_RECOVERY_GCM_AAD_HEX") ?? "A1A2A3A4A5A6A7A8", 8);
+        byte[] cbcIv = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_RECOVERY_CBC_IV_HEX") ?? "00112233445566778899AABBCCDDEEFF", 16);
+        Pkcs11Mechanism invalidMechanism = new(Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismParameters.AesGcm(gcmIv, aad, tagBits: 7));
+
+        Pkcs11Exception? exception = null;
+        try
+        {
+            _ = activeContext.Session.GetEncryptOutputLength(activeContext.KeyHandle, invalidMechanism, plaintext);
+        }
+        catch (Pkcs11Exception ex)
+        {
+            exception = ex;
+        }
+
+        Assert.NotNull(exception);
+        Assert.True(IsMechanismParamOrInvalid(exception!.Result.Value));
+
+        Pkcs11Mechanism validMechanism = new(Pkcs11MechanismTypes.AesCbc, cbcIv);
+        byte[] ciphertext = new byte[activeContext.Session.GetEncryptOutputLength(activeContext.KeyHandle, validMechanism, plaintext)];
+        Assert.True(activeContext.Session.TryEncrypt(activeContext.KeyHandle, validMechanism, plaintext, ciphertext, out int ciphertextWritten));
+
+        byte[] decrypted = new byte[activeContext.Session.GetDecryptOutputLength(activeContext.KeyHandle, validMechanism, ciphertext.AsSpan(0, ciphertextWritten))];
+        Assert.True(activeContext.Session.TryDecrypt(activeContext.KeyHandle, validMechanism, ciphertext.AsSpan(0, ciphertextWritten), decrypted, out int decryptedWritten));
+        Assert.True(plaintext.AsSpan().SequenceEqual(decrypted.AsSpan(0, decryptedWritten)));
     }
 
     [Fact]
@@ -1549,6 +1593,64 @@ public sealed class SoftHsmCryptRegressionTests
         activeContext.Module.Initialize();
         using Pkcs11Session replacementSession = activeContext.Module.OpenSession(activeContext.SlotId);
         Assert.Equal(activeContext.SlotId, replacementSession.GetInfo().SlotId);
+    }
+
+    [Fact]
+    public void RepeatedFinalizeAndReinitializeCyclesKeepModuleUsable()
+    {
+        if (!TryCreateAdminContext(out AdminContext? context))
+        {
+            return;
+        }
+
+        using AdminContext activeContext = context!;
+
+        for (int round = 0; round < 5; round++)
+        {
+            using Pkcs11Session liveSession = activeContext.Module.OpenSession(activeContext.SlotId, readWrite: (round & 1) == 0);
+            Assert.Equal(activeContext.SlotId, liveSession.GetInfo().SlotId);
+
+            activeContext.Module.FinalizeModule();
+            Assert.Throws<InvalidOperationException>(() => liveSession.GetInfo());
+
+            activeContext.Module.Initialize();
+            using Pkcs11Session replacementSession = activeContext.Module.OpenSession(activeContext.SlotId);
+            Assert.Equal(activeContext.SlotId, replacementSession.GetInfo().SlotId);
+        }
+    }
+
+    [Fact]
+    public async Task ParallelOpenSessionBurstsRemainStableAcrossRounds()
+    {
+        string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
+        string? tokenLabel = Environment.GetEnvironmentVariable("PKCS11_TOKEN_LABEL");
+        if (string.IsNullOrWhiteSpace(modulePath) || string.IsNullOrWhiteSpace(tokenLabel))
+        {
+            return;
+        }
+
+        using Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
+        Pkcs11SlotId slotId = FindSlotByTokenLabel(module, tokenLabel);
+
+        for (int round = 0; round < 4; round++)
+        {
+            Task[] tasks = new Task[8];
+            for (int i = 0; i < tasks.Length; i++)
+            {
+                bool readWrite = (i & 1) == 0;
+                tasks[i] = Task.Run(() =>
+                {
+                    using Pkcs11Session session = module.OpenSession(slotId, readWrite);
+                    Assert.Equal(slotId, session.GetInfo().SlotId);
+                });
+            }
+
+            await Task.WhenAll(tasks);
+
+            using Pkcs11Session probeSession = module.OpenSession(slotId);
+            Assert.Equal(slotId, probeSession.GetInfo().SlotId);
+        }
     }
 
     [Fact]

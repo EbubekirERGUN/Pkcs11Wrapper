@@ -36,7 +36,7 @@ Acceptance criteria:
 - capability-gated behavior is handled consistently in tests
 
 ### 1.3 Concurrency and lifecycle stress coverage
-Status: **next**
+Status: **done**
 
 Goals:
 - validate repeated init/finalize cycles
@@ -50,7 +50,7 @@ Acceptance criteria:
 - no regression in baseline suite
 
 ### 1.4 Vendor regression lane hardening
-Status: planned
+Status: **next**
 
 Goals:
 - make vendor-path validation more explicit and repeatable
@@ -113,6 +113,6 @@ Acceptance criteria for Phase 2:
 
 ## Current top 3 tasks
 
-1. Add concurrency/lifecycle stress tests
-2. Harden vendor regression lane expectations/documentation
-3. Expand mechanism matrix with more vendor-sensitive negative cases
+1. Harden vendor regression lane expectations/documentation
+2. Expand mechanism matrix with more vendor-sensitive negative cases
+3. Start Phase 2 interface discovery (`C_GetInterface` / `C_GetInterfaceList`) design review
