@@ -14,24 +14,28 @@ Mevcut wrapper ve dogrulama kapsaminda sunlar bulunur:
 - Opsiyonel initialize aninda `CK_C_INITIALIZE_ARGS` bayraklari ve ozel mutex callback baglama destegi
 - Slot, token ve mechanism listeleme
 - Session acma/kapama ile user ve security-officer login akislar
+- `C_GetInterface` / `C_GetInterfaceList` uzerinden opsiyonel PKCS#11 v3 interface discovery
 - Object search ile attribute read/write yardimcilari
 - Object create, update, size query ve destroy akislar
 - Single-part encrypt/decrypt islemleri
 - Multi-part encrypt/decrypt ve operation-state resume akislar
 - Sign/verify islemleri
+- Modul bir v3 interface expose ediyorsa PKCS#11 v3 message-based encrypt/decrypt/sign/verify API'leri
 - Yonetimsel operasyonlar: `CloseAllSessions`, `InitPin`, `SetPin`, `InitToken`
+- Modul bir v3 interface expose ediyorsa PKCS#11 v3 session operasyonlari: `C_LoginUser`, `C_SessionCancel`
 - Hata raporlama yuzeyi: taxonomy metadata (retryability ipucu dahil) ve ham `CK_RV` korunumu
-- Dogrulama varliklari: SoftHSM fixture provisioning, regression script'leri, NativeAOT smoke, GitHub Actions CI
+- Dogrulama varliklari: SoftHSM fixture provisioning, regression script'leri, NativeAOT smoke, GitHub Actions CI, release verification script'i, NuGet pack metadata
 
-GitHub Actions tarafinda push/PR icin varsayilan yol SoftHSM olarak kalir; bakimcilar icin manuel tetiklenen opsiyonel bir vendor PKCS#11 regression lane de bulunur. Kurulum ayrintilari `docs/ci.md` icindedir.
+GitHub Actions tarafinda push/PR icin varsayilan yol SoftHSM olarak kalir; bakimcilar icin manuel tetiklenen opsiyonel bir vendor PKCS#11 regression lane de bulunur. Kurulum ayrintilari `docs/ci.md`, vendor lane sozlesmesi `docs/vendor-regression.md`, release dogrulama akisi ise `docs/release.md` icindedir.
 
 `InitToken` regression kapsami vardir; ancak provisioning odakli bu dogrulama, her genel calistirma senaryosunun zorunlu parcasi degil, opt-in bir yoldur.
 
-## Acik kalanlar (izlenen)
+## Guncel kisitlar (izlenen)
 
-- PKCS#11 v3 message-based giris noktalarinin (`C_MessageEncrypt*`, `C_MessageDecrypt*`, `C_MessageSign*`, `C_MessageVerify*`) modellemesi henuz yoktur.
+- Otomatik runtime dogrulama henuz PKCS#11 v3 message API'lerini pozitif olarak expose eden bir modul icermiyor; bu yollar su an ABI/layout testleri ve capability-gated runtime davranisi ile korunuyor.
 - Typed mechanism parameter helper/marshalling ECDH, AES-GCM/CTR/CCM ve RSA-OAEP/PSS yollarini kapsar; daha az yaygin bazi mechanism'ler halen ham byte payload kullanabilir.
-- SoftHSM runtime regression testleri cekirdek birlikte calisabilirlik akislarina odaklanir; ek mechanism matrisleri vendor profiline gore genisletilebilir.
+- Depo Linux-first olarak ele alinmistir; diger isletim sistemleri calisabilir ama dokumante edilen baseline'in parcasi degildir.
+- Paket yayini halen maintainer kontrollu bir aksiyondur; otomatik publish adimi tanimli degildir.
 
 ## Gereksinimler
 
@@ -102,7 +106,10 @@ dotnet run --project samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c R
 - `docs/development.md` - depo yapisi, yerel gelistirme dongusu, test katmanlari, ozellik durumu
 - `docs/softhsm-fixture.md` - SoftHSM fixture sozlesmesi, ekilen objeler, env override'lari, temizlik davranisi
 - `docs/ci.md` - GitHub Actions CI akisi ve yerel esdeger calistirma notlari
+- `docs/vendor-regression.md` - vendor uyumluluk profili, gerekli env sozlesmesi, capability-gated ve hard-fail ayrimi
 - `docs/smoke.md` - smoke orneginin davranisi, ortam degiskenleri, beklenen basari ciktilari, sorun giderme
+- `docs/compatibility-matrix.md` - dogrulanmis baseline, desteklenen capability alanlari, bilinen kisitlar
+- `docs/release.md` - release checklist, versiyonlama rehberi, packaging notlari
 
 ## Onemli yollar
 

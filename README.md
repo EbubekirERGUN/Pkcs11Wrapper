@@ -14,24 +14,28 @@ The current wrapper and validation surface covers:
 - Optional initialize-time `CK_C_INITIALIZE_ARGS` flags and custom mutex callback wiring
 - Slot, token, and mechanism enumeration
 - Session open/close plus user and security-officer login flows
+- Optional PKCS#11 v3 interface discovery via `C_GetInterface` / `C_GetInterfaceList`
 - Object search plus attribute read/write helpers
 - Object creation, mutation, size queries, and destroy flows
 - Single-part encrypt/decrypt operations
 - Multipart encrypt/decrypt and operation-state resume paths
 - Sign/verify operations
+- PKCS#11 v3 message-based encrypt/decrypt/sign/verify APIs when a module exposes a v3 interface
 - Administrative operations: `CloseAllSessions`, `InitPin`, `SetPin`, `InitToken`
+- PKCS#11 v3 session operations: `C_LoginUser`, `C_SessionCancel` when a module exposes a v3 interface
 - Error reporting with taxonomy metadata (including retryability hints) while preserving raw `CK_RV`
-- Validation assets: SoftHSM fixture provisioning, regression scripts, NativeAOT smoke, GitHub Actions CI
+- Validation assets: SoftHSM fixture provisioning, regression scripts, NativeAOT smoke, GitHub Actions CI, release verification script, NuGet pack metadata
 
-GitHub Actions keeps SoftHSM as the default push/PR path and also provides an optional manual vendor PKCS#11 regression lane for maintainers. Setup details are in `docs/ci.md`.
+GitHub Actions keeps SoftHSM as the default push/PR path and also provides an optional manual vendor PKCS#11 regression lane for maintainers. Setup details are in `docs/ci.md`, vendor-lane contract details are in `docs/vendor-regression.md`, and release verification is described in `docs/release.md`.
 
 `InitToken` regression coverage exists, but provisioning-style validation remains opt-in rather than part of every generic runtime scenario.
 
-## Current gaps (tracked)
+## Current limitations (tracked)
 
-- PKCS#11 v3 message-based entry points (`C_MessageEncrypt*`, `C_MessageDecrypt*`, `C_MessageSign*`, `C_MessageVerify*`) are not modeled yet.
+- Current automated runtime validation does **not** yet include a module that positively exposes PKCS#11 v3 message APIs; those paths are currently covered by ABI/layout tests and capability-gated runtime behavior.
 - Typed mechanism parameter helpers/marshalling cover ECDH, AES-GCM/CTR/CCM, and RSA-OAEP/PSS paths; less common mechanisms may still use raw byte payloads.
-- Runtime SoftHSM regression tests prioritize core interoperability paths; additional mechanism matrices can be expanded per vendor profile.
+- The repository is Linux-first; other operating systems may work but are not part of the documented baseline yet.
+- Package publication is still a maintainer-controlled action rather than an automated publish step.
 
 ## Requirements
 
@@ -102,7 +106,10 @@ dotnet run --project samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c R
 - `docs/development.md` - repository layout, local development loop, test layers, feature status
 - `docs/softhsm-fixture.md` - SoftHSM fixture contract, seeded objects, env overrides, cleanup behavior
 - `docs/ci.md` - GitHub Actions CI workflow and local parity guidance
+- `docs/vendor-regression.md` - vendor compatibility profile, required env contract, capability-gated vs hard-fail rules
 - `docs/smoke.md` - smoke sample behavior, environment toggles, expected success output, troubleshooting
+- `docs/compatibility-matrix.md` - validated baseline, supported capability areas, known limitations
+- `docs/release.md` - release checklist, versioning guidance, packaging notes
 
 ## Key paths
 
