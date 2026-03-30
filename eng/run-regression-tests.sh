@@ -43,8 +43,42 @@ require_command() {
 require_env() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
-    printf 'Required fixture variable is missing: %s\n' "$name" >&2
+    printf 'Required PKCS#11 environment variable is missing: %s\n' "$name" >&2
     exit 1
+  fi
+}
+
+apply_existing_env_defaults() {
+  export PKCS11_VENDOR_PROFILE="${PKCS11_VENDOR_PROFILE:-baseline-rsa-aes}"
+  export PKCS11_FIND_CLASS="${PKCS11_FIND_CLASS:-secret}"
+  export PKCS11_FIND_KEY_TYPE="${PKCS11_FIND_KEY_TYPE:-aes}"
+  export PKCS11_REQUIRE_ENCRYPT="${PKCS11_REQUIRE_ENCRYPT:-true}"
+  export PKCS11_REQUIRE_DECRYPT="${PKCS11_REQUIRE_DECRYPT:-true}"
+  export PKCS11_SIGN_MECHANISM="${PKCS11_SIGN_MECHANISM:-0x00000040}"
+  export PKCS11_SIGN_FIND_CLASS="${PKCS11_SIGN_FIND_CLASS:-private}"
+  export PKCS11_SIGN_FIND_KEY_TYPE="${PKCS11_SIGN_FIND_KEY_TYPE:-rsa}"
+  export PKCS11_SIGN_REQUIRE_SIGN="${PKCS11_SIGN_REQUIRE_SIGN:-true}"
+  export PKCS11_VERIFY_FIND_LABEL="${PKCS11_VERIFY_FIND_LABEL:-${PKCS11_SIGN_FIND_LABEL:-}}"
+  export PKCS11_VERIFY_FIND_ID_HEX="${PKCS11_VERIFY_FIND_ID_HEX:-${PKCS11_SIGN_FIND_ID_HEX:-}}"
+  export PKCS11_VERIFY_FIND_CLASS="${PKCS11_VERIFY_FIND_CLASS:-public}"
+  export PKCS11_VERIFY_FIND_KEY_TYPE="${PKCS11_VERIFY_FIND_KEY_TYPE:-rsa}"
+  export PKCS11_VERIFY_REQUIRE_VERIFY="${PKCS11_VERIFY_REQUIRE_VERIFY:-true}"
+  export PKCS11_PROVISIONING_REGRESSION="${PKCS11_PROVISIONING_REGRESSION:-0}"
+}
+
+print_existing_env_summary() {
+  printf 'Vendor compatibility profile: %s\n' "$PKCS11_VENDOR_PROFILE"
+  printf '  AES search: label=%s class=%s keyType=%s requireEncrypt=%s requireDecrypt=%s\n' \
+    "$PKCS11_FIND_LABEL" "$PKCS11_FIND_CLASS" "$PKCS11_FIND_KEY_TYPE" "$PKCS11_REQUIRE_ENCRYPT" "$PKCS11_REQUIRE_DECRYPT"
+  printf '  Sign search: label=%s class=%s keyType=%s mechanism=%s\n' \
+    "$PKCS11_SIGN_FIND_LABEL" "$PKCS11_SIGN_FIND_CLASS" "$PKCS11_SIGN_FIND_KEY_TYPE" "$PKCS11_SIGN_MECHANISM"
+  printf '  Verify search: label=%s class=%s keyType=%s\n' \
+    "$PKCS11_VERIFY_FIND_LABEL" "$PKCS11_VERIFY_FIND_CLASS" "$PKCS11_VERIFY_FIND_KEY_TYPE"
+
+  if [[ "$PKCS11_PROVISIONING_REGRESSION" == "1" ]]; then
+    printf '  Provisioning regression: enabled (SO PIN required)\n'
+  else
+    printf '  Provisioning regression: disabled\n'
   fi
 }
 
@@ -53,6 +87,8 @@ require_command pkcs11-tool
 
 if [[ "$use_existing_env" == "true" ]]; then
   printf 'Using existing PKCS#11 environment (SoftHSM fixture setup skipped)\n'
+  apply_existing_env_defaults
+  print_existing_env_summary
 else
   fixture_root="$(mktemp -d -t pkcs11wrapper-regression-XXXXXX)"
   fixture_env="$fixture_root/pkcs11-fixture.env"
@@ -78,13 +114,22 @@ object_listing="$(pkcs11-tool --module "$PKCS11_MODULE_PATH" --token-label "$PKC
 printf '%s\n' "$object_listing"
 
 if [[ "$object_listing" != *"label:      $PKCS11_FIND_LABEL"* ]]; then
-  printf 'Fixture validation failed: AES key label %s not found.\n' "$PKCS11_FIND_LABEL" >&2
+  printf 'PKCS#11 environment validation failed: AES key label %s not found.\n' "$PKCS11_FIND_LABEL" >&2
   exit 1
 fi
 
 if [[ "$object_listing" != *"label:      $PKCS11_SIGN_FIND_LABEL"* ]]; then
-  printf 'Fixture validation failed: RSA key label %s not found.\n' "$PKCS11_SIGN_FIND_LABEL" >&2
+  printf 'PKCS#11 environment validation failed: RSA sign key label %s not found.\n' "$PKCS11_SIGN_FIND_LABEL" >&2
   exit 1
+fi
+
+if [[ -n "${PKCS11_VERIFY_FIND_LABEL:-}" && "$PKCS11_VERIFY_FIND_LABEL" != "$PKCS11_SIGN_FIND_LABEL" && "$object_listing" != *"label:      $PKCS11_VERIFY_FIND_LABEL"* ]]; then
+  printf 'PKCS#11 environment validation failed: RSA verify key label %s not found.\n' "$PKCS11_VERIFY_FIND_LABEL" >&2
+  exit 1
+fi
+
+if [[ "$PKCS11_PROVISIONING_REGRESSION" == "1" ]]; then
+  require_env PKCS11_SO_PIN
 fi
 
 printf 'Running regression test suite with PKCS#11-backed environment\n'

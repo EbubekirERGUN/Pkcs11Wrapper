@@ -73,6 +73,7 @@ For the optional vendor lane, CI does not provision a fixture. The lane calls:
 ```
 
 and expects the vendor token/module inputs to already be available via workflow config.
+The script now applies the `baseline-rsa-aes` vendor compatibility profile by default; see `docs/vendor-regression.md`.
 
 ## Optional vendor lane setup
 
@@ -89,7 +90,9 @@ Enablement path:
    - `VENDOR_PKCS11_USER_PIN`
 3. Optional Secret (only needed for provisioning/admin test paths):
    - `VENDOR_PKCS11_SO_PIN`
-4. Run **Actions -> ci -> Run workflow** with:
+4. Optional Variable if you want a distinct verify-key search label:
+   - `VENDOR_PKCS11_VERIFY_FIND_LABEL`
+5. Run **Actions -> ci -> Run workflow** with:
    - `run_vendor_lane=true`
    - optional `vendor_dependency_install_command` if your module needs extra installation/runtime setup
 
@@ -124,6 +127,8 @@ That manual flow uses the same env contract while giving you direct access to th
 Local vendor-lane equivalent (pre-provisioned token/module, no SoftHSM fixture setup):
 
 ```bash
+export PKCS11_USE_EXISTING_ENV=1
+export PKCS11_VENDOR_PROFILE=baseline-rsa-aes
 export PKCS11_MODULE_PATH='/path/to/vendor-pkcs11.so'
 export PKCS11_TOKEN_LABEL='your-token-label'
 export PKCS11_USER_PIN='your-pin'
@@ -131,3 +136,5 @@ export PKCS11_FIND_LABEL='existing-aes-label'
 export PKCS11_SIGN_FIND_LABEL='existing-rsa-label'
 ./eng/run-regression-tests.sh --use-existing-env
 ```
+
+See `docs/vendor-regression.md` for the defaulted search contract and the optional provisioning/admin path.

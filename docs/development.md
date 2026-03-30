@@ -24,7 +24,7 @@ dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 Notes:
 
 - `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
-- `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation.
+- `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation and now defaults to the `baseline-rsa-aes` vendor compatibility profile documented in `docs/vendor-regression.md`.
 - `eng/run-smoke-aot.sh` provisions its own temporary fixture, publishes `samples/Pkcs11Wrapper.Smoke` with `/p:PublishAot=true`, then executes the produced binary.
 - If you want to inspect behavior interactively, create a fixture with `eng/setup-softhsm-fixture.sh`, `source` the generated env file, and run the smoke sample or targeted `dotnet test` commands manually.
 
@@ -65,6 +65,7 @@ Notable current assumptions:
 - documented validation flow is Linux-oriented
 - SoftHSM is the reference module used by scripts, tests, and CI
 - a separate optional CI lane can run regression tests against a configured non-SoftHSM vendor module
+- vendor validation distinguishes capability-gated skips from broken env/object-contract failures
 - provisioning regression for `InitToken` is intentionally opt-in and only runs when `PKCS11_PROVISIONING_REGRESSION=1` and `PKCS11_SO_PIN` are available
 
 ## Runtime contracts

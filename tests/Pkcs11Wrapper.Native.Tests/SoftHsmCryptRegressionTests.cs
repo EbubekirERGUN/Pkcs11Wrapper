@@ -410,8 +410,11 @@ public sealed class SoftHsmCryptRegressionTests
         using SignVerifyContext activeContext = context!;
         byte[] data = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_SIGN_RECOVER_DATA_HEX") ?? "00112233445566778899AABBCCDDEEFF", 16);
 
-        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.Sha256, Pkcs11MechanismFlags.Digest) ||
-            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaX509, Pkcs11MechanismFlags.SignRecover | Pkcs11MechanismFlags.VerifyRecover))
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.Session.SlotId,
+                (Pkcs11MechanismTypes.Sha256, Pkcs11MechanismFlags.Digest, "CKM_SHA256 digest"),
+                (Pkcs11MechanismTypes.RsaX509, Pkcs11MechanismFlags.SignRecover | Pkcs11MechanismFlags.VerifyRecover, "CKM_RSA_X_509 sign/verify recover")))
         {
             return;
         }
@@ -493,8 +496,11 @@ public sealed class SoftHsmCryptRegressionTests
         Pkcs11Mechanism digestMechanism = new(Pkcs11MechanismTypes.Sha256);
         Pkcs11Mechanism cryptMechanism = new(Pkcs11MechanismTypes.AesCbc, iv);
 
-        if (!SupportsMechanism(activeContext.Module, activeContext.SlotId, Pkcs11MechanismTypes.Sha256, Pkcs11MechanismFlags.Digest) ||
-            !SupportsMechanism(activeContext.Module, activeContext.SlotId, Pkcs11MechanismTypes.AesCbc, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt))
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.SlotId,
+                (Pkcs11MechanismTypes.Sha256, Pkcs11MechanismFlags.Digest, "CKM_SHA256 digest"),
+                (Pkcs11MechanismTypes.AesCbc, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt, "CKM_AES_CBC encrypt/decrypt")))
         {
             return;
         }
@@ -599,8 +605,11 @@ public sealed class SoftHsmCryptRegressionTests
         }
 
         using TestContext activeContext = context!;
-        if (!SupportsMechanism(activeContext.Module, activeContext.SlotId, Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt) ||
-            !SupportsMechanism(activeContext.Module, activeContext.SlotId, Pkcs11MechanismTypes.AesCbc, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt))
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.SlotId,
+                (Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt, "CKM_AES_GCM encrypt/decrypt"),
+                (Pkcs11MechanismTypes.AesCbc, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt, "CKM_AES_CBC encrypt/decrypt")))
         {
             return;
         }
@@ -966,8 +975,11 @@ public sealed class SoftHsmCryptRegressionTests
         }
 
         using GenerateContext activeContext = context!;
-        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.AesKeyGen, Pkcs11MechanismFlags.Generate) ||
-            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt))
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.Session.SlotId,
+                (Pkcs11MechanismTypes.AesKeyGen, Pkcs11MechanismFlags.Generate, "CKM_AES_KEY_GEN generate"),
+                (Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt, "CKM_AES_GCM encrypt/decrypt")))
         {
             return;
         }
@@ -1037,8 +1049,11 @@ public sealed class SoftHsmCryptRegressionTests
         }
 
         using GenerateContext activeContext = context!;
-        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaPkcsKeyPairGen, Pkcs11MechanismFlags.GenerateKeyPair) ||
-            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaPkcsOaep, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt))
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.Session.SlotId,
+                (Pkcs11MechanismTypes.RsaPkcsKeyPairGen, Pkcs11MechanismFlags.GenerateKeyPair, "CKM_RSA_PKCS_KEY_PAIR_GEN generate key pair"),
+                (Pkcs11MechanismTypes.RsaPkcsOaep, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt, "CKM_RSA_PKCS_OAEP encrypt/decrypt")))
         {
             return;
         }
@@ -1117,8 +1132,11 @@ public sealed class SoftHsmCryptRegressionTests
         }
 
         using GenerateContext activeContext = context!;
-        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaPkcsKeyPairGen, Pkcs11MechanismFlags.GenerateKeyPair) ||
-            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.Sha256RsaPkcsPss, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify))
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.Session.SlotId,
+                (Pkcs11MechanismTypes.RsaPkcsKeyPairGen, Pkcs11MechanismFlags.GenerateKeyPair, "CKM_RSA_PKCS_KEY_PAIR_GEN generate key pair"),
+                (Pkcs11MechanismTypes.Sha256RsaPkcsPss, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify, "CKM_SHA256_RSA_PKCS_PSS sign/verify")))
         {
             return;
         }
@@ -1173,8 +1191,11 @@ public sealed class SoftHsmCryptRegressionTests
         }
 
         using GenerateContext activeContext = context!;
-        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.GenericSecretKeyGen, Pkcs11MechanismFlags.Generate) ||
-            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.Sha256Hmac, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify))
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.Session.SlotId,
+                (Pkcs11MechanismTypes.GenericSecretKeyGen, Pkcs11MechanismFlags.Generate, "CKM_GENERIC_SECRET_KEY_GEN generate"),
+                (Pkcs11MechanismTypes.Sha256Hmac, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify, "CKM_SHA256_HMAC sign/verify")))
         {
             return;
         }
@@ -1946,6 +1967,57 @@ public sealed class SoftHsmCryptRegressionTests
     private static bool IsOperationStateUnavailable(Pkcs11Exception exception)
         => exception.Result.Value == CkrFunctionNotSupported;
 
+    private static bool IsStrictRequired()
+        => string.Equals(Environment.GetEnvironmentVariable("PKCS11_STRICT_REQUIRED"), "1", StringComparison.Ordinal);
+
+    private static string? GetEnvironmentVariableOrDefault(string name, string? fallback)
+    {
+        string? value = Environment.GetEnvironmentVariable(name);
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
+
+    private static string[] GetMissingRequiredEnvironmentVariables(params string[] names)
+    {
+        List<string> missing = [];
+        foreach (string name in names)
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name)))
+            {
+                missing.Add(name);
+            }
+        }
+
+        return [.. missing];
+    }
+
+    private static void ThrowIfStrictMissingEnvironment(string scenario, params string[] missing)
+    {
+        if (missing.Length != 0 && IsStrictRequired())
+        {
+            throw new Xunit.Sdk.XunitException($"Required PKCS#11 environment for {scenario} is missing: {string.Join(", ", missing)}.");
+        }
+    }
+
+    private static bool RequireMechanismSupport(Pkcs11Module module, Pkcs11SlotId slotId, params (Pkcs11MechanismType MechanismType, Pkcs11MechanismFlags RequiredFlags, string DisplayName)[] requirements)
+    {
+        List<string> missing = [];
+        foreach ((Pkcs11MechanismType mechanismType, Pkcs11MechanismFlags requiredFlags, string displayName) in requirements)
+        {
+            if (!SupportsMechanism(module, slotId, mechanismType, requiredFlags))
+            {
+                missing.Add(displayName);
+            }
+        }
+
+        if (missing.Count != 0)
+        {
+            Console.WriteLine($"Capability-gated: module does not expose required mechanism support for this regression path: {string.Join(", ", missing)}.");
+            return false;
+        }
+
+        return true;
+    }
+
     private static bool SupportsMechanism(Pkcs11Module module, Pkcs11SlotId slotId, Pkcs11MechanismType mechanismType, Pkcs11MechanismFlags requiredFlags)
     {
         int mechanismCount = module.GetMechanismCount(slotId);
@@ -2079,24 +2151,24 @@ public sealed class SoftHsmCryptRegressionTests
         string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
         string? tokenLabel = Environment.GetEnvironmentVariable("PKCS11_TOKEN_LABEL");
         string? userPin = Environment.GetEnvironmentVariable("PKCS11_USER_PIN");
+        string[] missing = GetMissingRequiredEnvironmentVariables("PKCS11_MODULE_PATH", "PKCS11_TOKEN_LABEL", "PKCS11_USER_PIN");
+        ThrowIfStrictMissingEnvironment("admin context", missing);
 
-        if (string.IsNullOrWhiteSpace(modulePath) ||
-            string.IsNullOrWhiteSpace(tokenLabel) ||
-            string.IsNullOrWhiteSpace(userPin))
+        if (missing.Length != 0)
         {
             context = null;
             return false;
         }
 
-        Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        Pkcs11Module module = Pkcs11Module.Load(modulePath!);
 
         try
         {
             module.Initialize();
             context = new AdminContext(
                 module,
-                FindSlotByTokenLabel(module, tokenLabel),
-                Encoding.UTF8.GetBytes(userPin),
+                FindSlotByTokenLabel(module, tokenLabel!),
+                Encoding.UTF8.GetBytes(userPin!),
                 GetOptionalUtf8Bytes(Environment.GetEnvironmentVariable("PKCS11_SO_PIN")));
             return true;
         }
@@ -2116,15 +2188,21 @@ public sealed class SoftHsmCryptRegressionTests
         string? soPin = Environment.GetEnvironmentVariable("PKCS11_SO_PIN");
         string? enableProvisioning = Environment.GetEnvironmentVariable("PKCS11_PROVISIONING_REGRESSION");
 
-        if (string.IsNullOrWhiteSpace(modulePath) ||
-            string.IsNullOrWhiteSpace(soPin) ||
-            !string.Equals(enableProvisioning, "1", StringComparison.Ordinal))
+        if (!string.Equals(enableProvisioning, "1", StringComparison.Ordinal))
         {
             context = null;
             return false;
         }
 
-        Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        string[] missing = GetMissingRequiredEnvironmentVariables("PKCS11_MODULE_PATH", "PKCS11_SO_PIN");
+        ThrowIfStrictMissingEnvironment("provisioning context", missing);
+        if (missing.Length != 0)
+        {
+            context = null;
+            return false;
+        }
+
+        Pkcs11Module module = Pkcs11Module.Load(modulePath!);
 
         try
         {
@@ -2132,7 +2210,7 @@ public sealed class SoftHsmCryptRegressionTests
             context = new ProvisioningContext(
                 module,
                 FindProvisioningSlot(module),
-                Encoding.UTF8.GetBytes(soPin),
+                Encoding.UTF8.GetBytes(soPin!),
                 Encoding.ASCII.GetBytes("246810"));
             return true;
         }
@@ -2148,23 +2226,23 @@ public sealed class SoftHsmCryptRegressionTests
         string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
         string? tokenLabel = Environment.GetEnvironmentVariable("PKCS11_TOKEN_LABEL");
         string? userPin = Environment.GetEnvironmentVariable("PKCS11_USER_PIN");
+        string[] missing = GetMissingRequiredEnvironmentVariables("PKCS11_MODULE_PATH", "PKCS11_TOKEN_LABEL", "PKCS11_USER_PIN");
+        ThrowIfStrictMissingEnvironment("generation context", missing);
 
-        if (string.IsNullOrWhiteSpace(modulePath) ||
-            string.IsNullOrWhiteSpace(tokenLabel) ||
-            string.IsNullOrWhiteSpace(userPin))
+        if (missing.Length != 0)
         {
             context = null;
             return false;
         }
 
-        Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        Pkcs11Module module = Pkcs11Module.Load(modulePath!);
 
         try
         {
             module.Initialize();
-            Pkcs11SlotId slotId = FindSlotByTokenLabel(module, tokenLabel);
+            Pkcs11SlotId slotId = FindSlotByTokenLabel(module, tokenLabel!);
             Pkcs11Session session = module.OpenSession(slotId, readWrite: true);
-            byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin);
+            byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin!);
             LoginUser(session, pinUtf8);
             context = new GenerateContext(module, session);
             return true;
@@ -2181,34 +2259,32 @@ public sealed class SoftHsmCryptRegressionTests
         string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
         string? tokenLabel = Environment.GetEnvironmentVariable("PKCS11_TOKEN_LABEL");
         string? userPin = Environment.GetEnvironmentVariable("PKCS11_USER_PIN");
-        string? findClass = Environment.GetEnvironmentVariable("PKCS11_FIND_CLASS");
-        string? findKeyType = Environment.GetEnvironmentVariable("PKCS11_FIND_KEY_TYPE");
+        string? findClass = GetEnvironmentVariableOrDefault("PKCS11_FIND_CLASS", "secret");
+        string? findKeyType = GetEnvironmentVariableOrDefault("PKCS11_FIND_KEY_TYPE", "aes");
+        string[] missing = GetMissingRequiredEnvironmentVariables("PKCS11_MODULE_PATH", "PKCS11_TOKEN_LABEL", "PKCS11_USER_PIN");
+        ThrowIfStrictMissingEnvironment("crypt context", missing);
 
-        if (string.IsNullOrWhiteSpace(modulePath) ||
-            string.IsNullOrWhiteSpace(tokenLabel) ||
-            string.IsNullOrWhiteSpace(userPin) ||
-            string.IsNullOrWhiteSpace(findClass) ||
-            string.IsNullOrWhiteSpace(findKeyType))
+        if (missing.Length != 0)
         {
             context = null;
             return false;
         }
 
-        Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        Pkcs11Module module = Pkcs11Module.Load(modulePath!);
 
         try
         {
             module.Initialize();
-            Pkcs11SlotId slotId = FindSlotByTokenLabel(module, tokenLabel);
+            Pkcs11SlotId slotId = FindSlotByTokenLabel(module, tokenLabel!);
             Pkcs11Session session = module.OpenSession(slotId);
-            byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin);
+            byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin!);
             LoginUser(session, pinUtf8);
 
             Pkcs11ObjectSearchParameters search = new(
                 label: ParseHex(Environment.GetEnvironmentVariable("PKCS11_FIND_LABEL"), Encoding.UTF8.GetBytes),
                 id: ParseHex(Environment.GetEnvironmentVariable("PKCS11_FIND_ID_HEX"), Convert.FromHexString),
-                objectClass: ParseObjectClass(findClass),
-                keyType: ParseKeyType(findKeyType),
+                objectClass: ParseObjectClass(findClass!),
+                keyType: ParseKeyType(findKeyType!),
                 requireEncrypt: ParseNullableBoolean(Environment.GetEnvironmentVariable("PKCS11_REQUIRE_ENCRYPT")),
                 requireDecrypt: ParseNullableBoolean(Environment.GetEnvironmentVariable("PKCS11_REQUIRE_DECRYPT")));
 
@@ -2228,53 +2304,53 @@ public sealed class SoftHsmCryptRegressionTests
         string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
         string? tokenLabel = Environment.GetEnvironmentVariable("PKCS11_TOKEN_LABEL");
         string? userPin = Environment.GetEnvironmentVariable("PKCS11_USER_PIN");
-        string? signMechanismText = Environment.GetEnvironmentVariable("PKCS11_SIGN_MECHANISM");
-        string? signClass = Environment.GetEnvironmentVariable("PKCS11_SIGN_FIND_CLASS");
-        string? signKeyType = Environment.GetEnvironmentVariable("PKCS11_SIGN_FIND_KEY_TYPE");
-        string? verifyClass = Environment.GetEnvironmentVariable("PKCS11_VERIFY_FIND_CLASS");
-        string? verifyKeyType = Environment.GetEnvironmentVariable("PKCS11_VERIFY_FIND_KEY_TYPE");
+        string? signMechanismText = GetEnvironmentVariableOrDefault("PKCS11_SIGN_MECHANISM", "0x00000040");
+        string? signClass = GetEnvironmentVariableOrDefault("PKCS11_SIGN_FIND_CLASS", "private");
+        string? signKeyType = GetEnvironmentVariableOrDefault("PKCS11_SIGN_FIND_KEY_TYPE", "rsa");
+        string? verifyClass = GetEnvironmentVariableOrDefault("PKCS11_VERIFY_FIND_CLASS", "public");
+        string? verifyKeyType = GetEnvironmentVariableOrDefault("PKCS11_VERIFY_FIND_KEY_TYPE", "rsa");
+        string[] missing = GetMissingRequiredEnvironmentVariables("PKCS11_MODULE_PATH", "PKCS11_TOKEN_LABEL", "PKCS11_USER_PIN");
+        ThrowIfStrictMissingEnvironment("sign/verify context", missing);
 
-        if (string.IsNullOrWhiteSpace(modulePath) ||
-            string.IsNullOrWhiteSpace(tokenLabel) ||
-            string.IsNullOrWhiteSpace(userPin) ||
-            string.IsNullOrWhiteSpace(signMechanismText) ||
-            string.IsNullOrWhiteSpace(signClass) ||
-            string.IsNullOrWhiteSpace(signKeyType) ||
-            string.IsNullOrWhiteSpace(verifyClass) ||
-            string.IsNullOrWhiteSpace(verifyKeyType))
+        if (missing.Length != 0)
         {
             context = null;
             return false;
         }
 
-        Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        Pkcs11Module module = Pkcs11Module.Load(modulePath!);
 
         try
         {
             module.Initialize();
-            Pkcs11SlotId slotId = FindSlotByTokenLabel(module, tokenLabel);
+            Pkcs11SlotId slotId = FindSlotByTokenLabel(module, tokenLabel!);
             Pkcs11Session session = module.OpenSession(slotId);
-            byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin);
+            byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin!);
             LoginUser(session, pinUtf8);
 
+            string? signLabelText = Environment.GetEnvironmentVariable("PKCS11_SIGN_FIND_LABEL");
+            string? signIdText = Environment.GetEnvironmentVariable("PKCS11_SIGN_FIND_ID_HEX");
+            string? verifyLabelText = GetEnvironmentVariableOrDefault("PKCS11_VERIFY_FIND_LABEL", signLabelText);
+            string? verifyIdText = GetEnvironmentVariableOrDefault("PKCS11_VERIFY_FIND_ID_HEX", signIdText);
+
             Pkcs11ObjectSearchParameters signSearch = new(
-                label: ParseHex(Environment.GetEnvironmentVariable("PKCS11_SIGN_FIND_LABEL"), Encoding.UTF8.GetBytes),
-                id: ParseHex(Environment.GetEnvironmentVariable("PKCS11_SIGN_FIND_ID_HEX"), Convert.FromHexString),
-                objectClass: ParseObjectClass(signClass),
-                keyType: ParseKeyType(signKeyType),
+                label: ParseHex(signLabelText, Encoding.UTF8.GetBytes),
+                id: ParseHex(signIdText, Convert.FromHexString),
+                objectClass: ParseObjectClass(signClass!),
+                keyType: ParseKeyType(signKeyType!),
                 requireSign: ParseNullableBoolean(Environment.GetEnvironmentVariable("PKCS11_SIGN_REQUIRE_SIGN")));
 
             Pkcs11ObjectSearchParameters verifySearch = new(
-                label: ParseHex(Environment.GetEnvironmentVariable("PKCS11_VERIFY_FIND_LABEL"), Encoding.UTF8.GetBytes),
-                id: ParseHex(Environment.GetEnvironmentVariable("PKCS11_VERIFY_FIND_ID_HEX"), Convert.FromHexString),
-                objectClass: ParseObjectClass(verifyClass),
-                keyType: ParseKeyType(verifyKeyType),
+                label: ParseHex(verifyLabelText, Encoding.UTF8.GetBytes),
+                id: ParseHex(verifyIdText, Convert.FromHexString),
+                objectClass: ParseObjectClass(verifyClass!),
+                keyType: ParseKeyType(verifyKeyType!),
                 requireVerify: ParseNullableBoolean(Environment.GetEnvironmentVariable("PKCS11_VERIFY_REQUIRE_VERIFY")));
 
             Assert.True(session.TryFindObject(signSearch, out Pkcs11ObjectHandle signKeyHandle));
             Assert.True(session.TryFindObject(verifySearch, out Pkcs11ObjectHandle verifyKeyHandle));
 
-            Pkcs11MechanismType mechanismType = new(ParseNuint(signMechanismText));
+            Pkcs11MechanismType mechanismType = new(ParseNuint(signMechanismText!));
             byte[] mechanismParameter = ParseHex(Environment.GetEnvironmentVariable("PKCS11_SIGN_MECHANISM_PARAM_HEX"), Convert.FromHexString);
 
             context = new SignVerifyContext(module, session, signKeyHandle, verifyKeyHandle, mechanismType, mechanismParameter);

@@ -50,7 +50,7 @@ Acceptance criteria:
 - no regression in baseline suite
 
 ### 1.4 Vendor regression lane hardening
-Status: **next**
+Status: **done**
 
 Goals:
 - make vendor-path validation more explicit and repeatable
@@ -63,7 +63,7 @@ Acceptance criteria:
 - test expectations clearly distinguish capability-gated vs broken behavior
 
 ### 1.5 Mechanism matrix expansion
-Status: planned
+Status: **next**
 
 Goals:
 - widen coverage for RSA OAEP/PSS variants, AES modes, ECDH variants, and edge cases
@@ -113,6 +113,6 @@ Acceptance criteria for Phase 2:
 
 ## Current top 3 tasks
 
-1. Harden vendor regression lane expectations/documentation
-2. Expand mechanism matrix with more vendor-sensitive negative cases
-3. Start Phase 2 interface discovery (`C_GetInterface` / `C_GetInterfaceList`) design review
+1. Expand mechanism matrix with more vendor-sensitive negative cases
+2. Start Phase 2 interface discovery (`C_GetInterface` / `C_GetInterfaceList`) implementation review
+3. Plan PKCS#11 v3 message-based API surface (`C_Message*`) without breaking AOT/contracts
