@@ -646,6 +646,44 @@ public unsafe struct CK_FUNCTION_LIST
     public delegate* unmanaged[Cdecl]<CK_FLAGS, CK_SLOT_ID*, void*, CK_RV> C_WaitForSlotEvent;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CK_INTERFACE
+{
+    public byte* InterfaceName;
+    public void* FunctionList;
+    public CK_FLAGS Flags;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CK_FUNCTION_LIST_3_0
+{
+    public CK_FUNCTION_LIST Base;
+    public delegate* unmanaged[Cdecl]<CK_INTERFACE*, CK_ULONG*, CK_RV> C_GetInterfaceList;
+    public delegate* unmanaged[Cdecl]<byte*, CK_VERSION*, CK_INTERFACE**, CK_FLAGS, CK_RV> C_GetInterface;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_USER_TYPE, byte*, CK_ULONG, byte*, CK_ULONG, CK_RV> C_LoginUser;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_FLAGS, CK_RV> C_SessionCancel;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> C_MessageEncryptInit;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_EncryptMessage;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, CK_RV> C_EncryptMessageBegin;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_FLAGS, CK_RV> C_EncryptMessageNext;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_RV> C_MessageEncryptFinal;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> C_MessageDecryptInit;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_DecryptMessage;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, CK_RV> C_DecryptMessageBegin;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_FLAGS, CK_RV> C_DecryptMessageNext;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_RV> C_MessageDecryptFinal;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> C_MessageSignInit;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_SignMessage;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, CK_RV> C_SignMessageBegin;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_SignMessageNext;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_RV> C_MessageSignFinal;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> C_MessageVerifyInit;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, CK_RV> C_VerifyMessage;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, CK_RV> C_VerifyMessageBegin;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, CK_RV> C_VerifyMessageNext;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_RV> C_MessageVerifyFinal;
+}
+
 
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct CK_C_INITIALIZE_ARGS

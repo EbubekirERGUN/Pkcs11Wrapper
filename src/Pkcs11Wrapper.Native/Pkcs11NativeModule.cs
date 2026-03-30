@@ -20,15 +20,23 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     private const nuint Pkcs11Sha512RsaPkcsPssMechanism = 0x00000045u;
     private readonly nint _handle;
     private readonly CK_FUNCTION_LIST* _functionList;
+    private readonly nint _getInterfaceListExport;
+    private readonly nint _getInterfaceExport;
     private readonly object _lifecycleSync = new();
     private volatile bool _disposed;
     private volatile bool _isInitialized;
     private bool _ownsInitialization;
 
-    private Pkcs11NativeModule(nint handle, CK_FUNCTION_LIST* functionList)
+    private Pkcs11NativeModule(
+        nint handle,
+        CK_FUNCTION_LIST* functionList,
+        nint getInterfaceListExport,
+        nint getInterfaceExport)
     {
         _handle = handle;
         _functionList = functionList;
+        _getInterfaceListExport = getInterfaceListExport;
+        _getInterfaceExport = getInterfaceExport;
     }
 
     public CK_FUNCTION_LIST* FunctionList
@@ -68,7 +76,20 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 throw new InvalidOperationException("C_GetFunctionList returned a null function list pointer.");
             }
 
-            return new Pkcs11NativeModule(handle, functionList);
+            nint getInterfaceList = 0;
+            nint getInterface = 0;
+
+            if (NativeLibrary.TryGetExport(handle, "C_GetInterfaceList", out nint getInterfaceListAddress))
+            {
+                getInterfaceList = getInterfaceListAddress;
+            }
+
+            if (NativeLibrary.TryGetExport(handle, "C_GetInterface", out nint getInterfaceAddress))
+            {
+                getInterface = getInterfaceAddress;
+            }
+
+            return new Pkcs11NativeModule(handle, functionList, getInterfaceList, getInterface);
         }
         catch
         {
@@ -155,6 +176,117 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         }
 
         return functionList->Version;
+    }
+
+    public bool SupportsInterfaceDiscovery => _getInterfaceListExport != 0 && _getInterfaceExport != 0;
+
+    public int GetInterfaceCount()
+    {
+        EnsureNotDisposed();
+
+        if (_getInterfaceListExport == 0)
+        {
+            return 0;
+        }
+
+        delegate* unmanaged[Cdecl]<CK_INTERFACE*, CK_ULONG*, CK_RV> getInterfaceList = (delegate* unmanaged[Cdecl]<CK_INTERFACE*, CK_ULONG*, CK_RV>)_getInterfaceListExport;
+
+        CK_ULONG count = default;
+        CK_RV result = getInterfaceList(null, &count);
+        ThrowIfFailed(result, "C_GetInterfaceList");
+        return ToInt32Checked(count, "interface count");
+    }
+
+    public bool TryGetInterfaces(Span<CK_INTERFACE> destination, out int written)
+    {
+        EnsureNotDisposed();
+
+        if (_getInterfaceListExport == 0)
+        {
+            written = 0;
+            return true;
+        }
+
+        delegate* unmanaged[Cdecl]<CK_INTERFACE*, CK_ULONG*, CK_RV> getInterfaceList = (delegate* unmanaged[Cdecl]<CK_INTERFACE*, CK_ULONG*, CK_RV>)_getInterfaceListExport;
+
+        CK_ULONG count = default;
+        CK_RV result = getInterfaceList(null, &count);
+        ThrowIfFailed(result, "C_GetInterfaceList");
+
+        int required = ToInt32Checked(count, "interface count");
+        if (destination.Length < required)
+        {
+            written = required;
+            return false;
+        }
+
+        if (required == 0)
+        {
+            written = 0;
+            return true;
+        }
+
+        count = (CK_ULONG)(nuint)required;
+        fixed (CK_INTERFACE* destinationPointer = destination)
+        {
+            result = getInterfaceList(destinationPointer, &count);
+        }
+
+        if (result == Pkcs11ReturnValues.BufferTooSmall)
+        {
+            written = ToInt32Checked(count, "interface count");
+            return false;
+        }
+
+        ThrowIfFailed(result, "C_GetInterfaceList");
+        written = ToInt32Checked(count, "interface count");
+        return true;
+    }
+
+    public bool TryGetInterface(ReadOnlySpan<byte> nameUtf8, CK_VERSION? version, CK_FLAGS flags, out CK_INTERFACE nativeInterface)
+    {
+        EnsureNotDisposed();
+
+        if (_getInterfaceExport == 0)
+        {
+            nativeInterface = default;
+            return false;
+        }
+
+        delegate* unmanaged[Cdecl]<byte*, CK_VERSION*, CK_INTERFACE**, CK_FLAGS, CK_RV> getInterface = (delegate* unmanaged[Cdecl]<byte*, CK_VERSION*, CK_INTERFACE**, CK_FLAGS, CK_RV>)_getInterfaceExport;
+
+        CK_INTERFACE* interfacePointer = null;
+        CK_VERSION requestedVersion = version ?? default;
+        CK_VERSION* requestedVersionPointer = version is null ? null : &requestedVersion;
+
+        CK_RV result;
+        if (nameUtf8.IsEmpty)
+        {
+            result = getInterface(null, requestedVersionPointer, &interfacePointer, flags);
+        }
+        else
+        {
+            fixed (byte* namePointer = nameUtf8)
+            {
+                result = getInterface(namePointer, requestedVersionPointer, &interfacePointer, flags);
+            }
+        }
+
+        if (result == Pkcs11ReturnValues.FunctionNotSupported)
+        {
+            nativeInterface = default;
+            return false;
+        }
+
+        ThrowIfFailed(result, "C_GetInterface");
+
+        if (interfacePointer is null)
+        {
+            throw new InvalidOperationException("C_GetInterface returned a null interface pointer.");
+        }
+
+        nativeInterface = *interfacePointer;
+        return true;
     }
 
     public int GetSlotCount(bool tokenPresentOnly)
@@ -1526,6 +1658,148 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         return true;
     }
 
+    public void LoginUser(CK_SESSION_HANDLE sessionHandle, CK_USER_TYPE userType, ReadOnlySpan<byte> pinUtf8, ReadOnlySpan<byte> usernameUtf8)
+    {
+        EnsureInitialized();
+
+        CK_FUNCTION_LIST_3_0* functionList = GetFunctionList30();
+        EnsureFunctionAvailable((void*)functionList->C_LoginUser, "C_LoginUser");
+
+        CK_RV result;
+        if (pinUtf8.IsEmpty && usernameUtf8.IsEmpty)
+        {
+            result = functionList->C_LoginUser(sessionHandle, userType, null, 0, null, 0);
+        }
+        else
+        {
+            fixed (byte* pinPointer = pinUtf8)
+            fixed (byte* usernamePointer = usernameUtf8)
+            {
+                result = functionList->C_LoginUser(
+                    sessionHandle,
+                    userType,
+                    pinUtf8.IsEmpty ? null : pinPointer,
+                    (CK_ULONG)(nuint)pinUtf8.Length,
+                    usernameUtf8.IsEmpty ? null : usernamePointer,
+                    (CK_ULONG)(nuint)usernameUtf8.Length);
+            }
+        }
+
+        ThrowIfFailed(result, "C_LoginUser");
+    }
+
+    public void SessionCancel(CK_SESSION_HANDLE sessionHandle, CK_FLAGS flags)
+    {
+        EnsureInitialized();
+        CK_FUNCTION_LIST_3_0* functionList = GetFunctionList30();
+        EnsureFunctionAvailable((void*)functionList->C_SessionCancel, "C_SessionCancel");
+        CK_RV result = functionList->C_SessionCancel(sessionHandle, flags);
+        ThrowIfFailed(result, "C_SessionCancel");
+    }
+
+    public void MessageEncryptInit(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
+        => InitializeV3CryptOperation(sessionHandle, keyHandle, mechanismType, mechanismParameter, GetFunctionList30()->C_MessageEncryptInit, "C_MessageEncryptInit");
+
+    public int GetMessageEncryptOutputLength(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> plaintext)
+        => GetMessageOutputLength(sessionHandle, parameter, associatedData, plaintext, GetFunctionList30()->C_EncryptMessage, "C_EncryptMessage", "ciphertext length");
+
+    public bool TryEncryptMessage(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> plaintext, Span<byte> ciphertext, out int written)
+        => TryMessageInvoke(sessionHandle, parameter, associatedData, plaintext, ciphertext, out written, GetFunctionList30()->C_EncryptMessage, "C_EncryptMessage", "ciphertext length");
+
+    public void EncryptMessageBegin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData)
+        => MessageBegin(sessionHandle, parameter, associatedData, GetFunctionList30()->C_EncryptMessageBegin, "C_EncryptMessageBegin");
+
+    public bool TryEncryptMessageNext(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> plaintextPart, Span<byte> ciphertextPart, CK_FLAGS flags, out int written)
+        => TryMessageNext(sessionHandle, parameter, plaintextPart, ciphertextPart, flags, out written, GetFunctionList30()->C_EncryptMessageNext, "C_EncryptMessageNext", "ciphertext length");
+
+    public void MessageEncryptFinal(CK_SESSION_HANDLE sessionHandle) => MessageFinal(sessionHandle, GetFunctionList30()->C_MessageEncryptFinal, "C_MessageEncryptFinal");
+
+    public void MessageDecryptInit(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
+        => InitializeV3CryptOperation(sessionHandle, keyHandle, mechanismType, mechanismParameter, GetFunctionList30()->C_MessageDecryptInit, "C_MessageDecryptInit");
+
+    public int GetMessageDecryptOutputLength(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> ciphertext)
+        => GetMessageOutputLength(sessionHandle, parameter, associatedData, ciphertext, GetFunctionList30()->C_DecryptMessage, "C_DecryptMessage", "plaintext length");
+
+    public bool TryDecryptMessage(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> ciphertext, Span<byte> plaintext, out int written)
+        => TryMessageInvoke(sessionHandle, parameter, associatedData, ciphertext, plaintext, out written, GetFunctionList30()->C_DecryptMessage, "C_DecryptMessage", "plaintext length");
+
+    public void DecryptMessageBegin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData)
+        => MessageBegin(sessionHandle, parameter, associatedData, GetFunctionList30()->C_DecryptMessageBegin, "C_DecryptMessageBegin");
+
+    public bool TryDecryptMessageNext(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> ciphertextPart, Span<byte> plaintextPart, CK_FLAGS flags, out int written)
+        => TryMessageNext(sessionHandle, parameter, ciphertextPart, plaintextPart, flags, out written, GetFunctionList30()->C_DecryptMessageNext, "C_DecryptMessageNext", "plaintext length");
+
+    public void MessageDecryptFinal(CK_SESSION_HANDLE sessionHandle) => MessageFinal(sessionHandle, GetFunctionList30()->C_MessageDecryptFinal, "C_MessageDecryptFinal");
+
+    public void MessageSignInit(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
+        => InitializeV3CryptOperation(sessionHandle, keyHandle, mechanismType, mechanismParameter, GetFunctionList30()->C_MessageSignInit, "C_MessageSignInit");
+
+    public int GetSignMessageOutputLength(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data)
+        => GetSignMessageOutputLengthCore(sessionHandle, parameter, data, GetFunctionList30()->C_SignMessage, "C_SignMessage");
+
+    public bool TrySignMessage(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+        => TrySignMessageCore(sessionHandle, parameter, data, signature, out written, GetFunctionList30()->C_SignMessage, "C_SignMessage");
+
+    public void SignMessageBegin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter)
+    {
+        EnsureInitialized();
+        CK_FUNCTION_LIST_3_0* functionList = GetFunctionList30();
+        EnsureFunctionAvailable((void*)functionList->C_SignMessageBegin, "C_SignMessageBegin");
+
+        CK_RV result;
+        if (parameter.IsEmpty)
+        {
+            result = functionList->C_SignMessageBegin(sessionHandle, null, 0);
+        }
+        else
+        {
+            fixed (byte* parameterPointer = parameter)
+            {
+                result = functionList->C_SignMessageBegin(sessionHandle, parameterPointer, (CK_ULONG)(nuint)parameter.Length);
+            }
+        }
+
+        ThrowIfFailed(result, "C_SignMessageBegin");
+    }
+
+    public bool TrySignMessageNext(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+        => TrySignMessageCore(sessionHandle, parameter, data, signature, out written, GetFunctionList30()->C_SignMessageNext, "C_SignMessageNext");
+
+    public void MessageSignFinal(CK_SESSION_HANDLE sessionHandle) => MessageFinal(sessionHandle, GetFunctionList30()->C_MessageSignFinal, "C_MessageSignFinal");
+
+    public void MessageVerifyInit(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
+        => InitializeV3CryptOperation(sessionHandle, keyHandle, mechanismType, mechanismParameter, GetFunctionList30()->C_MessageVerifyInit, "C_MessageVerifyInit");
+
+    public bool VerifyMessage(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
+        => VerifyMessageCore(sessionHandle, parameter, data, signature, GetFunctionList30()->C_VerifyMessage, "C_VerifyMessage");
+
+    public void VerifyMessageBegin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter)
+    {
+        EnsureInitialized();
+        CK_FUNCTION_LIST_3_0* functionList = GetFunctionList30();
+        EnsureFunctionAvailable((void*)functionList->C_VerifyMessageBegin, "C_VerifyMessageBegin");
+
+        CK_RV result;
+        if (parameter.IsEmpty)
+        {
+            result = functionList->C_VerifyMessageBegin(sessionHandle, null, 0);
+        }
+        else
+        {
+            fixed (byte* parameterPointer = parameter)
+            {
+                result = functionList->C_VerifyMessageBegin(sessionHandle, parameterPointer, (CK_ULONG)(nuint)parameter.Length);
+            }
+        }
+
+        ThrowIfFailed(result, "C_VerifyMessageBegin");
+    }
+
+    public bool VerifyMessageNext(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
+        => VerifyMessageCore(sessionHandle, parameter, data, signature, GetFunctionList30()->C_VerifyMessageNext, "C_VerifyMessageNext");
+
+    public void MessageVerifyFinal(CK_SESSION_HANDLE sessionHandle) => MessageFinal(sessionHandle, GetFunctionList30()->C_MessageVerifyFinal, "C_MessageVerifyFinal");
+
     public void Dispose()
     {
         lock (_lifecycleSync)
@@ -1556,6 +1830,253 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 _ownsInitialization = false;
                 NativeLibrary.Free(_handle);
             }
+        }
+    }
+
+    private CK_FUNCTION_LIST_3_0* GetFunctionList30()
+    {
+        if (!TryGetInterface([], new CK_VERSION(3, 0), new CK_FLAGS(0), out CK_INTERFACE nativeInterface))
+        {
+            throw new InvalidOperationException("The PKCS#11 module does not expose a PKCS#11 v3.0 interface.");
+        }
+
+        if (nativeInterface.FunctionList is null)
+        {
+            throw new InvalidOperationException("C_GetInterface returned a null function list pointer.");
+        }
+
+        return (CK_FUNCTION_LIST_3_0*)nativeInterface.FunctionList;
+    }
+
+    private void InitializeV3CryptOperation(
+        CK_SESSION_HANDLE sessionHandle,
+        CK_OBJECT_HANDLE keyHandle,
+        CK_MECHANISM_TYPE mechanismType,
+        ReadOnlySpan<byte> mechanismParameter,
+        delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> init,
+        string operation)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)init, operation);
+
+        fixed (byte* mechanismParameterPointer = mechanismParameter)
+        {
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
+            CK_RV result = init(sessionHandle, &mechanism, keyHandle);
+            ThrowIfFailed(result, operation);
+        }
+    }
+
+    private int GetMessageOutputLength(
+        CK_SESSION_HANDLE sessionHandle,
+        ReadOnlySpan<byte> parameter,
+        ReadOnlySpan<byte> associatedData,
+        ReadOnlySpan<byte> input,
+        delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke,
+        string operation,
+        string outputName)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)invoke, operation);
+        CK_ULONG outputLength = default;
+        InvokeMessage(sessionHandle, parameter, associatedData, input, null, &outputLength, invoke, operation);
+        return ToInt32Checked(outputLength, outputName);
+    }
+
+    private bool TryMessageInvoke(
+        CK_SESSION_HANDLE sessionHandle,
+        ReadOnlySpan<byte> parameter,
+        ReadOnlySpan<byte> associatedData,
+        ReadOnlySpan<byte> input,
+        Span<byte> output,
+        out int written,
+        delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke,
+        string operation,
+        string outputName)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)invoke, operation);
+        CK_ULONG outputLength = (CK_ULONG)(nuint)output.Length;
+
+        fixed (byte* outputPointer = output)
+        {
+            CK_RV result = InvokeMessage(sessionHandle, parameter, associatedData, input, output.IsEmpty ? null : outputPointer, &outputLength, invoke, operation, throwOnError: false);
+            if (result == Pkcs11ReturnValues.BufferTooSmall)
+            {
+                written = ToInt32Checked(outputLength, outputName);
+                return false;
+            }
+
+            ThrowIfFailed(result, operation);
+        }
+
+        written = ToInt32Checked(outputLength, outputName);
+        return true;
+    }
+
+    private void MessageBegin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, CK_RV> begin, string operation)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)begin, operation);
+
+        fixed (byte* parameterPointer = parameter)
+        fixed (byte* associatedDataPointer = associatedData)
+        {
+            CK_RV result = begin(
+                sessionHandle,
+                parameter.IsEmpty ? null : parameterPointer,
+                (CK_ULONG)(nuint)parameter.Length,
+                associatedData.IsEmpty ? null : associatedDataPointer,
+                (CK_ULONG)(nuint)associatedData.Length);
+            ThrowIfFailed(result, operation);
+        }
+    }
+
+    private bool TryMessageNext(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> input, Span<byte> output, CK_FLAGS flags, out int written, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_FLAGS, CK_RV> next, string operation, string outputName)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)next, operation);
+
+        CK_ULONG outputLength = (CK_ULONG)(nuint)output.Length;
+        fixed (byte* parameterPointer = parameter)
+        fixed (byte* inputPointer = input)
+        fixed (byte* outputPointer = output)
+        {
+            CK_RV result = next(
+                sessionHandle,
+                parameter.IsEmpty ? null : parameterPointer,
+                (CK_ULONG)(nuint)parameter.Length,
+                input.IsEmpty ? null : inputPointer,
+                (CK_ULONG)(nuint)input.Length,
+                output.IsEmpty ? null : outputPointer,
+                &outputLength,
+                flags);
+
+            if (result == Pkcs11ReturnValues.BufferTooSmall)
+            {
+                written = ToInt32Checked(outputLength, outputName);
+                return false;
+            }
+
+            ThrowIfFailed(result, operation);
+        }
+
+        written = ToInt32Checked(outputLength, outputName);
+        return true;
+    }
+
+    private void MessageFinal(CK_SESSION_HANDLE sessionHandle, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_RV> final, string operation)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)final, operation);
+        ThrowIfFailed(final(sessionHandle), operation);
+    }
+
+    private int GetSignMessageOutputLengthCore(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke, string operation)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)invoke, operation);
+        CK_ULONG signatureLength = default;
+        InvokeSignMessage(sessionHandle, parameter, data, null, &signatureLength, invoke, operation);
+        return ToInt32Checked(signatureLength, "signature length");
+    }
+
+    private bool TrySignMessageCore(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke, string operation)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)invoke, operation);
+        CK_ULONG signatureLength = (CK_ULONG)(nuint)signature.Length;
+
+        fixed (byte* signaturePointer = signature)
+        {
+            CK_RV result = InvokeSignMessage(sessionHandle, parameter, data, signature.IsEmpty ? null : signaturePointer, &signatureLength, invoke, operation, throwOnError: false);
+            if (result == Pkcs11ReturnValues.BufferTooSmall)
+            {
+                written = ToInt32Checked(signatureLength, "signature length");
+                return false;
+            }
+
+            ThrowIfFailed(result, operation);
+        }
+
+        written = ToInt32Checked(signatureLength, "signature length");
+        return true;
+    }
+
+    private bool VerifyMessageCore(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, CK_RV> verify, string operation)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)verify, operation);
+
+        fixed (byte* parameterPointer = parameter)
+        fixed (byte* dataPointer = data)
+        fixed (byte* signaturePointer = signature)
+        {
+            CK_RV result = verify(
+                sessionHandle,
+                parameter.IsEmpty ? null : parameterPointer,
+                (CK_ULONG)(nuint)parameter.Length,
+                data.IsEmpty ? null : dataPointer,
+                (CK_ULONG)(nuint)data.Length,
+                signature.IsEmpty ? null : signaturePointer,
+                (CK_ULONG)(nuint)signature.Length);
+
+            if (result == Pkcs11ReturnValues.SignatureInvalid || result == Pkcs11ReturnValues.SignatureLenRange)
+            {
+                return false;
+            }
+
+            ThrowIfFailed(result, operation);
+            return true;
+        }
+    }
+
+    private CK_RV InvokeMessage(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> input, byte* output, CK_ULONG* outputLength, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke, string operation, bool throwOnError = true)
+    {
+        fixed (byte* parameterPointer = parameter)
+        fixed (byte* associatedDataPointer = associatedData)
+        fixed (byte* inputPointer = input)
+        {
+            CK_RV result = invoke(
+                sessionHandle,
+                parameter.IsEmpty ? null : parameterPointer,
+                (CK_ULONG)(nuint)parameter.Length,
+                associatedData.IsEmpty ? null : associatedDataPointer,
+                (CK_ULONG)(nuint)associatedData.Length,
+                input.IsEmpty ? null : inputPointer,
+                (CK_ULONG)(nuint)input.Length,
+                output,
+                outputLength);
+
+            if (throwOnError)
+            {
+                ThrowIfFailed(result, operation);
+            }
+
+            return result;
+        }
+    }
+
+    private CK_RV InvokeSignMessage(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, byte* signature, CK_ULONG* signatureLength, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke, string operation, bool throwOnError = true)
+    {
+        fixed (byte* parameterPointer = parameter)
+        fixed (byte* dataPointer = data)
+        {
+            CK_RV result = invoke(
+                sessionHandle,
+                parameter.IsEmpty ? null : parameterPointer,
+                (CK_ULONG)(nuint)parameter.Length,
+                data.IsEmpty ? null : dataPointer,
+                (CK_ULONG)(nuint)data.Length,
+                signature,
+                signatureLength);
+
+            if (throwOnError)
+            {
+                ThrowIfFailed(result, operation);
+            }
+
+            return result;
         }
     }
 

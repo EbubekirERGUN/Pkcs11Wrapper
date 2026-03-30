@@ -2,9 +2,19 @@
   <PropertyGroup>
     <AssemblyName>Pkcs11Wrapper</AssemblyName>
     <RootNamespace>Pkcs11Wrapper</RootNamespace>
+    <PackageId>Pkcs11Wrapper</PackageId>
+    <Description>Span-first .NET 10 PKCS#11 wrapper with NativeAOT-friendly interop.</Description>
+    <PackageTags>pkcs11;cryptoki;hsm;smartcard;nativeaot</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Pkcs11Wrapper.Native\Pkcs11Wrapper.Native.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
   </ItemGroup>
 </Project>

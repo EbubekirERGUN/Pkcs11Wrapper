@@ -57,6 +57,8 @@ The wrapper surface implemented through the current phase set includes:
 - object creation, mutation, size queries, and destroy
 - encrypt/decrypt and sign/verify APIs
 - multipart operations and operation-state APIs
+- optional PKCS#11 v3 interface discovery and message-based API surface
+- optional `C_LoginUser` / `C_SessionCancel` through the discovered v3 interface
 - administrative operations for session invalidation and token/PIN provisioning
 - native AOT smoke validation through the sample app
 
@@ -67,6 +69,7 @@ Notable current assumptions:
 - a separate optional CI lane can run regression tests against a configured non-SoftHSM vendor module
 - vendor validation distinguishes capability-gated skips from broken env/object-contract failures
 - provisioning regression for `InitToken` is intentionally opt-in and only runs when `PKCS11_PROVISIONING_REGRESSION=1` and `PKCS11_SO_PIN` are available
+- current SoftHSM builds used in CI do not export `C_GetInterface*`, so v3-specific runtime behavior remains capability-gated until an additional v3-capable module is added to validation
 
 ## Runtime contracts
 
@@ -87,3 +90,5 @@ Notable current assumptions:
 - Fixture contract: `docs/softhsm-fixture.md`
 - CI behavior: `docs/ci.md`
 - Smoke sample usage: `docs/smoke.md`
+- Compatibility matrix: `docs/compatibility-matrix.md`
+- Release discipline: `docs/release.md`

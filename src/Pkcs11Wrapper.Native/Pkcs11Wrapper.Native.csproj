@@ -2,5 +2,15 @@
   <PropertyGroup>
     <AssemblyName>Pkcs11Wrapper.Native</AssemblyName>
     <RootNamespace>Pkcs11Wrapper.Native</RootNamespace>
+    <PackageId>Pkcs11Wrapper.Native</PackageId>
+    <Description>Low-level NativeAOT-friendly PKCS#11 interop layer for Pkcs11Wrapper.</Description>
+    <PackageTags>pkcs11;cryptoki;interop;nativeaot</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
+  </ItemGroup>
 </Project>

@@ -299,6 +299,36 @@ public sealed class ManagedApiSurfaceTests
     }
 
     [Fact]
+    public void Phase21To23V3ApisAreExposedWithSpanFirstShapes()
+    {
+        Assert.NotNull(typeof(Pkcs11Module).GetProperty(nameof(Pkcs11Module.SupportsInterfaceDiscovery)));
+        Assert.NotNull(typeof(Pkcs11Module).GetMethod(nameof(Pkcs11Module.GetInterfaceCount), Type.EmptyTypes));
+        Assert.NotNull(typeof(Pkcs11Module).GetMethod(nameof(Pkcs11Module.TryGetInterfaces), [typeof(Span<Pkcs11Interface>), typeof(int).MakeByRefType()]));
+        Assert.NotNull(typeof(Pkcs11Module).GetMethod(nameof(Pkcs11Module.TryGetInterface), [typeof(ReadOnlySpan<byte>), typeof(CK_VERSION?).MakeByRefType().GetElementType()!, typeof(Pkcs11InterfaceFlags), typeof(Pkcs11Interface).MakeByRefType()]));
+
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.LoginUser), [typeof(Pkcs11UserType), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>)]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.SessionCancel), [typeof(Pkcs11MessageFlags)]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.MessageEncryptInit), [typeof(Pkcs11ObjectHandle), typeof(Pkcs11Mechanism)]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.GetMessageEncryptOutputLength), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>)]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TryEncryptMessage), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(Span<byte>), typeof(int).MakeByRefType()]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TryEncryptMessageNext), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(Span<byte>), typeof(int).MakeByRefType(), typeof(Pkcs11MessageFlags)]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.MessageDecryptInit), [typeof(Pkcs11ObjectHandle), typeof(Pkcs11Mechanism)]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TryDecryptMessage), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(Span<byte>), typeof(int).MakeByRefType()]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.MessageSignInit), [typeof(Pkcs11ObjectHandle), typeof(Pkcs11Mechanism)]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TrySignMessage), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(Span<byte>), typeof(int).MakeByRefType()]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.MessageVerifyInit), [typeof(Pkcs11ObjectHandle), typeof(Pkcs11Mechanism)]));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.VerifyMessage), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>)]));
+
+        Assert.Equal(typeof(bool), typeof(Pkcs11Module).GetProperty(nameof(Pkcs11Module.SupportsInterfaceDiscovery))!.PropertyType);
+        Assert.Equal(typeof(int), typeof(Pkcs11Module).GetMethod(nameof(Pkcs11Module.GetInterfaceCount), Type.EmptyTypes)!.ReturnType);
+        Assert.Equal(typeof(void), typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.LoginUser), [typeof(Pkcs11UserType), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>)])!.ReturnType);
+        Assert.Equal(typeof(void), typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.SessionCancel), [typeof(Pkcs11MessageFlags)])!.ReturnType);
+        Assert.Equal(typeof(int), typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.GetMessageEncryptOutputLength), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>)])!.ReturnType);
+        Assert.Equal(typeof(bool), typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TryEncryptMessage), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(Span<byte>), typeof(int).MakeByRefType()])!.ReturnType);
+        Assert.Equal(typeof(bool), typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.VerifyMessage), [typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>), typeof(ReadOnlySpan<byte>)])!.ReturnType);
+    }
+
+    [Fact]
     public void ProvisioningHelpersExposeExpectedDefaults()
     {
         Pkcs11ObjectAttribute[] aes = Pkcs11ProvisioningTemplates.CreateAesEncryptDecryptSecretKey("aes"u8, [0xA1], token: false, extractable: true, valueLength: 24);

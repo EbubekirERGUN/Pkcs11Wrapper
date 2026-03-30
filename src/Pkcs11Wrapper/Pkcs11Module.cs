@@ -27,6 +27,8 @@ public sealed class Pkcs11Module : IDisposable
 
     public CK_VERSION FunctionListVersion => _nativeModule.FunctionListVersion;
 
+    public bool SupportsInterfaceDiscovery => _nativeModule.SupportsInterfaceDiscovery;
+
     public static Pkcs11Module Load(string libraryPath) => new(Pkcs11NativeModule.Load(libraryPath));
 
     public void Initialize() => Initialize(default);
@@ -172,6 +174,44 @@ public sealed class Pkcs11Module : IDisposable
         return _nativeModule.TryGetMechanisms(slotId.NativeValue, nativeDestination, out written);
     }
 
+    public int GetInterfaceCount()
+    {
+        ThrowIfDisposed();
+        return _nativeModule.GetInterfaceCount();
+    }
+
+    public bool TryGetInterfaces(Span<Pkcs11Interface> destination, out int written)
+    {
+        ThrowIfDisposed();
+
+        Span<CK_INTERFACE> nativeInterfaces = destination.Length <= 16
+            ? stackalloc CK_INTERFACE[destination.Length]
+            : new CK_INTERFACE[destination.Length];
+
+        bool success = _nativeModule.TryGetInterfaces(nativeInterfaces, out written);
+        int copyCount = Math.Min(destination.Length, Math.Min(written, nativeInterfaces.Length));
+        for (int i = 0; i < copyCount; i++)
+        {
+            destination[i] = Pkcs11Interface.FromNative(nativeInterfaces[i]);
+        }
+
+        return success;
+    }
+
+    public bool TryGetInterface(ReadOnlySpan<byte> nameUtf8, CK_VERSION? version, Pkcs11InterfaceFlags flags, out Pkcs11Interface pkcs11Interface)
+    {
+        ThrowIfDisposed();
+
+        if (_nativeModule.TryGetInterface(nameUtf8, version, new CK_FLAGS((nuint)(ulong)flags), out CK_INTERFACE nativeInterface))
+        {
+            pkcs11Interface = Pkcs11Interface.FromNative(nativeInterface);
+            return true;
+        }
+
+        pkcs11Interface = default;
+        return false;
+    }
+
     public Pkcs11MechanismInfo GetMechanismInfo(Pkcs11SlotId slotId, Pkcs11MechanismType mechanismType)
         => Pkcs11MechanismInfo.FromNative(_nativeModule.GetMechanismInfo(slotId.NativeValue, mechanismType.NativeValue));
 
@@ -233,6 +273,12 @@ public sealed class Pkcs11Module : IDisposable
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
         _nativeModule.Login(sessionHandle, userType.ToNative(), pinUtf8);
+    }
+
+    internal void LoginUser(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11UserType userType, ReadOnlySpan<byte> pinUtf8, ReadOnlySpan<byte> usernameUtf8)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.LoginUser(sessionHandle, userType.ToNative(), pinUtf8, usernameUtf8);
     }
 
     internal void Logout(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
@@ -694,6 +740,150 @@ public sealed class Pkcs11Module : IDisposable
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
         return _nativeModule.TryCancelFunction(sessionHandle);
+    }
+
+    internal void SessionCancel(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11MessageFlags flags)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.SessionCancel(sessionHandle, new CK_FLAGS((nuint)(ulong)flags));
+    }
+
+    internal void MessageEncryptInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.MessageEncryptInit(sessionHandle, keyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter);
+    }
+
+    internal int GetMessageEncryptOutputLength(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> plaintext)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.GetMessageEncryptOutputLength(sessionHandle, parameter, associatedData, plaintext);
+    }
+
+    internal bool TryEncryptMessage(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> plaintext, Span<byte> ciphertext, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryEncryptMessage(sessionHandle, parameter, associatedData, plaintext, ciphertext, out written);
+    }
+
+    internal void EncryptMessageBegin(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.EncryptMessageBegin(sessionHandle, parameter, associatedData);
+    }
+
+    internal bool TryEncryptMessageNext(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> plaintextPart, Span<byte> ciphertextPart, Pkcs11MessageFlags flags, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryEncryptMessageNext(sessionHandle, parameter, plaintextPart, ciphertextPart, new CK_FLAGS((nuint)(ulong)flags), out written);
+    }
+
+    internal void MessageEncryptFinal(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.MessageEncryptFinal(sessionHandle);
+    }
+
+    internal void MessageDecryptInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.MessageDecryptInit(sessionHandle, keyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter);
+    }
+
+    internal int GetMessageDecryptOutputLength(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> ciphertext)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.GetMessageDecryptOutputLength(sessionHandle, parameter, associatedData, ciphertext);
+    }
+
+    internal bool TryDecryptMessage(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> ciphertext, Span<byte> plaintext, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryDecryptMessage(sessionHandle, parameter, associatedData, ciphertext, plaintext, out written);
+    }
+
+    internal void DecryptMessageBegin(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.DecryptMessageBegin(sessionHandle, parameter, associatedData);
+    }
+
+    internal bool TryDecryptMessageNext(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> ciphertextPart, Span<byte> plaintextPart, Pkcs11MessageFlags flags, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryDecryptMessageNext(sessionHandle, parameter, ciphertextPart, plaintextPart, new CK_FLAGS((nuint)(ulong)flags), out written);
+    }
+
+    internal void MessageDecryptFinal(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.MessageDecryptFinal(sessionHandle);
+    }
+
+    internal void MessageSignInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.MessageSignInit(sessionHandle, keyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter);
+    }
+
+    internal int GetSignMessageOutputLength(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.GetSignMessageOutputLength(sessionHandle, parameter, data);
+    }
+
+    internal bool TrySignMessage(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TrySignMessage(sessionHandle, parameter, data, signature, out written);
+    }
+
+    internal void SignMessageBegin(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.SignMessageBegin(sessionHandle, parameter);
+    }
+
+    internal bool TrySignMessageNext(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TrySignMessageNext(sessionHandle, parameter, data, signature, out written);
+    }
+
+    internal void MessageSignFinal(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.MessageSignFinal(sessionHandle);
+    }
+
+    internal void MessageVerifyInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.MessageVerifyInit(sessionHandle, keyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter);
+    }
+
+    internal bool VerifyMessage(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.VerifyMessage(sessionHandle, parameter, data, signature);
+    }
+
+    internal void VerifyMessageBegin(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.VerifyMessageBegin(sessionHandle, parameter);
+    }
+
+    internal bool VerifyMessageNext(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.VerifyMessageNext(sessionHandle, parameter, data, signature);
+    }
+
+    internal void MessageVerifyFinal(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.MessageVerifyFinal(sessionHandle);
     }
 
     internal void CloseSession(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)

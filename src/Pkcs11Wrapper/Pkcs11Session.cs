@@ -38,6 +38,12 @@ public sealed class Pkcs11Session : IDisposable
         _module.Login(_sessionHandle, _generation, SlotId, _slotGeneration, userType, pinUtf8);
     }
 
+    public void LoginUser(Pkcs11UserType userType, ReadOnlySpan<byte> pinUtf8, ReadOnlySpan<byte> usernameUtf8)
+    {
+        ThrowIfDisposed();
+        _module.LoginUser(_sessionHandle, _generation, SlotId, _slotGeneration, userType, pinUtf8, usernameUtf8);
+    }
+
     public void Logout()
     {
         ThrowIfDisposed();
@@ -511,6 +517,150 @@ public sealed class Pkcs11Session : IDisposable
     {
         ThrowIfDisposed();
         return _module.TryCancelFunction(_sessionHandle, _generation, SlotId, _slotGeneration);
+    }
+
+    public void SessionCancel(Pkcs11MessageFlags flags = Pkcs11MessageFlags.None)
+    {
+        ThrowIfDisposed();
+        _module.SessionCancel(_sessionHandle, _generation, SlotId, _slotGeneration, flags);
+    }
+
+    public void MessageEncryptInit(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        ThrowIfDisposed();
+        _module.MessageEncryptInit(_sessionHandle, _generation, SlotId, _slotGeneration, keyHandle, mechanism);
+    }
+
+    public int GetMessageEncryptOutputLength(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> plaintext)
+    {
+        ThrowIfDisposed();
+        return _module.GetMessageEncryptOutputLength(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, associatedData, plaintext);
+    }
+
+    public bool TryEncryptMessage(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> plaintext, Span<byte> ciphertext, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TryEncryptMessage(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, associatedData, plaintext, ciphertext, out written);
+    }
+
+    public void EncryptMessageBegin(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData)
+    {
+        ThrowIfDisposed();
+        _module.EncryptMessageBegin(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, associatedData);
+    }
+
+    public bool TryEncryptMessageNext(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> plaintextPart, Span<byte> ciphertextPart, out int written, Pkcs11MessageFlags flags = Pkcs11MessageFlags.None)
+    {
+        ThrowIfDisposed();
+        return _module.TryEncryptMessageNext(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, plaintextPart, ciphertextPart, flags, out written);
+    }
+
+    public void MessageEncryptFinal()
+    {
+        ThrowIfDisposed();
+        _module.MessageEncryptFinal(_sessionHandle, _generation, SlotId, _slotGeneration);
+    }
+
+    public void MessageDecryptInit(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        ThrowIfDisposed();
+        _module.MessageDecryptInit(_sessionHandle, _generation, SlotId, _slotGeneration, keyHandle, mechanism);
+    }
+
+    public int GetMessageDecryptOutputLength(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> ciphertext)
+    {
+        ThrowIfDisposed();
+        return _module.GetMessageDecryptOutputLength(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, associatedData, ciphertext);
+    }
+
+    public bool TryDecryptMessage(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> ciphertext, Span<byte> plaintext, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TryDecryptMessage(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, associatedData, ciphertext, plaintext, out written);
+    }
+
+    public void DecryptMessageBegin(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData)
+    {
+        ThrowIfDisposed();
+        _module.DecryptMessageBegin(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, associatedData);
+    }
+
+    public bool TryDecryptMessageNext(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> ciphertextPart, Span<byte> plaintextPart, out int written, Pkcs11MessageFlags flags = Pkcs11MessageFlags.None)
+    {
+        ThrowIfDisposed();
+        return _module.TryDecryptMessageNext(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, ciphertextPart, plaintextPart, flags, out written);
+    }
+
+    public void MessageDecryptFinal()
+    {
+        ThrowIfDisposed();
+        _module.MessageDecryptFinal(_sessionHandle, _generation, SlotId, _slotGeneration);
+    }
+
+    public void MessageSignInit(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        ThrowIfDisposed();
+        _module.MessageSignInit(_sessionHandle, _generation, SlotId, _slotGeneration, keyHandle, mechanism);
+    }
+
+    public int GetSignMessageOutputLength(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data)
+    {
+        ThrowIfDisposed();
+        return _module.GetSignMessageOutputLength(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, data);
+    }
+
+    public bool TrySignMessage(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TrySignMessage(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, data, signature, out written);
+    }
+
+    public void SignMessageBegin(ReadOnlySpan<byte> parameter)
+    {
+        ThrowIfDisposed();
+        _module.SignMessageBegin(_sessionHandle, _generation, SlotId, _slotGeneration, parameter);
+    }
+
+    public bool TrySignMessageNext(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TrySignMessageNext(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, data, signature, out written);
+    }
+
+    public void MessageSignFinal()
+    {
+        ThrowIfDisposed();
+        _module.MessageSignFinal(_sessionHandle, _generation, SlotId, _slotGeneration);
+    }
+
+    public void MessageVerifyInit(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        ThrowIfDisposed();
+        _module.MessageVerifyInit(_sessionHandle, _generation, SlotId, _slotGeneration, keyHandle, mechanism);
+    }
+
+    public bool VerifyMessage(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
+    {
+        ThrowIfDisposed();
+        return _module.VerifyMessage(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, data, signature);
+    }
+
+    public void VerifyMessageBegin(ReadOnlySpan<byte> parameter)
+    {
+        ThrowIfDisposed();
+        _module.VerifyMessageBegin(_sessionHandle, _generation, SlotId, _slotGeneration, parameter);
+    }
+
+    public bool VerifyMessageNext(ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
+    {
+        ThrowIfDisposed();
+        return _module.VerifyMessageNext(_sessionHandle, _generation, SlotId, _slotGeneration, parameter, data, signature);
+    }
+
+    public void MessageVerifyFinal()
+    {
+        ThrowIfDisposed();
+        _module.MessageVerifyFinal(_sessionHandle, _generation, SlotId, _slotGeneration);
     }
 
     public void GenerateRandom(Span<byte> destination)

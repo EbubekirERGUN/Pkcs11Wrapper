@@ -31,6 +31,7 @@ public sealed class NativeTypeLayoutTests
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_ECDH1_DERIVE_PARAMS>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_MECHANISM_INFO>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_VERSION>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_INTERFACE>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_INFO>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_SLOT_INFO>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_TOKEN_INFO>());
@@ -217,6 +218,33 @@ public sealed class NativeTypeLayoutTests
         Assert.Equal(expectedInitializeOffset + (64 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_GenerateRandom)).ToInt32());
         Assert.Equal(expectedInitializeOffset + (65 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_GetFunctionStatus)).ToInt32());
         Assert.Equal(expectedInitializeOffset + (66 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_CancelFunction)).ToInt32());
+        Assert.Equal(expectedInitializeOffset + (67 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_WaitForSlotEvent)).ToInt32());
+    }
+
+    [Fact]
+    public void InterfaceAndFunctionList30LayoutMatchesExpectedOrder()
+    {
+        int pointerSize = IntPtr.Size;
+        int expectedInitializeOffset = IntPtr.Size == 8 ? 8 : 4;
+        int baseSize = Marshal.SizeOf<CK_FUNCTION_LIST>();
+
+        Assert.Equal(0, Marshal.OffsetOf<CK_INTERFACE>(nameof(CK_INTERFACE.InterfaceName)).ToInt32());
+        Assert.Equal(pointerSize, Marshal.OffsetOf<CK_INTERFACE>(nameof(CK_INTERFACE.FunctionList)).ToInt32());
+        Assert.Equal(2 * pointerSize, Marshal.OffsetOf<CK_INTERFACE>(nameof(CK_INTERFACE.Flags)).ToInt32());
+
+        Assert.Equal(0, Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.Base)).ToInt32());
+        Assert.Equal(baseSize, Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_GetInterfaceList)).ToInt32());
+        Assert.Equal(baseSize + pointerSize, Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_GetInterface)).ToInt32());
+        Assert.Equal(baseSize + (2 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_LoginUser)).ToInt32());
+        Assert.Equal(baseSize + (3 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_SessionCancel)).ToInt32());
+        Assert.Equal(baseSize + (4 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_MessageEncryptInit)).ToInt32());
+        Assert.Equal(baseSize + (8 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_MessageEncryptFinal)).ToInt32());
+        Assert.Equal(baseSize + (9 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_MessageDecryptInit)).ToInt32());
+        Assert.Equal(baseSize + (13 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_MessageDecryptFinal)).ToInt32());
+        Assert.Equal(baseSize + (14 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_MessageSignInit)).ToInt32());
+        Assert.Equal(baseSize + (18 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_MessageSignFinal)).ToInt32());
+        Assert.Equal(baseSize + (19 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_MessageVerifyInit)).ToInt32());
+        Assert.Equal(baseSize + (23 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST_3_0>(nameof(CK_FUNCTION_LIST_3_0.C_MessageVerifyFinal)).ToInt32());
         Assert.Equal(expectedInitializeOffset + (67 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_WaitForSlotEvent)).ToInt32());
     }
 }

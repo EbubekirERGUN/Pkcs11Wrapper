@@ -28,6 +28,26 @@ public sealed class SoftHsmCryptRegressionTests
     private const nuint CkrObjectHandleInvalid = 0x00000082u;
 
     [Fact]
+    public void InterfaceDiscoveryGracefullyReportsAbsentOnSoftHsm()
+    {
+        if (!TryCreateCryptContext(out TestContext? context))
+        {
+            return;
+        }
+
+        using TestContext activeContext = context!;
+        Pkcs11Module module = activeContext.Module;
+
+        Assert.False(module.SupportsInterfaceDiscovery);
+        Assert.Equal(0, module.GetInterfaceCount());
+
+        Pkcs11Interface[] interfaces = new Pkcs11Interface[1];
+        Assert.True(module.TryGetInterfaces(interfaces, out int written));
+        Assert.Equal(0, written);
+        Assert.False(module.TryGetInterface("PKCS 11"u8, new CK_VERSION(3, 0), Pkcs11InterfaceFlags.None, out _));
+    }
+
+    [Fact]
     public void SinglePartSha256DigestMatchesManagedHash()
     {
         if (!TryCreateCryptContext(out TestContext? context))

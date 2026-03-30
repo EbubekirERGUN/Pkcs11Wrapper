@@ -80,18 +80,36 @@ Notes:
 ## Phase 2 - PKCS#11 spec coverage
 
 ### 2.1 Interface discovery
+Status: **done**
+
 - `C_GetInterface`
 - `C_GetInterfaceList`
 
+Notes:
+- added optional export-based interface discovery that degrades cleanly on modules like current SoftHSM builds that do not expose the v3 entry points
+- introduced managed `Pkcs11Interface` projection and ABI/layout coverage for `CK_INTERFACE` / `CK_FUNCTION_LIST_3_0`
+
 ### 2.2 Message-based PKCS#11 v3 APIs
+Status: **done**
+
 - `C_MessageEncrypt*`
 - `C_MessageDecrypt*`
 - `C_MessageSign*`
 - `C_MessageVerify*`
 
+Notes:
+- added span-first managed wrappers for single-shot and begin/next/final message flows
+- routed through the discovered PKCS#11 v3 interface instead of assuming `C_GetFunctionList()` returns an extended table
+
 ### 2.3 Additional session/user APIs if needed
+Status: **done**
+
 - `C_LoginUser`
 - `C_SessionCancel`
+
+Notes:
+- managed session surface now exposes `LoginUser` and `SessionCancel`
+- capability remains v3-interface gated by design
 
 Acceptance criteria for Phase 2:
 - managed API shape is reviewed carefully
@@ -101,22 +119,32 @@ Acceptance criteria for Phase 2:
 ## Phase 3 - Productization
 
 ### 3.1 Compatibility matrix
+Status: **done**
+
 - supported platforms
 - supported module families / validation targets
 - known limitations
 
 ### 3.2 Docs and examples
+Status: **done**
+
 - production-oriented usage examples
 - troubleshooting notes
 - vendor caveats
 
 ### 3.3 Packaging / release discipline
+Status: **done**
+
 - versioning and release notes
 - publishing hygiene
 - benchmark/perf notes where meaningful
 
+Notes:
+- pack metadata added to both projects
+- `eng/verify-release.sh` now provides a repeatable restore/build/test/smoke/pack gate for release candidates
+
 ## Current top 3 tasks
 
-1. Implement Phase 2 interface discovery (`C_GetInterface` / `C_GetInterfaceList`) with an AOT-safe managed projection
-2. Design and expose PKCS#11 v3 message-based API surface (`C_Message*`) without regressing the existing span-first contracts
-3. Add `C_LoginUser` / `C_SessionCancel` only after the v3 function-list retrieval path is in place
+1. Add a vendor validation target that actually exposes PKCS#11 v3 message APIs so the new capability-gated paths get runtime coverage
+2. Expand docs/examples once a concrete v3-capable hardware or software target is chosen
+3. Decide whether package publishing should stay manual or move into a guarded/tag-only CI flow
