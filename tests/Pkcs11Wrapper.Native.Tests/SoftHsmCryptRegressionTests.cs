@@ -1041,6 +1041,135 @@ public sealed class SoftHsmCryptRegressionTests
     }
 
     [Fact]
+    public void MechanismMatrixAesCtrRoundTripsAndRejectsWrongCounterBits()
+    {
+        if (!TryCreateGenerateContext(out GenerateContext? context))
+        {
+            return;
+        }
+
+        using GenerateContext activeContext = context!;
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.Session.SlotId,
+                (Pkcs11MechanismTypes.AesKeyGen, Pkcs11MechanismFlags.Generate, "CKM_AES_KEY_GEN generate"),
+                (Pkcs11MechanismTypes.AesCtr, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt, "CKM_AES_CTR encrypt/decrypt")))
+        {
+            return;
+        }
+
+        byte[] label = Encoding.ASCII.GetBytes($"phase16-ctr-{Guid.NewGuid():N}");
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] ctrBlock = ParseExactHex("00000000000000000000000000000001", 16);
+        byte[] plaintext = Encoding.UTF8.GetBytes("phase16-aes-ctr-matrix");
+        Pkcs11ObjectHandle keyHandle = default;
+        bool created = false;
+
+        try
+        {
+            keyHandle = activeContext.Session.GenerateKey(
+                new Pkcs11Mechanism(Pkcs11MechanismTypes.AesKeyGen),
+                Pkcs11ProvisioningTemplates.CreateAesEncryptDecryptSecretKey(label, id, token: false, extractable: false, valueLength: 32));
+            created = true;
+
+            Pkcs11Mechanism mechanism = new(Pkcs11MechanismTypes.AesCtr, Pkcs11MechanismParameters.AesCtr(ctrBlock, counterBits: 32));
+            byte[] ciphertext = new byte[activeContext.Session.GetEncryptOutputLength(keyHandle, mechanism, plaintext)];
+            Assert.True(activeContext.Session.TryEncrypt(keyHandle, mechanism, plaintext, ciphertext, out int ciphertextWritten));
+
+            byte[] decrypted = new byte[activeContext.Session.GetDecryptOutputLength(keyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten))];
+            Assert.True(activeContext.Session.TryDecrypt(keyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten), decrypted, out int decryptedWritten));
+            Assert.True(plaintext.AsSpan().SequenceEqual(decrypted.AsSpan(0, decryptedWritten)));
+
+            Pkcs11Exception? exception = null;
+            try
+            {
+                _ = activeContext.Session.GetEncryptOutputLength(
+                    keyHandle,
+                    new Pkcs11Mechanism(Pkcs11MechanismTypes.AesCtr, Pkcs11MechanismParameters.AesCtr(ctrBlock, counterBits: 0)),
+                    plaintext);
+            }
+            catch (Pkcs11Exception ex)
+            {
+                exception = ex;
+            }
+
+            Assert.NotNull(exception);
+            Assert.True(IsMechanismParamOrInvalid(exception!.Result.Value));
+        }
+        finally
+        {
+            if (created)
+            {
+                TryDestroyObject(activeContext.Session, keyHandle);
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: label, id: id, objectClass: Pkcs11ObjectClasses.SecretKey, keyType: Pkcs11KeyTypes.Aes));
+            }
+        }
+    }
+
+    [Fact]
+    public void MechanismMatrixAesCbcPadRoundTripsAndRejectsWrongIvLength()
+    {
+        if (!TryCreateGenerateContext(out GenerateContext? context))
+        {
+            return;
+        }
+
+        using GenerateContext activeContext = context!;
+        if (!RequireMechanismSupport(
+                activeContext.Module,
+                activeContext.Session.SlotId,
+                (Pkcs11MechanismTypes.AesKeyGen, Pkcs11MechanismFlags.Generate, "CKM_AES_KEY_GEN generate"),
+                (Pkcs11MechanismTypes.AesCbcPad, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt, "CKM_AES_CBC_PAD encrypt/decrypt")))
+        {
+            return;
+        }
+
+        byte[] label = Encoding.ASCII.GetBytes($"phase16-cbc-{Guid.NewGuid():N}");
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] iv = ParseExactHex("00112233445566778899AABBCCDDEEFF", 16);
+        byte[] plaintext = Encoding.UTF8.GetBytes("phase16-aes-cbc-pad-matrix");
+        Pkcs11ObjectHandle keyHandle = default;
+        bool created = false;
+
+        try
+        {
+            keyHandle = activeContext.Session.GenerateKey(
+                new Pkcs11Mechanism(Pkcs11MechanismTypes.AesKeyGen),
+                Pkcs11ProvisioningTemplates.CreateAesEncryptDecryptSecretKey(label, id, token: false, extractable: false, valueLength: 32));
+            created = true;
+
+            Pkcs11Mechanism mechanism = new(Pkcs11MechanismTypes.AesCbcPad, iv);
+            byte[] ciphertext = new byte[activeContext.Session.GetEncryptOutputLength(keyHandle, mechanism, plaintext)];
+            Assert.True(activeContext.Session.TryEncrypt(keyHandle, mechanism, plaintext, ciphertext, out int ciphertextWritten));
+
+            byte[] decrypted = new byte[activeContext.Session.GetDecryptOutputLength(keyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten))];
+            Assert.True(activeContext.Session.TryDecrypt(keyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten), decrypted, out int decryptedWritten));
+            Assert.True(plaintext.AsSpan().SequenceEqual(decrypted.AsSpan(0, decryptedWritten)));
+
+            Pkcs11Exception? exception = null;
+            try
+            {
+                _ = activeContext.Session.GetEncryptOutputLength(keyHandle, new Pkcs11Mechanism(Pkcs11MechanismTypes.AesCbcPad, iv.AsSpan(..15)), plaintext);
+            }
+            catch (Pkcs11Exception ex)
+            {
+                exception = ex;
+            }
+
+            Assert.NotNull(exception);
+            Assert.True(IsMechanismParamOrInvalid(exception!.Result.Value));
+        }
+        finally
+        {
+            if (created)
+            {
+                TryDestroyObject(activeContext.Session, keyHandle);
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: label, id: id, objectClass: Pkcs11ObjectClasses.SecretKey, keyType: Pkcs11KeyTypes.Aes));
+            }
+        }
+    }
+
+    [Fact]
     public void MechanismMatrixRsaOaepRoundTripsAndRejectsKeyMismatch()
     {
         if (!TryCreateGenerateContext(out GenerateContext? context))

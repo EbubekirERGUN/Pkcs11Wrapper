@@ -63,7 +63,7 @@ Acceptance criteria:
 - test expectations clearly distinguish capability-gated vs broken behavior
 
 ### 1.5 Mechanism matrix expansion
-Status: **next**
+Status: **done**
 
 Goals:
 - widen coverage for RSA OAEP/PSS variants, AES modes, ECDH variants, and edge cases
@@ -72,6 +72,10 @@ Goals:
 Acceptance criteria:
 - new matrix tests added without making the suite flaky
 - unsupported combinations are capability-gated, not silently ignored
+
+Notes:
+- added AES-CTR and AES-CBC-PAD matrix coverage alongside the existing AES-GCM / RSA OAEP / RSA PSS / HMAC cases
+- new negative checks assert mechanism-parameter rejection paths instead of silently skipping bad parameter combinations
 
 ## Phase 2 - PKCS#11 spec coverage
 
@@ -113,6 +117,6 @@ Acceptance criteria for Phase 2:
 
 ## Current top 3 tasks
 
-1. Expand mechanism matrix with more vendor-sensitive negative cases
-2. Start Phase 2 interface discovery (`C_GetInterface` / `C_GetInterfaceList`) implementation review
-3. Plan PKCS#11 v3 message-based API surface (`C_Message*`) without breaking AOT/contracts
+1. Implement Phase 2 interface discovery (`C_GetInterface` / `C_GetInterfaceList`) with an AOT-safe managed projection
+2. Design and expose PKCS#11 v3 message-based API surface (`C_Message*`) without regressing the existing span-first contracts
+3. Add `C_LoginUser` / `C_SessionCancel` only after the v3 function-list retrieval path is in place
