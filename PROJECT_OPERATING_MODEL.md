@@ -54,8 +54,18 @@ For each task:
 Expected conversational controls:
 - `devam et` -> continue with the next prioritized task
 - `dur` -> stop autonomous progress
-- `özet` -> summarize current status, completed work, and next tasks
+- `özet` / `durum` / `durum raporu` -> summarize current status, completed work, current focus, next tasks, blockers, and push status
 - `push` -> push the already committed local work
+
+## Status report format
+
+When Ebubekir asks for status, default to a concise report with these sections:
+
+- **Tamamlananlar**
+- **Şu an üzerinde çalışılan**
+- **Sıradaki işler**
+- **Riskler / blocker'lar**
+- **Commit / push durumu**
 
 ## Safety / scope
 
