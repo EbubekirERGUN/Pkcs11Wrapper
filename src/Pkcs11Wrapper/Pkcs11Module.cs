@@ -10,7 +10,11 @@ namespace Pkcs11Wrapper;
 
 public sealed class Pkcs11Module : IDisposable
 {
+    private static readonly CK_RV BufferTooSmallResult = Pkcs11ResultCodes.BufferTooSmall;
+    private static readonly CK_RV AttributeSensitiveResult = Pkcs11ResultCodes.AttributeSensitive;
+    private static readonly CK_RV AttributeTypeInvalidResult = Pkcs11ResultCodes.AttributeTypeInvalid;
     private readonly Pkcs11NativeModule _nativeModule;
+    private readonly object _lifecycleSync = new();
     private readonly object _sessionStateLock = new();
     private readonly Dictionary<Pkcs11SlotId, int> _slotSessionGenerations = [];
     private int _sessionGeneration;
@@ -24,19 +28,28 @@ public sealed class Pkcs11Module : IDisposable
 
     public void Initialize()
     {
-        ThrowIfDisposed();
-        _nativeModule.Initialize();
+        lock (_lifecycleSync)
+        {
+            ThrowIfDisposed();
+            _nativeModule.Initialize();
+        }
     }
 
     public void FinalizeModule()
     {
-        ThrowIfDisposed();
-        bool wasInitialized = _nativeModule.IsInitialized;
-        _nativeModule.FinalizeModule();
-
-        if (wasInitialized)
+        lock (_lifecycleSync)
         {
-            _sessionGeneration++;
+            ThrowIfDisposed();
+            bool wasInitialized = _nativeModule.IsInitialized;
+            _nativeModule.FinalizeModule();
+
+            if (wasInitialized)
+            {
+                lock (_sessionStateLock)
+                {
+                    _sessionGeneration++;
+                }
+            }
         }
     }
 
@@ -48,6 +61,26 @@ public sealed class Pkcs11Module : IDisposable
     {
         Span<CK_SLOT_ID> nativeDestination = MemoryMarshal.Cast<Pkcs11SlotId, CK_SLOT_ID>(destination);
         return _nativeModule.TryGetSlots(nativeDestination, out written, tokenPresentOnly);
+    }
+
+    public Pkcs11SlotId WaitForSlotEvent()
+    {
+        ThrowIfDisposed();
+        return new Pkcs11SlotId((nuint)_nativeModule.WaitForSlotEvent().Value);
+    }
+
+    public bool TryWaitForSlotEvent(out Pkcs11SlotId slotId)
+    {
+        ThrowIfDisposed();
+
+        if (_nativeModule.TryWaitForSlotEvent(out CK_SLOT_ID nativeSlotId))
+        {
+            slotId = new Pkcs11SlotId((nuint)nativeSlotId.Value);
+            return true;
+        }
+
+        slotId = default;
+        return false;
     }
 
     public Pkcs11SlotInfo GetSlotInfo(Pkcs11SlotId slotId) => Pkcs11SlotInfo.FromNative(_nativeModule.GetSlotInfo(slotId.NativeValue));
@@ -66,25 +99,28 @@ public sealed class Pkcs11Module : IDisposable
 
     public void InitToken(Pkcs11SlotId slotId, ReadOnlySpan<byte> soPin, ReadOnlySpan<byte> label)
     {
-        ThrowIfDisposed();
-
-        if (label.Length > 32)
+        lock (_lifecycleSync)
         {
-            throw new ArgumentException("The PKCS#11 token label cannot exceed 32 bytes before blank padding.", nameof(label));
-        }
+            ThrowIfDisposed();
 
-        Span<byte> paddedLabel = stackalloc byte[32];
-        paddedLabel.Fill((byte)' ');
-        label.CopyTo(paddedLabel);
+            if (label.Length > 32)
+            {
+                throw new ArgumentException("The PKCS#11 token label cannot exceed 32 bytes before blank padding.", nameof(label));
+            }
 
-        if (GetSlotInfo(slotId).Flags.HasFlag(Pkcs11SlotFlags.TokenPresent))
-        {
-            _nativeModule.CloseAllSessions(slotId.NativeValue);
+            Span<byte> paddedLabel = stackalloc byte[32];
+            paddedLabel.Fill((byte)' ');
+            label.CopyTo(paddedLabel);
+
+            if (GetSlotInfo(slotId).Flags.HasFlag(Pkcs11SlotFlags.TokenPresent))
+            {
+                _nativeModule.CloseAllSessions(slotId.NativeValue);
+                IncrementSlotSessionGeneration(slotId);
+            }
+
+            _nativeModule.InitToken(slotId.NativeValue, soPin, paddedLabel);
             IncrementSlotSessionGeneration(slotId);
         }
-
-        _nativeModule.InitToken(slotId.NativeValue, soPin, paddedLabel);
-        IncrementSlotSessionGeneration(slotId);
     }
 
     public int GetMechanismCount(Pkcs11SlotId slotId) => _nativeModule.GetMechanismCount(slotId.NativeValue);
@@ -100,30 +136,50 @@ public sealed class Pkcs11Module : IDisposable
 
     public Pkcs11Session OpenSession(Pkcs11SlotId slotId, bool readWrite = false)
     {
-        ThrowIfDisposed();
-        int generation = _sessionGeneration;
-        int slotGeneration = GetSlotSessionGeneration(slotId);
-        CK_SESSION_HANDLE sessionHandle = _nativeModule.OpenSession(slotId.NativeValue, readWrite);
-        return new Pkcs11Session(this, generation, slotId, slotGeneration, sessionHandle, readWrite);
+        lock (_lifecycleSync)
+        {
+            ThrowIfDisposed();
+
+            int generation;
+            int slotGeneration;
+            lock (_sessionStateLock)
+            {
+                generation = _sessionGeneration;
+                slotGeneration = _slotSessionGenerations.GetValueOrDefault(slotId);
+            }
+
+            CK_SESSION_HANDLE sessionHandle = _nativeModule.OpenSession(slotId.NativeValue, readWrite);
+            return new Pkcs11Session(this, generation, slotId, slotGeneration, sessionHandle, readWrite);
+        }
     }
 
     public void CloseAllSessions(Pkcs11SlotId slotId)
     {
-        ThrowIfDisposed();
-        _nativeModule.CloseAllSessions(slotId.NativeValue);
-        IncrementSlotSessionGeneration(slotId);
+        lock (_lifecycleSync)
+        {
+            ThrowIfDisposed();
+            _nativeModule.CloseAllSessions(slotId.NativeValue);
+            IncrementSlotSessionGeneration(slotId);
+        }
     }
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (_lifecycleSync)
         {
-            return;
-        }
+            lock (_sessionStateLock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
 
-        _disposed = true;
-        _sessionGeneration++;
-        _nativeModule.Dispose();
+                _disposed = true;
+                _sessionGeneration++;
+            }
+
+            _nativeModule.Dispose();
+        }
     }
 
     internal Pkcs11SessionInfo GetSessionInfo(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
@@ -274,6 +330,36 @@ public sealed class Pkcs11Module : IDisposable
             {
                 PopulateAttributeTemplate(attributes, template, valueBufferPointer);
                 return new Pkcs11ObjectHandle((nuint)_nativeModule.CreateObject(sessionHandle, template[..attributes.Length]).Value);
+            }
+        }
+        finally
+        {
+            ReturnPackedAttributeTemplate(rentedTemplate, rentedValueBuffer, totalValueLength);
+        }
+    }
+
+    internal unsafe Pkcs11ObjectHandle CopyObject(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle sourceObjectHandle, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+
+        CK_ATTRIBUTE[]? rentedTemplate = null;
+        byte[]? rentedValueBuffer = null;
+        int totalValueLength = GetTotalAttributeValueLength(attributes);
+
+        Span<CK_ATTRIBUTE> template = attributes.Length <= 8
+            ? stackalloc CK_ATTRIBUTE[attributes.Length]
+            : (rentedTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(attributes.Length));
+
+        Span<byte> valueBuffer = totalValueLength <= 256
+            ? stackalloc byte[totalValueLength]
+            : (rentedValueBuffer = ArrayPool<byte>.Shared.Rent(totalValueLength));
+
+        try
+        {
+            fixed (byte* valueBufferPointer = valueBuffer)
+            {
+                PopulateAttributeTemplate(attributes, template, valueBufferPointer);
+                return new Pkcs11ObjectHandle((nuint)_nativeModule.CopyObject(sessionHandle, sourceObjectHandle.NativeValue, template[..attributes.Length]).Value);
             }
         }
         finally
@@ -525,6 +611,12 @@ public sealed class Pkcs11Module : IDisposable
         return _nativeModule.TryDigest(sessionHandle, mechanism.Type.NativeValue, mechanism.Parameter, data, digest, out written);
     }
 
+    internal void DigestKey(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.DigestKey(sessionHandle, keyHandle.NativeValue);
+    }
+
     internal bool Verify(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
@@ -549,6 +641,24 @@ public sealed class Pkcs11Module : IDisposable
         return _nativeModule.TrySignFinal(sessionHandle, signature, out written);
     }
 
+    internal void SignRecoverInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.SignRecoverInit(sessionHandle, keyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter);
+    }
+
+    internal int GetSignRecoverOutputLength(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> data)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.GetSignRecoverOutputLength(sessionHandle, data);
+    }
+
+    internal bool TrySignRecover(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TrySignRecover(sessionHandle, data, signature, out written);
+    }
+
     internal void VerifyInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
@@ -565,6 +675,24 @@ public sealed class Pkcs11Module : IDisposable
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
         return _nativeModule.VerifyFinal(sessionHandle, signature);
+    }
+
+    internal void VerifyRecoverInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.VerifyRecoverInit(sessionHandle, keyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter);
+    }
+
+    internal int GetVerifyRecoverOutputLength(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> signature)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.GetVerifyRecoverOutputLength(sessionHandle, signature);
+    }
+
+    internal bool TryVerifyRecover(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> signature, Span<byte> data, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryVerifyRecover(sessionHandle, signature, data, out written);
     }
 
     internal void DigestInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11Mechanism mechanism)
@@ -591,6 +719,12 @@ public sealed class Pkcs11Module : IDisposable
         _nativeModule.GenerateRandom(sessionHandle, destination);
     }
 
+    internal void SeedRandom(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> seed)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        _nativeModule.SeedRandom(sessionHandle, seed);
+    }
+
     internal void EncryptInit(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
@@ -601,6 +735,18 @@ public sealed class Pkcs11Module : IDisposable
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
         return _nativeModule.TryEncryptUpdate(sessionHandle, input, output, out written);
+    }
+
+    internal bool TryDigestEncryptUpdate(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> input, Span<byte> output, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryDigestEncryptUpdate(sessionHandle, input, output, out written);
+    }
+
+    internal bool TrySignEncryptUpdate(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> input, Span<byte> output, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TrySignEncryptUpdate(sessionHandle, input, output, out written);
     }
 
     internal bool TryEncryptFinal(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Span<byte> output, out int written)
@@ -619,6 +765,18 @@ public sealed class Pkcs11Module : IDisposable
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
         return _nativeModule.TryDecryptUpdate(sessionHandle, input, output, out written);
+    }
+
+    internal bool TryDecryptDigestUpdate(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> input, Span<byte> output, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryDecryptDigestUpdate(sessionHandle, input, output, out written);
+    }
+
+    internal bool TryDecryptVerifyUpdate(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<byte> input, Span<byte> output, out int written)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryDecryptVerifyUpdate(sessionHandle, input, output, out written);
     }
 
     internal bool TryDecryptFinal(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Span<byte> output, out int written)
@@ -660,10 +818,15 @@ public sealed class Pkcs11Module : IDisposable
     }
 
     private bool CanUseSession(int generation, Pkcs11SlotId slotId, int slotGeneration)
-        => !_disposed &&
-           _nativeModule.IsInitialized &&
-           generation == _sessionGeneration &&
-           slotGeneration == GetSlotSessionGeneration(slotId);
+    {
+        lock (_sessionStateLock)
+        {
+            return !_disposed &&
+                   _nativeModule.IsInitialized &&
+                   generation == _sessionGeneration &&
+                   slotGeneration == _slotSessionGenerations.GetValueOrDefault(slotId);
+        }
+    }
 
     private void EnsureSessionIsUsable(int generation, Pkcs11SlotId slotId, int slotGeneration)
     {
@@ -691,9 +854,12 @@ public sealed class Pkcs11Module : IDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
+        lock (_sessionStateLock)
         {
-            throw new ObjectDisposedException(nameof(Pkcs11Module));
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(Pkcs11Module));
+            }
         }
     }
 
@@ -757,13 +923,20 @@ public sealed class Pkcs11Module : IDisposable
         {
             var result when result == CK_RV.Ok && query.IsUnavailableInformation => Pkcs11AttributeReadStatus.UnavailableInformation,
             var result when result == CK_RV.Ok => Pkcs11AttributeReadStatus.Success,
-            var result when result == new CK_RV(0x00000150u) => Pkcs11AttributeReadStatus.BufferTooSmall,
-            var result when result == new CK_RV(0x00000011u) => Pkcs11AttributeReadStatus.Sensitive,
-            var result when result == new CK_RV(0x00000012u) => Pkcs11AttributeReadStatus.TypeInvalid,
+            var result when result == BufferTooSmallResult => Pkcs11AttributeReadStatus.BufferTooSmall,
+            var result when result == AttributeSensitiveResult => Pkcs11AttributeReadStatus.Sensitive,
+            var result when result == AttributeTypeInvalidResult => Pkcs11AttributeReadStatus.TypeInvalid,
             _ => throw new InvalidOperationException($"Unexpected PKCS#11 attribute query result {query.Result}.")
         };
 
         return new Pkcs11AttributeReadResult(status, query.Length);
+    }
+
+    private static class Pkcs11ResultCodes
+    {
+        public static readonly CK_RV BufferTooSmall = new(0x00000150u);
+        public static readonly CK_RV AttributeSensitive = new(0x00000011u);
+        public static readonly CK_RV AttributeTypeInvalid = new(0x00000012u);
     }
 }
 

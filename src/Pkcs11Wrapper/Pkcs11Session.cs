@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Threading;
 using Pkcs11Wrapper.Native.Interop;
 
 namespace Pkcs11Wrapper;
@@ -9,7 +10,7 @@ public sealed class Pkcs11Session : IDisposable
     private readonly int _generation;
     private readonly int _slotGeneration;
     private readonly CK_SESSION_HANDLE _sessionHandle;
-    private bool _disposed;
+    private int _disposed;
 
     internal Pkcs11Session(Pkcs11Module module, int generation, Pkcs11SlotId slotId, int slotGeneration, CK_SESSION_HANDLE sessionHandle, bool isReadWrite)
     {
@@ -81,6 +82,12 @@ public sealed class Pkcs11Session : IDisposable
     {
         ThrowIfDisposed();
         return _module.CreateObject(_sessionHandle, _generation, SlotId, _slotGeneration, attributes);
+    }
+
+    public Pkcs11ObjectHandle CopyObject(Pkcs11ObjectHandle sourceObjectHandle, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+    {
+        ThrowIfDisposed();
+        return _module.CopyObject(_sessionHandle, _generation, SlotId, _slotGeneration, sourceObjectHandle, attributes);
     }
 
     public void SetAttributeValue(Pkcs11ObjectHandle handle, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
@@ -230,6 +237,12 @@ public sealed class Pkcs11Session : IDisposable
         return _module.TryDigest(_sessionHandle, _generation, SlotId, _slotGeneration, mechanism, data, digest, out written);
     }
 
+    public void DigestKey(Pkcs11ObjectHandle keyHandle)
+    {
+        ThrowIfDisposed();
+        _module.DigestKey(_sessionHandle, _generation, SlotId, _slotGeneration, keyHandle);
+    }
+
     public bool Verify(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
     {
         ThrowIfDisposed();
@@ -272,6 +285,12 @@ public sealed class Pkcs11Session : IDisposable
         return _module.TrySign(_sessionHandle, _generation, SlotId, _slotGeneration, ResolveRequiredObjectHandle(keySearch), mechanism, data, signature, out written);
     }
 
+    public void DigestKey(Pkcs11ObjectSearchParameters keySearch)
+    {
+        ThrowIfDisposed();
+        _module.DigestKey(_sessionHandle, _generation, SlotId, _slotGeneration, ResolveRequiredObjectHandle(keySearch));
+    }
+
     public bool Verify(Pkcs11ObjectSearchParameters keySearch, Pkcs11Mechanism mechanism, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
     {
         ThrowIfDisposed();
@@ -302,6 +321,30 @@ public sealed class Pkcs11Session : IDisposable
         return _module.TrySignFinal(_sessionHandle, _generation, SlotId, _slotGeneration, signature, out written);
     }
 
+    public void SignRecoverInit(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        ThrowIfDisposed();
+        _module.SignRecoverInit(_sessionHandle, _generation, SlotId, _slotGeneration, keyHandle, mechanism);
+    }
+
+    public void SignRecoverInit(Pkcs11ObjectSearchParameters keySearch, Pkcs11Mechanism mechanism)
+    {
+        ThrowIfDisposed();
+        _module.SignRecoverInit(_sessionHandle, _generation, SlotId, _slotGeneration, ResolveRequiredObjectHandle(keySearch), mechanism);
+    }
+
+    public int GetSignRecoverOutputLength(ReadOnlySpan<byte> data)
+    {
+        ThrowIfDisposed();
+        return _module.GetSignRecoverOutputLength(_sessionHandle, _generation, SlotId, _slotGeneration, data);
+    }
+
+    public bool TrySignRecover(ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TrySignRecover(_sessionHandle, _generation, SlotId, _slotGeneration, data, signature, out written);
+    }
+
     public void VerifyInit(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
     {
         ThrowIfDisposed();
@@ -326,6 +369,30 @@ public sealed class Pkcs11Session : IDisposable
         return _module.VerifyFinal(_sessionHandle, _generation, SlotId, _slotGeneration, signature);
     }
 
+    public void VerifyRecoverInit(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
+    {
+        ThrowIfDisposed();
+        _module.VerifyRecoverInit(_sessionHandle, _generation, SlotId, _slotGeneration, keyHandle, mechanism);
+    }
+
+    public void VerifyRecoverInit(Pkcs11ObjectSearchParameters keySearch, Pkcs11Mechanism mechanism)
+    {
+        ThrowIfDisposed();
+        _module.VerifyRecoverInit(_sessionHandle, _generation, SlotId, _slotGeneration, ResolveRequiredObjectHandle(keySearch), mechanism);
+    }
+
+    public int GetVerifyRecoverOutputLength(ReadOnlySpan<byte> signature)
+    {
+        ThrowIfDisposed();
+        return _module.GetVerifyRecoverOutputLength(_sessionHandle, _generation, SlotId, _slotGeneration, signature);
+    }
+
+    public bool TryVerifyRecover(ReadOnlySpan<byte> signature, Span<byte> data, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TryVerifyRecover(_sessionHandle, _generation, SlotId, _slotGeneration, signature, data, out written);
+    }
+
     public void EncryptInit(Pkcs11ObjectHandle keyHandle, Pkcs11Mechanism mechanism)
     {
         ThrowIfDisposed();
@@ -348,6 +415,18 @@ public sealed class Pkcs11Session : IDisposable
     {
         ThrowIfDisposed();
         return _module.TryEncryptUpdate(_sessionHandle, _generation, SlotId, _slotGeneration, input, output, out written);
+    }
+
+    public bool TryDigestEncryptUpdate(ReadOnlySpan<byte> input, Span<byte> output, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TryDigestEncryptUpdate(_sessionHandle, _generation, SlotId, _slotGeneration, input, output, out written);
+    }
+
+    public bool TrySignEncryptUpdate(ReadOnlySpan<byte> input, Span<byte> output, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TrySignEncryptUpdate(_sessionHandle, _generation, SlotId, _slotGeneration, input, output, out written);
     }
 
     public void DigestUpdate(ReadOnlySpan<byte> data)
@@ -386,6 +465,18 @@ public sealed class Pkcs11Session : IDisposable
         return _module.TryDecryptUpdate(_sessionHandle, _generation, SlotId, _slotGeneration, input, output, out written);
     }
 
+    public bool TryDecryptDigestUpdate(ReadOnlySpan<byte> input, Span<byte> output, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TryDecryptDigestUpdate(_sessionHandle, _generation, SlotId, _slotGeneration, input, output, out written);
+    }
+
+    public bool TryDecryptVerifyUpdate(ReadOnlySpan<byte> input, Span<byte> output, out int written)
+    {
+        ThrowIfDisposed();
+        return _module.TryDecryptVerifyUpdate(_sessionHandle, _generation, SlotId, _slotGeneration, input, output, out written);
+    }
+
     public bool TryDecryptFinal(Span<byte> output, out int written)
     {
         ThrowIfDisposed();
@@ -416,20 +507,25 @@ public sealed class Pkcs11Session : IDisposable
         _module.GenerateRandom(_sessionHandle, _generation, SlotId, _slotGeneration, destination);
     }
 
+    public void SeedRandom(ReadOnlySpan<byte> seed)
+    {
+        ThrowIfDisposed();
+        _module.SeedRandom(_sessionHandle, _generation, SlotId, _slotGeneration, seed);
+    }
+
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
             return;
         }
 
         _module.CloseSession(_sessionHandle, _generation, SlotId, _slotGeneration);
-        _disposed = true;
     }
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
+        if (Volatile.Read(ref _disposed) != 0)
         {
             throw new ObjectDisposedException(nameof(Pkcs11Session));
         }

@@ -384,6 +384,83 @@ public unsafe struct CK_ECDH1_DERIVE_PARAMS
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public readonly struct CK_RSA_PKCS_MGF_TYPE : IEquatable<CK_RSA_PKCS_MGF_TYPE>
+{
+    public CK_RSA_PKCS_MGF_TYPE(nuint value) => Value = value;
+
+    public readonly nuint Value;
+
+    public static implicit operator CK_RSA_PKCS_MGF_TYPE(nuint value) => new(value);
+
+    public static explicit operator nuint(CK_RSA_PKCS_MGF_TYPE value) => value.Value;
+
+    public bool Equals(CK_RSA_PKCS_MGF_TYPE other) => Value == other.Value;
+
+    public override bool Equals(object? obj) => obj is CK_RSA_PKCS_MGF_TYPE other && Equals(other);
+
+    public override int GetHashCode() => Value.GetHashCode();
+
+    public override string ToString() => $"0x{Value:x}";
+
+    public static bool operator ==(CK_RSA_PKCS_MGF_TYPE left, CK_RSA_PKCS_MGF_TYPE right) => left.Equals(right);
+
+    public static bool operator !=(CK_RSA_PKCS_MGF_TYPE left, CK_RSA_PKCS_MGF_TYPE right) => !left.Equals(right);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct CK_RSA_PKCS_OAEP_SOURCE_TYPE : IEquatable<CK_RSA_PKCS_OAEP_SOURCE_TYPE>
+{
+    public CK_RSA_PKCS_OAEP_SOURCE_TYPE(nuint value) => Value = value;
+
+    public readonly nuint Value;
+
+    public static implicit operator CK_RSA_PKCS_OAEP_SOURCE_TYPE(nuint value) => new(value);
+
+    public static explicit operator nuint(CK_RSA_PKCS_OAEP_SOURCE_TYPE value) => value.Value;
+
+    public bool Equals(CK_RSA_PKCS_OAEP_SOURCE_TYPE other) => Value == other.Value;
+
+    public override bool Equals(object? obj) => obj is CK_RSA_PKCS_OAEP_SOURCE_TYPE other && Equals(other);
+
+    public override int GetHashCode() => Value.GetHashCode();
+
+    public override string ToString() => $"0x{Value:x}";
+
+    public static bool operator ==(CK_RSA_PKCS_OAEP_SOURCE_TYPE left, CK_RSA_PKCS_OAEP_SOURCE_TYPE right) => left.Equals(right);
+
+    public static bool operator !=(CK_RSA_PKCS_OAEP_SOURCE_TYPE left, CK_RSA_PKCS_OAEP_SOURCE_TYPE right) => !left.Equals(right);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CK_GCM_PARAMS
+{
+    public byte* Iv;
+    public CK_ULONG IvLen;
+    public CK_ULONG IvBits;
+    public byte* Aad;
+    public CK_ULONG AadLen;
+    public CK_ULONG TagBits;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CK_RSA_PKCS_OAEP_PARAMS
+{
+    public CK_MECHANISM_TYPE HashAlg;
+    public CK_RSA_PKCS_MGF_TYPE Mgf;
+    public CK_RSA_PKCS_OAEP_SOURCE_TYPE Source;
+    public void* SourceData;
+    public CK_ULONG SourceDataLen;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct CK_RSA_PKCS_PSS_PARAMS
+{
+    public CK_MECHANISM_TYPE HashAlg;
+    public CK_RSA_PKCS_MGF_TYPE Mgf;
+    public CK_ULONG SaltLen;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public unsafe struct CK_ATTRIBUTE
 {
     public CK_ATTRIBUTE_TYPE Type;
@@ -521,24 +598,24 @@ public unsafe struct CK_FUNCTION_LIST
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_RV> C_DigestInit;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_Digest;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, CK_RV> C_DigestUpdate;
-    public void* C_DigestKey;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_OBJECT_HANDLE, CK_RV> C_DigestKey;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG*, CK_RV> C_DigestFinal;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> C_SignInit;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_Sign;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, CK_RV> C_SignUpdate;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG*, CK_RV> C_SignFinal;
-    public void* C_SignRecoverInit;
-    public void* C_SignRecover;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> C_SignRecoverInit;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_SignRecover;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> C_VerifyInit;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG, CK_RV> C_Verify;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, CK_RV> C_VerifyUpdate;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, CK_RV> C_VerifyFinal;
-    public void* C_VerifyRecoverInit;
-    public void* C_VerifyRecover;
-    public void* C_DigestEncryptUpdate;
-    public void* C_DecryptDigestUpdate;
-    public void* C_SignEncryptUpdate;
-    public void* C_DecryptVerifyUpdate;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_RV> C_VerifyRecoverInit;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_VerifyRecover;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_DigestEncryptUpdate;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_DecryptDigestUpdate;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_SignEncryptUpdate;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> C_DecryptVerifyUpdate;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_ATTRIBUTE*, CK_ULONG, CK_OBJECT_HANDLE*, CK_RV> C_GenerateKey;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_ATTRIBUTE*, CK_ULONG, CK_ATTRIBUTE*, CK_ULONG, CK_OBJECT_HANDLE*, CK_OBJECT_HANDLE*, CK_RV> C_GenerateKeyPair;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_OBJECT_HANDLE, byte*, CK_ULONG*, CK_RV> C_WrapKey;
@@ -548,5 +625,5 @@ public unsafe struct CK_FUNCTION_LIST
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, CK_RV> C_GenerateRandom;
     public void* C_GetFunctionStatus;
     public void* C_CancelFunction;
-    public void* C_WaitForSlotEvent;
+    public delegate* unmanaged[Cdecl]<CK_FLAGS, CK_SLOT_ID*, void*, CK_RV> C_WaitForSlotEvent;
 }

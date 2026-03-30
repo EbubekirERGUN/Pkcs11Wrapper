@@ -8,6 +8,20 @@ namespace Pkcs11Wrapper.Native.Tests;
 
 public sealed class SoftHsmCryptRegressionTests
 {
+    private static readonly Pkcs11MechanismType RsaX509MechanismType = new(0x00000003u);
+    private static readonly Pkcs11AttributeType SignRecoverAttributeType = new(0x00000109u);
+    private static readonly Pkcs11AttributeType VerifyRecoverAttributeType = new(0x0000010Bu);
+    private const nuint CkrFunctionNotSupported = 0x00000054u;
+    private const nuint CkrMechanismInvalid = 0x00000070u;
+    private const nuint CkrMechanismParamInvalid = 0x00000071u;
+    private const nuint CkrOperationNotInitialized = 0x00000091u;
+    private const nuint CkrPinIncorrect = 0x000000a0u;
+    private const nuint CkrUserAlreadyLoggedIn = 0x00000100u;
+    private const nuint CkrKeyTypeInconsistent = 0x00000063u;
+    private const nuint CkrKeyUnwrappable = 0x00000067u;
+    private const nuint CkrKeyFunctionNotPermitted = 0x00000068u;
+    private const nuint CkrObjectHandleInvalid = 0x00000082u;
+
     [Fact]
     public void SinglePartSha256DigestMatchesManagedHash()
     {
@@ -82,6 +96,24 @@ public sealed class SoftHsmCryptRegressionTests
         Assert.Contains(first, static value => value != 0);
         Assert.Contains(second, static value => value != 0);
         Assert.False(first.AsSpan().SequenceEqual(second));
+    }
+
+    [Fact]
+    public void SeedRandomAcceptsEntropyAndGenerateRandomStillProducesOutput()
+    {
+        if (!TryCreateCryptContext(out TestContext? context))
+        {
+            return;
+        }
+
+        using TestContext activeContext = context!;
+        byte[] seed = ParseHex(Environment.GetEnvironmentVariable("PKCS11_SEED_RANDOM_HEX") ?? "102132435465768798A9BACBDCEDFE0F", Convert.FromHexString);
+        byte[] random = new byte[32];
+
+        activeContext.Session.SeedRandom(seed);
+        activeContext.Session.GenerateRandom(random);
+
+        Assert.Contains(random, static value => value != 0);
     }
 
     [Fact]
@@ -346,6 +378,197 @@ public sealed class SoftHsmCryptRegressionTests
         activeContext.Session.VerifyUpdate(data.AsSpan(0, splitIndex));
         activeContext.Session.VerifyUpdate(data.AsSpan(splitIndex));
         Assert.False(activeContext.Session.VerifyFinal(multipartSignature.AsSpan(0, multipartWritten - 1)));
+    }
+
+    [Fact]
+    public void DigestKeyAndRecoverOperationsAreCapabilityGatedAndPreserveBufferTooSmallSemantics()
+    {
+        if (!TryCreateSignVerifyContext(out SignVerifyContext? context))
+        {
+            return;
+        }
+
+        using SignVerifyContext activeContext = context!;
+        byte[] data = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_SIGN_RECOVER_DATA_HEX") ?? "00112233445566778899AABBCCDDEEFF", 16);
+
+        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.Sha256, Pkcs11MechanismFlags.Digest) ||
+            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, RsaX509MechanismType, Pkcs11MechanismFlags.SignRecover | Pkcs11MechanismFlags.VerifyRecover))
+        {
+            return;
+        }
+
+        if (!TryGetBooleanAttribute(activeContext.Session, activeContext.SignKeyHandle, SignRecoverAttributeType, out bool canSignRecover) ||
+            !TryGetBooleanAttribute(activeContext.Session, activeContext.VerifyKeyHandle, VerifyRecoverAttributeType, out bool canVerifyRecover) ||
+            !canSignRecover ||
+            !canVerifyRecover)
+        {
+            return;
+        }
+
+        try
+        {
+            activeContext.Session.DigestInit(new Pkcs11Mechanism(Pkcs11MechanismTypes.Sha256));
+            activeContext.Session.DigestUpdate(data);
+            activeContext.Session.DigestKey(activeContext.SignKeyHandle);
+
+            Span<byte> tooSmallDigest = stackalloc byte[31];
+            Assert.False(activeContext.Session.TryDigestFinal(tooSmallDigest, out int digestLength));
+            Assert.True(digestLength > 0);
+
+            byte[] digest = new byte[digestLength];
+            Assert.True(activeContext.Session.TryDigestFinal(digest, out int digestWritten));
+            Assert.Equal(digestLength, digestWritten);
+
+            Pkcs11Mechanism rsaX509 = new(RsaX509MechanismType);
+            activeContext.Session.SignRecoverInit(activeContext.SignKeyHandle, rsaX509);
+            int signRecoverLength = activeContext.Session.GetSignRecoverOutputLength(data);
+            Assert.True(signRecoverLength > 0);
+
+            activeContext.Session.SignRecoverInit(activeContext.SignKeyHandle, rsaX509);
+            Span<byte> tooSmallSignature = stackalloc byte[Math.Max(signRecoverLength - 1, 0)];
+            if (signRecoverLength > 0)
+            {
+                Assert.False(activeContext.Session.TrySignRecover(data, tooSmallSignature, out int requiredSignRecoverLength));
+                Assert.Equal(signRecoverLength, requiredSignRecoverLength);
+            }
+
+            activeContext.Session.SignRecoverInit(activeContext.SignKeyHandle, rsaX509);
+            byte[] signature = new byte[signRecoverLength];
+            Assert.True(activeContext.Session.TrySignRecover(data, signature, out int signatureWritten));
+            Assert.Equal(signRecoverLength, signatureWritten);
+
+            activeContext.Session.VerifyRecoverInit(activeContext.VerifyKeyHandle, rsaX509);
+            int verifyRecoverLength = activeContext.Session.GetVerifyRecoverOutputLength(signature.AsSpan(0, signatureWritten));
+            Assert.True(verifyRecoverLength > 0);
+
+            activeContext.Session.VerifyRecoverInit(activeContext.VerifyKeyHandle, rsaX509);
+            Span<byte> tooSmallRecovered = stackalloc byte[Math.Max(verifyRecoverLength - 1, 0)];
+            if (verifyRecoverLength > 0)
+            {
+                Assert.False(activeContext.Session.TryVerifyRecover(signature.AsSpan(0, signatureWritten), tooSmallRecovered, out int requiredVerifyRecoverLength));
+                Assert.Equal(verifyRecoverLength, requiredVerifyRecoverLength);
+            }
+
+            activeContext.Session.VerifyRecoverInit(activeContext.VerifyKeyHandle, rsaX509);
+            byte[] recovered = new byte[verifyRecoverLength];
+            Assert.True(activeContext.Session.TryVerifyRecover(signature.AsSpan(0, signatureWritten), recovered, out int recoveredWritten));
+            Assert.Equal(verifyRecoverLength, recoveredWritten);
+        }
+        catch (Pkcs11Exception ex) when (IsRecoverOrDigestKeyUnavailable(ex))
+        {
+            return;
+        }
+    }
+
+    [Fact]
+    public void CombinedDigestEncryptAndDecryptDigestUpdatesAreCapabilityGatedAndRoundTrip()
+    {
+        if (!TryCreateCryptContext(out TestContext? context))
+        {
+            return;
+        }
+
+        using TestContext activeContext = context!;
+        byte[] iv = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_MULTIPART_IV_HEX") ?? "00112233445566778899AABBCCDDEEFF", 16);
+        byte[] block = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_COMBINED_UPDATE_BLOCK_HEX") ?? "404142434445464748494A4B4C4D4E4F", 16);
+        Pkcs11Mechanism digestMechanism = new(Pkcs11MechanismTypes.Sha256);
+        Pkcs11Mechanism cryptMechanism = new(Pkcs11MechanismTypes.AesCbc, iv);
+
+        if (!SupportsMechanism(activeContext.Module, activeContext.SlotId, Pkcs11MechanismTypes.Sha256, Pkcs11MechanismFlags.Digest) ||
+            !SupportsMechanism(activeContext.Module, activeContext.SlotId, Pkcs11MechanismTypes.AesCbc, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt))
+        {
+            return;
+        }
+
+        try
+        {
+            activeContext.Session.DigestInit(digestMechanism);
+            activeContext.Session.EncryptInit(activeContext.KeyHandle, cryptMechanism);
+
+            Span<byte> tooSmallEncrypt = stackalloc byte[15];
+            Assert.False(activeContext.Session.TryDigestEncryptUpdate(block, tooSmallEncrypt, out int requiredDigestEncryptLength));
+            Assert.Equal(16, requiredDigestEncryptLength);
+
+            byte[] digestEncrypted = new byte[requiredDigestEncryptLength];
+            Assert.True(activeContext.Session.TryDigestEncryptUpdate(block, digestEncrypted, out int digestEncryptWritten));
+            Assert.Equal(requiredDigestEncryptLength, digestEncryptWritten);
+
+            byte[] baselineCiphertext = EncryptMultipart(activeContext.Session, activeContext.KeyHandle, cryptMechanism, block, ReadOnlySpan<byte>.Empty);
+
+            activeContext.Session.DigestInit(digestMechanism);
+            activeContext.Session.DecryptInit(activeContext.KeyHandle, cryptMechanism);
+
+            Span<byte> tooSmallDecrypt = stackalloc byte[15];
+            Assert.False(activeContext.Session.TryDecryptDigestUpdate(baselineCiphertext, tooSmallDecrypt, out int requiredDecryptDigestLength));
+            Assert.Equal(16, requiredDecryptDigestLength);
+
+            byte[] decrypted = new byte[requiredDecryptDigestLength];
+            Assert.True(activeContext.Session.TryDecryptDigestUpdate(baselineCiphertext, decrypted, out int decryptDigestWritten));
+            Assert.Equal(requiredDecryptDigestLength, decryptDigestWritten);
+            Assert.True(block.AsSpan().SequenceEqual(decrypted.AsSpan(0, decryptDigestWritten)));
+        }
+        catch (Pkcs11Exception ex) when (IsCombinedUpdateUnavailable(ex))
+        {
+            return;
+        }
+    }
+
+    [Fact]
+    public void CombinedSignEncryptAndDecryptVerifyUpdatesAreCapabilityGatedAndRoundTrip()
+    {
+        if (!TryCreateSignVerifyContext(out SignVerifyContext? context))
+        {
+            return;
+        }
+
+        using SignVerifyContext activeContext = context!;
+        byte[] data = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_SIGN_ENCRYPT_DATA_HEX") ?? "505152535455565758595A5B5C5D5E5F", 16);
+        Pkcs11Mechanism mechanism = new(RsaX509MechanismType);
+
+        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, RsaX509MechanismType, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify | Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt) ||
+            !TryGetBooleanAttribute(activeContext.Session, activeContext.SignKeyHandle, Pkcs11AttributeTypes.Sign, out bool canSign) ||
+            !TryGetBooleanAttribute(activeContext.Session, activeContext.SignKeyHandle, Pkcs11AttributeTypes.Decrypt, out bool canDecrypt) ||
+            !TryGetBooleanAttribute(activeContext.Session, activeContext.VerifyKeyHandle, Pkcs11AttributeTypes.Verify, out bool canVerify) ||
+            !TryGetBooleanAttribute(activeContext.Session, activeContext.VerifyKeyHandle, Pkcs11AttributeTypes.Encrypt, out bool canEncrypt) ||
+            !canSign ||
+            !canDecrypt ||
+            !canVerify ||
+            !canEncrypt)
+        {
+            return;
+        }
+
+        try
+        {
+            activeContext.Session.SignInit(activeContext.SignKeyHandle, mechanism);
+            activeContext.Session.EncryptInit(activeContext.VerifyKeyHandle, mechanism);
+
+            Assert.False(activeContext.Session.TrySignEncryptUpdate(data, Span<byte>.Empty, out int requiredSignEncryptLength));
+            Assert.True(requiredSignEncryptLength > 0);
+
+            byte[] signEncrypted = new byte[requiredSignEncryptLength];
+            Assert.True(activeContext.Session.TrySignEncryptUpdate(data, signEncrypted, out int signEncryptWritten));
+            Assert.Equal(requiredSignEncryptLength, signEncryptWritten);
+
+            byte[] signature = new byte[activeContext.Session.GetSignOutputLength(activeContext.SignKeyHandle, mechanism, data)];
+            Assert.True(activeContext.Session.TrySignFinal(signature, out int signatureWritten));
+            Assert.True(signatureWritten > 0);
+
+            activeContext.Session.DecryptInit(activeContext.SignKeyHandle, mechanism);
+            activeContext.Session.VerifyInit(activeContext.VerifyKeyHandle, mechanism);
+
+            Assert.False(activeContext.Session.TryDecryptVerifyUpdate(signEncrypted.AsSpan(0, signEncryptWritten), Span<byte>.Empty, out int requiredDecryptVerifyLength));
+            Assert.True(requiredDecryptVerifyLength > 0);
+
+            byte[] decrypted = new byte[requiredDecryptVerifyLength];
+            Assert.True(activeContext.Session.TryDecryptVerifyUpdate(signEncrypted.AsSpan(0, signEncryptWritten), decrypted, out int decryptVerifyWritten));
+            Assert.Equal(requiredDecryptVerifyLength, decryptVerifyWritten);
+            Assert.True(activeContext.Session.VerifyFinal(signature.AsSpan(0, signatureWritten)));
+        }
+        catch (Pkcs11Exception ex) when (IsCombinedUpdateUnavailable(ex))
+        {
+            return;
+        }
     }
 
     [Fact]
@@ -673,6 +896,256 @@ public sealed class SoftHsmCryptRegressionTests
     }
 
     [Fact]
+    public void MechanismMatrixAesGcmRoundTripsAndCoversNegativeCases()
+    {
+        if (!TryCreateGenerateContext(out GenerateContext? context))
+        {
+            return;
+        }
+
+        using GenerateContext activeContext = context!;
+        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.AesKeyGen, Pkcs11MechanismFlags.Generate) ||
+            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt))
+        {
+            return;
+        }
+
+        byte[] label = Encoding.ASCII.GetBytes($"phase16-gcm-{Guid.NewGuid():N}");
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] iv = ParseExactHex("00112233445566778899AABB", 12);
+        byte[] aad = ParseExactHex("A1A2A3A4A5A6A7A8", 8);
+        byte[] plaintext = Encoding.UTF8.GetBytes("phase16-aes-gcm-matrix");
+        Pkcs11ObjectHandle keyHandle = default;
+        bool created = false;
+
+        try
+        {
+            keyHandle = activeContext.Session.GenerateKey(
+                new Pkcs11Mechanism(Pkcs11MechanismTypes.AesKeyGen),
+                Pkcs11ProvisioningTemplates.CreateAesEncryptDecryptSecretKey(label, id, token: false, extractable: false, valueLength: 32));
+            created = true;
+
+            Pkcs11Mechanism mechanism = new(Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismParameters.AesGcm(iv, aad, tagBits: 128));
+            int expectedCiphertextLength = activeContext.Session.GetEncryptOutputLength(keyHandle, mechanism, plaintext);
+
+            Span<byte> tooSmall = stackalloc byte[Math.Max(expectedCiphertextLength - 1, 0)];
+            if (expectedCiphertextLength > 0)
+            {
+                Assert.False(activeContext.Session.TryEncrypt(keyHandle, mechanism, plaintext, tooSmall, out int requiredLength));
+                Assert.Equal(expectedCiphertextLength, requiredLength);
+            }
+
+            byte[] ciphertext = new byte[expectedCiphertextLength];
+            Assert.True(activeContext.Session.TryEncrypt(keyHandle, mechanism, plaintext, ciphertext, out int ciphertextWritten));
+
+            byte[] decrypted = new byte[activeContext.Session.GetDecryptOutputLength(keyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten))];
+            Assert.True(activeContext.Session.TryDecrypt(keyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten), decrypted, out int decryptedWritten));
+            Assert.True(plaintext.AsSpan().SequenceEqual(decrypted.AsSpan(0, decryptedWritten)));
+
+            Pkcs11Mechanism invalidMechanism = new(Pkcs11MechanismTypes.AesGcm, Pkcs11MechanismParameters.AesGcm(iv, aad, tagBits: 7));
+            Pkcs11Exception? exception = null;
+            try
+            {
+                _ = activeContext.Session.GetEncryptOutputLength(keyHandle, invalidMechanism, plaintext);
+            }
+            catch (Pkcs11Exception ex)
+            {
+                exception = ex;
+            }
+
+            Assert.NotNull(exception);
+            Assert.True(IsMechanismParamOrInvalid(exception!.Result.Value));
+        }
+        finally
+        {
+            if (created)
+            {
+                TryDestroyObject(activeContext.Session, keyHandle);
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: label, id: id, objectClass: Pkcs11ObjectClasses.SecretKey, keyType: Pkcs11KeyTypes.Aes));
+            }
+        }
+    }
+
+    [Fact]
+    public void MechanismMatrixRsaOaepRoundTripsAndRejectsKeyMismatch()
+    {
+        if (!TryCreateGenerateContext(out GenerateContext? context))
+        {
+            return;
+        }
+
+        using GenerateContext activeContext = context!;
+        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaPkcsKeyPairGen, Pkcs11MechanismFlags.GenerateKeyPair) ||
+            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaPkcsOaep, Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt))
+        {
+            return;
+        }
+
+        byte[] label = Encoding.ASCII.GetBytes($"phase16-oaep-{Guid.NewGuid():N}");
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] plaintext = Encoding.UTF8.GetBytes("phase16-rsa-oaep-matrix");
+        Pkcs11GeneratedKeyPair keyPair = default;
+        bool created = false;
+
+        try
+        {
+            Pkcs11KeyPairTemplate template = CreateRsaEncryptDecryptKeyPair(label, id, token: false);
+            keyPair = activeContext.Session.GenerateKeyPair(new Pkcs11Mechanism(Pkcs11MechanismTypes.RsaPkcsKeyPairGen), template.PublicKeyAttributes, template.PrivateKeyAttributes);
+            created = true;
+
+            Pkcs11Mechanism mechanism = new(Pkcs11MechanismTypes.RsaPkcsOaep, Pkcs11MechanismParameters.RsaOaep(Pkcs11MechanismTypes.Sha256, Pkcs11RsaMgfTypes.Mgf1Sha256));
+            byte[] ciphertext = new byte[activeContext.Session.GetEncryptOutputLength(keyPair.PublicKeyHandle, mechanism, plaintext)];
+            Assert.True(activeContext.Session.TryEncrypt(keyPair.PublicKeyHandle, mechanism, plaintext, ciphertext, out int ciphertextWritten));
+
+            byte[] decrypted = new byte[activeContext.Session.GetDecryptOutputLength(keyPair.PrivateKeyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten))];
+            Assert.True(activeContext.Session.TryDecrypt(keyPair.PrivateKeyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten), decrypted, out int decryptedWritten));
+            Assert.True(plaintext.AsSpan().SequenceEqual(decrypted.AsSpan(0, decryptedWritten)));
+
+            Pkcs11Exception? mismatchException = null;
+            try
+            {
+                _ = activeContext.Session.GetDecryptOutputLength(keyPair.PublicKeyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten));
+            }
+            catch (Pkcs11Exception ex)
+            {
+                mismatchException = ex;
+            }
+
+            Assert.NotNull(mismatchException);
+            Assert.True(IsKeyMismatchOrInvalid(mismatchException!.Result.Value));
+        }
+        finally
+        {
+            if (created)
+            {
+                TryDestroyObject(activeContext.Session, keyPair.PrivateKeyHandle);
+                TryDestroyObject(activeContext.Session, keyPair.PublicKeyHandle);
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: label, id: id, objectClass: Pkcs11ObjectClasses.PrivateKey, keyType: Pkcs11KeyTypes.Rsa));
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: label, id: id, objectClass: Pkcs11ObjectClasses.PublicKey, keyType: Pkcs11KeyTypes.Rsa));
+            }
+        }
+    }
+
+    [Fact]
+    public void MechanismMatrixRsaPssRoundTripsAndCoversBufferTooSmall()
+    {
+        if (!TryCreateGenerateContext(out GenerateContext? context))
+        {
+            return;
+        }
+
+        using GenerateContext activeContext = context!;
+        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaPkcsKeyPairGen, Pkcs11MechanismFlags.GenerateKeyPair) ||
+            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.Sha256RsaPkcsPss, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify))
+        {
+            return;
+        }
+
+        byte[] label = Encoding.ASCII.GetBytes($"phase16-pss-{Guid.NewGuid():N}");
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] data = Encoding.UTF8.GetBytes("phase16-rsa-pss-matrix");
+        Pkcs11GeneratedKeyPair keyPair = default;
+        bool created = false;
+
+        try
+        {
+            Pkcs11KeyPairTemplate templates = Pkcs11ProvisioningTemplates.CreateRsaSignVerifyKeyPair(label, id, token: false, modulusBits: 2048);
+            keyPair = activeContext.Session.GenerateKeyPair(new Pkcs11Mechanism(Pkcs11MechanismTypes.RsaPkcsKeyPairGen), templates.PublicKeyAttributes, templates.PrivateKeyAttributes);
+            created = true;
+
+            Pkcs11Mechanism mechanism = new(Pkcs11MechanismTypes.Sha256RsaPkcsPss, Pkcs11MechanismParameters.RsaPss(Pkcs11MechanismTypes.Sha256, Pkcs11RsaMgfTypes.Mgf1Sha256, 32));
+            int expectedLength = activeContext.Session.GetSignOutputLength(keyPair.PrivateKeyHandle, mechanism, data);
+
+            Span<byte> tooSmall = stackalloc byte[Math.Max(expectedLength - 1, 0)];
+            if (expectedLength > 0)
+            {
+                Assert.False(activeContext.Session.TrySign(keyPair.PrivateKeyHandle, mechanism, data, tooSmall, out int requiredLength));
+                Assert.Equal(expectedLength, requiredLength);
+            }
+
+            byte[] signature = new byte[expectedLength];
+            Assert.True(activeContext.Session.TrySign(keyPair.PrivateKeyHandle, mechanism, data, signature, out int written));
+            Assert.True(activeContext.Session.Verify(keyPair.PublicKeyHandle, mechanism, data, signature.AsSpan(0, written)));
+
+            Pkcs11Mechanism mismatchedSalt = new(Pkcs11MechanismTypes.Sha256RsaPkcsPss, Pkcs11MechanismParameters.RsaPss(Pkcs11MechanismTypes.Sha256, Pkcs11RsaMgfTypes.Mgf1Sha256, 31));
+            Assert.False(activeContext.Session.Verify(keyPair.PublicKeyHandle, mismatchedSalt, data, signature.AsSpan(0, written)));
+        }
+        finally
+        {
+            if (created)
+            {
+                TryDestroyObject(activeContext.Session, keyPair.PrivateKeyHandle);
+                TryDestroyObject(activeContext.Session, keyPair.PublicKeyHandle);
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: label, id: id, objectClass: Pkcs11ObjectClasses.PrivateKey, keyType: Pkcs11KeyTypes.Rsa));
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: label, id: id, objectClass: Pkcs11ObjectClasses.PublicKey, keyType: Pkcs11KeyTypes.Rsa));
+            }
+        }
+    }
+
+    [Fact]
+    public void MechanismMatrixSha256HmacRoundTripsAndRejectsWrongKey()
+    {
+        if (!TryCreateGenerateContext(out GenerateContext? context))
+        {
+            return;
+        }
+
+        using GenerateContext activeContext = context!;
+        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.GenericSecretKeyGen, Pkcs11MechanismFlags.Generate) ||
+            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.Sha256Hmac, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify))
+        {
+            return;
+        }
+
+        byte[] firstLabel = Encoding.ASCII.GetBytes($"phase16-hmac-a-{Guid.NewGuid():N}");
+        byte[] secondLabel = Encoding.ASCII.GetBytes($"phase16-hmac-b-{Guid.NewGuid():N}");
+        byte[] firstId = Guid.NewGuid().ToByteArray();
+        byte[] secondId = Guid.NewGuid().ToByteArray();
+        byte[] data = Encoding.UTF8.GetBytes("phase16-hmac-matrix");
+        Pkcs11ObjectHandle firstKey = default;
+        Pkcs11ObjectHandle secondKey = default;
+        bool firstCreated = false;
+        bool secondCreated = false;
+
+        try
+        {
+            firstKey = activeContext.Session.GenerateKey(new Pkcs11Mechanism(Pkcs11MechanismTypes.GenericSecretKeyGen), CreateGenericSecretHmacKeyTemplate(firstLabel, firstId));
+            secondKey = activeContext.Session.GenerateKey(new Pkcs11Mechanism(Pkcs11MechanismTypes.GenericSecretKeyGen), CreateGenericSecretHmacKeyTemplate(secondLabel, secondId));
+            firstCreated = true;
+            secondCreated = true;
+
+            Pkcs11Mechanism mechanism = new(Pkcs11MechanismTypes.Sha256Hmac);
+            int expectedLength = activeContext.Session.GetSignOutputLength(firstKey, mechanism, data);
+
+            Span<byte> tooSmall = stackalloc byte[Math.Max(expectedLength - 1, 0)];
+            if (expectedLength > 0)
+            {
+                Assert.False(activeContext.Session.TrySign(firstKey, mechanism, data, tooSmall, out int requiredLength));
+                Assert.Equal(expectedLength, requiredLength);
+            }
+
+            byte[] signature = new byte[expectedLength];
+            Assert.True(activeContext.Session.TrySign(firstKey, mechanism, data, signature, out int written));
+            Assert.True(activeContext.Session.Verify(firstKey, mechanism, data, signature.AsSpan(0, written)));
+            Assert.False(activeContext.Session.Verify(secondKey, mechanism, data, signature.AsSpan(0, written)));
+        }
+        finally
+        {
+            if (secondCreated)
+            {
+                TryDestroyObject(activeContext.Session, secondKey);
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: secondLabel, id: secondId, objectClass: Pkcs11ObjectClasses.SecretKey, keyType: Pkcs11KeyTypes.GenericSecret));
+            }
+
+            if (firstCreated)
+            {
+                TryDestroyObject(activeContext.Session, firstKey);
+                TryDestroyObjectBySearch(activeContext.Session, new Pkcs11ObjectSearchParameters(label: firstLabel, id: firstId, objectClass: Pkcs11ObjectClasses.SecretKey, keyType: Pkcs11KeyTypes.GenericSecret));
+            }
+        }
+    }
+
+    [Fact]
     public void DataObjectLifecycleRoundTripsThroughCreateUpdateAndDestroy()
     {
         string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
@@ -757,6 +1230,77 @@ public sealed class SoftHsmCryptRegressionTests
     }
 
     [Fact]
+    public void CopyObjectClonesDataObjectWithTemplateOverrides()
+    {
+        if (!TryCreateGenerateContext(out GenerateContext? context))
+        {
+            return;
+        }
+
+        using GenerateContext activeContext = context!;
+        byte[] sourceLabel = Encoding.UTF8.GetBytes($"phase14-copy-src-{Guid.NewGuid():N}");
+        byte[] copiedLabel = Encoding.UTF8.GetBytes($"phase14-copy-dst-{Guid.NewGuid():N}");
+        byte[] application = Encoding.UTF8.GetBytes("phase14-copy");
+        byte[] value = [0x50, 0x31, 0x34, 0x2D, 0x01];
+
+        Pkcs11ObjectHandle sourceHandle = default;
+        Pkcs11ObjectHandle copiedHandle = default;
+        bool sourceCreated = false;
+        bool copiedCreated = false;
+
+        try
+        {
+            sourceHandle = activeContext.Session.CreateObject(
+            [
+                Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.Data),
+                Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Token, false),
+                Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Private, false),
+                Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Modifiable, true),
+                Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, sourceLabel),
+                Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Application, application),
+                Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Value, value)
+            ]);
+
+            sourceCreated = true;
+            copiedHandle = activeContext.Session.CopyObject(
+                sourceHandle,
+                [
+                    Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, copiedLabel)
+                ]);
+
+            copiedCreated = true;
+            Assert.True(sourceHandle.Value != 0);
+            Assert.True(copiedHandle.Value != 0);
+            Assert.NotEqual(sourceHandle, copiedHandle);
+
+            Assert.True(activeContext.Session.TryFindObject(new Pkcs11ObjectSearchParameters(label: sourceLabel, objectClass: Pkcs11ObjectClasses.Data), out Pkcs11ObjectHandle locatedSource));
+            Assert.True(activeContext.Session.TryFindObject(new Pkcs11ObjectSearchParameters(label: copiedLabel, objectClass: Pkcs11ObjectClasses.Data), out Pkcs11ObjectHandle locatedCopy));
+            Assert.Equal(sourceHandle, locatedSource);
+            Assert.Equal(copiedHandle, locatedCopy);
+            Assert.Equal(value, GetRequiredAttributeBytes(activeContext.Session, copiedHandle, Pkcs11AttributeTypes.Value));
+
+            activeContext.Session.DestroyObject(copiedHandle);
+            copiedCreated = false;
+            activeContext.Session.DestroyObject(sourceHandle);
+            sourceCreated = false;
+        }
+        finally
+        {
+            if (copiedCreated)
+            {
+                TryDestroyObject(activeContext.Session, copiedHandle);
+                TryDestroyDataObjectByLabel(activeContext.Session, copiedLabel);
+            }
+
+            if (sourceCreated)
+            {
+                TryDestroyObject(activeContext.Session, sourceHandle);
+                TryDestroyDataObjectByLabel(activeContext.Session, sourceLabel);
+            }
+        }
+    }
+
+    [Fact]
     public void SetPinRoundTripsAndRestoresOriginalUserPin()
     {
         if (!TryCreateAdminContext(out AdminContext? context))
@@ -783,7 +1327,7 @@ public sealed class SoftHsmCryptRegressionTests
             using (Pkcs11Session oldPinSession = activeContext.Module.OpenSession(activeContext.SlotId, readWrite: true))
             {
                 Pkcs11Exception exception = Assert.Throws<Pkcs11Exception>(() => oldPinSession.Login(Pkcs11UserType.User, originalPinUtf8));
-                Assert.Equal(0x000000a0u, exception.Result.Value);
+                Assert.Equal(CkrPinIncorrect, exception.Result.Value);
             }
 
             using (Pkcs11Session newPinSession = activeContext.Module.OpenSession(activeContext.SlotId, readWrite: true))
@@ -949,6 +1493,26 @@ public sealed class SoftHsmCryptRegressionTests
         Assert.True(reinitializedTokenInfo.Flags.HasFlag(Pkcs11TokenFlags.TokenInitialized));
     }
 
+    [Fact]
+    public void FinalizeModuleInvalidatesExistingSessionsUntilModuleIsInitializedAgain()
+    {
+        if (!TryCreateAdminContext(out AdminContext? context))
+        {
+            return;
+        }
+
+        using AdminContext activeContext = context!;
+        using Pkcs11Session invalidatedSession = activeContext.Module.OpenSession(activeContext.SlotId);
+        Assert.Equal(activeContext.SlotId, invalidatedSession.GetInfo().SlotId);
+
+        activeContext.Module.FinalizeModule();
+        Assert.Throws<InvalidOperationException>(() => invalidatedSession.GetInfo());
+
+        activeContext.Module.Initialize();
+        using Pkcs11Session replacementSession = activeContext.Module.OpenSession(activeContext.SlotId);
+        Assert.Equal(activeContext.SlotId, replacementSession.GetInfo().SlotId);
+    }
+
     private static Pkcs11SlotId FindSlotByTokenLabel(Pkcs11Module module, string tokenLabel)
     {
         int slotCount = module.GetSlotCount();
@@ -997,6 +1561,58 @@ public sealed class SoftHsmCryptRegressionTests
 
         throw new Xunit.Sdk.XunitException("No free or uninitialized slot was available for Phase 9 provisioning regression.");
     }
+
+    private static bool IsMechanismParamOrInvalid(nuint result)
+        => result is CkrMechanismInvalid or CkrMechanismParamInvalid;
+
+    private static bool IsKeyMismatchOrInvalid(nuint result)
+        => result is CkrKeyTypeInconsistent or CkrKeyUnwrappable or CkrKeyFunctionNotPermitted or CkrMechanismInvalid;
+
+    private static Pkcs11KeyPairTemplate CreateRsaEncryptDecryptKeyPair(ReadOnlySpan<byte> label, ReadOnlySpan<byte> id, bool token)
+    {
+        byte[] labelBytes = label.ToArray();
+        byte[] idBytes = id.ToArray();
+
+        return new Pkcs11KeyPairTemplate(
+        [
+            Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.PublicKey),
+            Pkcs11ObjectAttribute.KeyType(Pkcs11AttributeTypes.KeyType, Pkcs11KeyTypes.Rsa),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Token, token),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Private, false),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Encrypt, true),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, labelBytes),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, idBytes),
+            Pkcs11ObjectAttribute.Nuint(Pkcs11AttributeTypes.ModulusBits, 2048),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.PublicExponent, new byte[] { 0x01, 0x00, 0x01 })
+        ],
+        [
+            Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.PrivateKey),
+            Pkcs11ObjectAttribute.KeyType(Pkcs11AttributeTypes.KeyType, Pkcs11KeyTypes.Rsa),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Token, token),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Private, true),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Decrypt, true),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Sensitive, true),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Extractable, false),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, labelBytes),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, idBytes)
+        ]);
+    }
+
+    private static Pkcs11ObjectAttribute[] CreateGenericSecretHmacKeyTemplate(ReadOnlySpan<byte> label, ReadOnlySpan<byte> id)
+        =>
+        [
+            Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.SecretKey),
+            Pkcs11ObjectAttribute.KeyType(Pkcs11AttributeTypes.KeyType, Pkcs11KeyTypes.GenericSecret),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Token, false),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Private, true),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Sign, true),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Verify, true),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Sensitive, true),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Extractable, false),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, label.ToArray()),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, id.ToArray()),
+            Pkcs11ObjectAttribute.Nuint(Pkcs11AttributeTypes.ValueLen, 32)
+        ];
 
     private static byte[] ParseHex(string? value, Func<string, byte[]> parser)
     {
@@ -1094,13 +1710,81 @@ public sealed class SoftHsmCryptRegressionTests
         {
             session.Login(Pkcs11UserType.User, pinUtf8);
         }
-        catch (Pkcs11Exception ex) when (ex.Result.Value is 0x000000a0u or 0x00000100u)
+        catch (Pkcs11Exception ex) when (ex.Result.Value is CkrPinIncorrect or CkrUserAlreadyLoggedIn)
         {
         }
     }
 
     private static bool IsOperationStateUnavailable(Pkcs11Exception exception)
-        => exception.Result.Value == 0x00000054u;
+        => exception.Result.Value == CkrFunctionNotSupported;
+
+    private static bool SupportsMechanism(Pkcs11Module module, Pkcs11SlotId slotId, Pkcs11MechanismType mechanismType, Pkcs11MechanismFlags requiredFlags)
+    {
+        int mechanismCount = module.GetMechanismCount(slotId);
+        if (mechanismCount == 0)
+        {
+            return false;
+        }
+
+        Pkcs11MechanismType[] mechanisms = new Pkcs11MechanismType[mechanismCount];
+        if (!module.TryGetMechanisms(slotId, mechanisms, out int written))
+        {
+            return false;
+        }
+
+        bool mechanismFound = false;
+        for (int i = 0; i < written; i++)
+        {
+            if (mechanisms[i] == mechanismType)
+            {
+                mechanismFound = true;
+                break;
+            }
+        }
+
+        if (!mechanismFound)
+        {
+            return false;
+        }
+
+        try
+        {
+            Pkcs11MechanismInfo info = module.GetMechanismInfo(slotId, mechanismType);
+            return (info.Flags & requiredFlags) == requiredFlags;
+        }
+        catch (Pkcs11Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetBooleanAttribute(Pkcs11Session session, Pkcs11ObjectHandle objectHandle, Pkcs11AttributeType attributeType, out bool value)
+    {
+        if (session.TryGetAttributeBoolean(objectHandle, attributeType, out bool nativeValue, out Pkcs11AttributeReadResult result) && result.IsReadable)
+        {
+            value = nativeValue;
+            return true;
+        }
+
+        value = false;
+        return false;
+    }
+
+    private static bool IsRecoverOrDigestKeyUnavailable(Pkcs11Exception exception)
+        => IsUnsupportedOrUnavailableCode(exception.Result.Value);
+
+    private static bool IsCombinedUpdateUnavailable(Pkcs11Exception exception)
+        => IsUnsupportedOrUnavailableCode(exception.Result.Value);
+
+    private static bool IsUnsupportedOrUnavailableCode(nuint result)
+        => result is
+            CkrFunctionNotSupported or
+            CkrKeyTypeInconsistent or
+            CkrKeyUnwrappable or
+            CkrKeyFunctionNotPermitted or
+            CkrMechanismInvalid or
+            CkrMechanismParamInvalid or
+            CkrOperationNotInitialized;
 
     private static byte[] GetRequiredAttributeBytes(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType)
     {
@@ -1141,7 +1825,7 @@ public sealed class SoftHsmCryptRegressionTests
         {
             session.DestroyObject(handle);
         }
-        catch (Pkcs11Exception ex) when (ex.Result.Value == 0x00000082u)
+        catch (Pkcs11Exception ex) when (ex.Result.Value == CkrObjectHandleInvalid)
         {
         }
     }

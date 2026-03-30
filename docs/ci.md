@@ -2,9 +2,16 @@
 
 ## Workflow
 
-`.github/workflows/ci.yml` defines a single `build-test-aot` job on `ubuntu-latest`.
+`.github/workflows/ci.yml` defines:
 
-The job runs on pushes to `main` and `master`, plus all pull requests.
+- `build-test-aot` (default SoftHSM lane)
+- `vendor-regression` (optional non-SoftHSM lane, manual dispatch only)
+
+Triggers:
+
+- push to `main` and `master`
+- all pull requests
+- `workflow_dispatch` with optional vendor-lane inputs
 
 Ordered steps:
 
@@ -39,6 +46,12 @@ Native AOT coverage from `eng/run-smoke-aot.sh` guarantees that:
 - the smoke binary still completes key runtime paths against the fixture
 - expected success lines remain present for login, encrypt/decrypt, sign/verify, object destroy, and logout
 
+Optional vendor regression coverage from `vendor-regression` guarantees that, when explicitly enabled and configured:
+
+- solution restore/build/test still works with a non-SoftHSM PKCS#11 backend
+- regression tests can run against pre-provisioned vendor token material
+- required runtime env contract is validated before tests start
+
 ## Fixture behavior in CI
 
 Both CI scripts create temporary fixture roots with `mktemp` and remove them on exit. CI does not depend on a pre-existing host token store or a checked-in SoftHSM configuration.
@@ -52,6 +65,39 @@ The fixture env contract comes from `eng/setup-softhsm-fixture.sh`, including:
 - `PKCS11_PROVISIONING_REGRESSION=1` for the opt-in `InitToken` test path
 
 The `InitToken` provisioning regression is still conditional on `PKCS11_SO_PIN`; the fixture script writes it, so CI satisfies that requirement.
+
+For the optional vendor lane, CI does not provision a fixture. The lane calls:
+
+```bash
+./eng/run-regression-tests.sh --use-existing-env
+```
+
+and expects the vendor token/module inputs to already be available via workflow config.
+
+## Optional vendor lane setup
+
+The vendor lane is opt-in and never runs on normal push/PR events.
+
+Enablement path:
+
+1. In GitHub repository settings, define Variables:
+   - `VENDOR_PKCS11_MODULE_PATH`
+   - `VENDOR_PKCS11_TOKEN_LABEL`
+   - `VENDOR_PKCS11_FIND_LABEL`
+   - `VENDOR_PKCS11_SIGN_FIND_LABEL`
+2. Define Secret:
+   - `VENDOR_PKCS11_USER_PIN`
+3. Optional Secret (only needed for provisioning/admin test paths):
+   - `VENDOR_PKCS11_SO_PIN`
+4. Run **Actions -> ci -> Run workflow** with:
+   - `run_vendor_lane=true`
+   - optional `vendor_dependency_install_command` if your module needs extra installation/runtime setup
+
+Guard behavior:
+
+- if `run_vendor_lane` is `false`, vendor lane is not scheduled
+- if `run_vendor_lane` is `true` but required config is missing, `vendor-regression` is skipped and `vendor-regression-config-missing` prints an informational message
+- default contributors do not need vendor secrets to run or contribute through standard PR CI
 
 ## Local CI parity
 
@@ -74,3 +120,14 @@ If you only need targeted troubleshooting:
 - run `dotnet run --project samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c Release`
 
 That manual flow uses the same env contract while giving you direct access to the temporary fixture.
+
+Local vendor-lane equivalent (pre-provisioned token/module, no SoftHSM fixture setup):
+
+```bash
+export PKCS11_MODULE_PATH='/path/to/vendor-pkcs11.so'
+export PKCS11_TOKEN_LABEL='your-token-label'
+export PKCS11_USER_PIN='your-pin'
+export PKCS11_FIND_LABEL='existing-aes-label'
+export PKCS11_SIGN_FIND_LABEL='existing-rsa-label'
+./eng/run-regression-tests.sh --use-existing-env
+```

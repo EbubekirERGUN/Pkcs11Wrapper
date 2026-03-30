@@ -19,7 +19,10 @@ Mevcut wrapper ve dogrulama kapsaminda sunlar bulunur:
 - Multi-part encrypt/decrypt ve operation-state resume akislar
 - Sign/verify islemleri
 - Yonetimsel operasyonlar: `CloseAllSessions`, `InitPin`, `SetPin`, `InitToken`
+- Hata raporlama yuzeyi: taxonomy metadata (retryability ipucu dahil) ve ham `CK_RV` korunumu
 - Dogrulama varliklari: SoftHSM fixture provisioning, regression script'leri, NativeAOT smoke, GitHub Actions CI
+
+GitHub Actions tarafinda push/PR icin varsayilan yol SoftHSM olarak kalir; bakimcilar icin manuel tetiklenen opsiyonel bir vendor PKCS#11 regression lane de bulunur. Kurulum ayrintilari `docs/ci.md` icindedir.
 
 `InitToken` regression kapsami vardir; ancak provisioning odakli bu dogrulama, her genel calistirma senaryosunun zorunlu parcasi degil, opt-in bir yoldur.
 

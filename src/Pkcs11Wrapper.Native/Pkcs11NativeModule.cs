@@ -8,10 +8,18 @@ namespace Pkcs11Wrapper.Native;
 public sealed unsafe class Pkcs11NativeModule : IDisposable
 {
     private const nuint Pkcs11Ecdh1DeriveMechanism = 0x00001050u;
+    private const nuint Pkcs11AesGcmMechanism = 0x00001087u;
+    private const nuint Pkcs11RsaPkcsOaepMechanism = 0x00000009u;
+    private const nuint Pkcs11RsaPkcsPssMechanism = 0x0000000du;
+    private const nuint Pkcs11Sha1RsaPkcsPssMechanism = 0x0000000eu;
+    private const nuint Pkcs11Sha256RsaPkcsPssMechanism = 0x00000043u;
+    private const nuint Pkcs11Sha384RsaPkcsPssMechanism = 0x00000044u;
+    private const nuint Pkcs11Sha512RsaPkcsPssMechanism = 0x00000045u;
     private readonly nint _handle;
     private readonly CK_FUNCTION_LIST* _functionList;
-    private bool _disposed;
-    private bool _isInitialized;
+    private readonly object _lifecycleSync = new();
+    private volatile bool _disposed;
+    private volatile bool _isInitialized;
     private bool _ownsInitialization;
 
     private Pkcs11NativeModule(nint handle, CK_FUNCTION_LIST* functionList)
@@ -66,47 +74,53 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
     public void Initialize()
     {
-        EnsureNotDisposed();
-
-        if (_isInitialized)
+        lock (_lifecycleSync)
         {
-            return;
-        }
+            EnsureNotDisposed();
 
-        if (FunctionList->C_Initialize is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_Initialize.");
-        }
+            if (_isInitialized)
+            {
+                return;
+            }
 
-        CK_RV result = FunctionList->C_Initialize(null);
-        if (result == Pkcs11ReturnValues.CryptokiAlreadyInitialized)
-        {
+            if (FunctionList->C_Initialize is null)
+            {
+                throw new InvalidOperationException("The PKCS#11 function list does not expose C_Initialize.");
+            }
+
+            CK_RV result = FunctionList->C_Initialize(null);
+            if (result == Pkcs11ReturnValues.CryptokiAlreadyInitialized)
+            {
+                _isInitialized = true;
+                _ownsInitialization = false;
+                return;
+            }
+
+            ThrowIfFailed(result, "C_Initialize");
             _isInitialized = true;
-            _ownsInitialization = false;
-            return;
+            _ownsInitialization = true;
         }
-
-        ThrowIfFailed(result, "C_Initialize");
-        _isInitialized = true;
-        _ownsInitialization = true;
     }
 
     public void FinalizeModule()
     {
-        EnsureNotDisposed();
-
-        if (!_isInitialized)
+        lock (_lifecycleSync)
         {
-            return;
-        }
+            EnsureNotDisposed();
 
-        if (_ownsInitialization)
-        {
-            InvokeFinalize();
-        }
+            if (!_isInitialized)
+            {
+                return;
+            }
 
-        _isInitialized = false;
-        _ownsInitialization = false;
+            if (_ownsInitialization)
+            {
+                InvokeFinalize();
+            }
+
+            _isInitialized = false;
+            _ownsInitialization = false;
+        }
     }
 
     public CK_INFO GetInfo()
@@ -663,6 +677,34 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         return objectHandle;
     }
 
+    public CK_OBJECT_HANDLE CopyObject(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE sourceObjectHandle, ReadOnlySpan<CK_ATTRIBUTE> template)
+    {
+        EnsureInitialized();
+
+        if (FunctionList->C_CopyObject is null)
+        {
+            throw new InvalidOperationException("The PKCS#11 function list does not expose C_CopyObject.");
+        }
+
+        CK_OBJECT_HANDLE objectHandle = default;
+        CK_RV result;
+
+        if (template.IsEmpty)
+        {
+            result = FunctionList->C_CopyObject(sessionHandle, sourceObjectHandle, null, 0, &objectHandle);
+        }
+        else
+        {
+            fixed (CK_ATTRIBUTE* templatePointer = template)
+            {
+                result = FunctionList->C_CopyObject(sessionHandle, sourceObjectHandle, templatePointer, (CK_ULONG)(nuint)template.Length, &objectHandle);
+            }
+        }
+
+        ThrowIfFailed(result, "C_CopyObject");
+        return objectHandle;
+    }
+
     public void SetAttributeValue(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE objectHandle, ReadOnlySpan<CK_ATTRIBUTE> template)
     {
         EnsureInitialized();
@@ -714,7 +756,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         CK_OBJECT_HANDLE keyHandle = default;
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             CK_RV result;
 
             if (template.IsEmpty)
@@ -748,7 +790,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         CK_OBJECT_HANDLE privateKeyHandle = default;
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             fixed (CK_ATTRIBUTE* publicTemplatePointer = publicKeyTemplate)
             fixed (CK_ATTRIBUTE* privateTemplatePointer = privateKeyTemplate)
             {
@@ -781,7 +823,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         CK_ULONG wrappedKeyLength = default;
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             CK_RV result = FunctionList->C_WrapKey(sessionHandle, &mechanism, wrappingKeyHandle, keyHandle, null, &wrappedKeyLength);
             ThrowIfFailed(result, "C_WrapKey");
         }
@@ -803,7 +845,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         fixed (byte* wrappedKeyPointer = wrappedKey)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             CK_RV result = FunctionList->C_WrapKey(sessionHandle, &mechanism, wrappingKeyHandle, keyHandle, wrappedKey.IsEmpty ? null : wrappedKeyPointer, &wrappedKeyLength);
             if (result == Pkcs11ReturnValues.BufferTooSmall)
             {
@@ -832,7 +874,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         fixed (byte* wrappedKeyPointer = wrappedKey)
         fixed (CK_ATTRIBUTE* templatePointer = template)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             CK_RV result = FunctionList->C_UnwrapKey(
                 sessionHandle,
                 &mechanism,
@@ -862,8 +904,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         fixed (CK_ATTRIBUTE* templatePointer = template)
         {
-            CK_ECDH1_DERIVE_PARAMS ecdh1DeriveParams = default;
-            CK_MECHANISM mechanism = CreateDeriveMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out ecdh1DeriveParams);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             CK_RV result = FunctionList->C_DeriveKey(
                 sessionHandle,
                 &mechanism,
@@ -878,21 +919,56 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         return keyHandle;
     }
 
-    private static CK_MECHANISM CreateDeriveMechanism(CK_MECHANISM_TYPE mechanismType, byte* mechanismParameterPointer, int mechanismParameterLength, out CK_ECDH1_DERIVE_PARAMS ecdh1DeriveParams)
+    private static CK_MECHANISM CreateMechanism(CK_MECHANISM_TYPE mechanismType, byte* mechanismParameterPointer, int mechanismParameterLength, out MarshalledMechanismParameters marshalledMechanismParameters)
     {
-        if ((nuint)mechanismType.Value != Pkcs11Ecdh1DeriveMechanism)
+        marshalledMechanismParameters = default;
+        nuint mechanismValue = (nuint)mechanismType.Value;
+
+        if (mechanismValue == Pkcs11Ecdh1DeriveMechanism)
         {
-            ecdh1DeriveParams = default;
-            return CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameterLength);
+            marshalledMechanismParameters.Ecdh1DeriveParams = CreateEcdh1DeriveParams(mechanismParameterPointer, mechanismParameterLength);
+            return new CK_MECHANISM
+            {
+                Mechanism = mechanismType,
+                Parameter = Unsafe.AsPointer(ref marshalledMechanismParameters.Ecdh1DeriveParams),
+                ParameterLength = (CK_ULONG)(nuint)sizeof(CK_ECDH1_DERIVE_PARAMS),
+            };
         }
 
-        ecdh1DeriveParams = CreateEcdh1DeriveParams(mechanismParameterPointer, mechanismParameterLength);
-        return new CK_MECHANISM
+        if (mechanismValue == Pkcs11AesGcmMechanism)
         {
-            Mechanism = mechanismType,
-            Parameter = Unsafe.AsPointer(ref ecdh1DeriveParams),
-            ParameterLength = (CK_ULONG)(nuint)sizeof(CK_ECDH1_DERIVE_PARAMS),
-        };
+            marshalledMechanismParameters.GcmParams = CreateGcmParams(mechanismParameterPointer, mechanismParameterLength);
+            return new CK_MECHANISM
+            {
+                Mechanism = mechanismType,
+                Parameter = Unsafe.AsPointer(ref marshalledMechanismParameters.GcmParams),
+                ParameterLength = (CK_ULONG)(nuint)sizeof(CK_GCM_PARAMS),
+            };
+        }
+
+        if (mechanismValue == Pkcs11RsaPkcsOaepMechanism)
+        {
+            marshalledMechanismParameters.OaepParams = CreateRsaOaepParams(mechanismParameterPointer, mechanismParameterLength);
+            return new CK_MECHANISM
+            {
+                Mechanism = mechanismType,
+                Parameter = Unsafe.AsPointer(ref marshalledMechanismParameters.OaepParams),
+                ParameterLength = (CK_ULONG)(nuint)sizeof(CK_RSA_PKCS_OAEP_PARAMS),
+            };
+        }
+
+        if (mechanismValue is Pkcs11RsaPkcsPssMechanism or Pkcs11Sha1RsaPkcsPssMechanism or Pkcs11Sha256RsaPkcsPssMechanism or Pkcs11Sha384RsaPkcsPssMechanism or Pkcs11Sha512RsaPkcsPssMechanism)
+        {
+            marshalledMechanismParameters.PssParams = CreateRsaPssParams(mechanismParameterPointer, mechanismParameterLength);
+            return new CK_MECHANISM
+            {
+                Mechanism = mechanismType,
+                Parameter = Unsafe.AsPointer(ref marshalledMechanismParameters.PssParams),
+                ParameterLength = (CK_ULONG)(nuint)sizeof(CK_RSA_PKCS_PSS_PARAMS),
+            };
+        }
+
+        return CreateRawMechanism(mechanismType, mechanismParameterPointer, mechanismParameterLength);
     }
 
     public nuint GetObjectSize(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE objectHandle)
@@ -1005,6 +1081,19 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
             "C_Digest",
             "digest");
 
+    public void DigestKey(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle)
+    {
+        EnsureInitialized();
+
+        if (FunctionList->C_DigestKey is null)
+        {
+            throw new InvalidOperationException("The PKCS#11 function list does not expose C_DigestKey.");
+        }
+
+        CK_RV result = FunctionList->C_DigestKey(sessionHandle, keyHandle);
+        ThrowIfFailed(result, "C_DigestKey");
+    }
+
     public bool TrySign(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
         => TrySinglePartCrypt(
             sessionHandle,
@@ -1027,7 +1116,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             InitializeCryptOperation(sessionHandle, keyHandle, &mechanism, FunctionList->C_VerifyInit, "C_VerifyInit");
             return InvokeVerify(sessionHandle, data, signature, FunctionList->C_Verify, "C_Verify");
         }
@@ -1067,6 +1156,33 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
             out written,
             FunctionList->C_SignFinal,
             "C_SignFinal",
+            "signature");
+
+    public void SignRecoverInit(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
+        => InitializeMultiPartCryptOperation(
+            sessionHandle,
+            keyHandle,
+            mechanismType,
+            mechanismParameter,
+            FunctionList->C_SignRecoverInit,
+            "C_SignRecoverInit");
+
+    public int GetSignRecoverOutputLength(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> data)
+        => GetCryptInvokeOutputLength(
+            sessionHandle,
+            data,
+            FunctionList->C_SignRecover,
+            "C_SignRecover",
+            "signature");
+
+    public bool TrySignRecover(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
+        => TryCryptUpdate(
+            sessionHandle,
+            data,
+            signature,
+            out written,
+            FunctionList->C_SignRecover,
+            "C_SignRecover",
             "signature");
 
     public void VerifyInit(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
@@ -1126,6 +1242,33 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         ThrowIfFailed(result, "C_VerifyFinal");
         return true;
     }
+
+    public void VerifyRecoverInit(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
+        => InitializeMultiPartCryptOperation(
+            sessionHandle,
+            keyHandle,
+            mechanismType,
+            mechanismParameter,
+            FunctionList->C_VerifyRecoverInit,
+            "C_VerifyRecoverInit");
+
+    public int GetVerifyRecoverOutputLength(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> signature)
+        => GetCryptInvokeOutputLength(
+            sessionHandle,
+            signature,
+            FunctionList->C_VerifyRecover,
+            "C_VerifyRecover",
+            "recovered data length");
+
+    public bool TryVerifyRecover(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> signature, Span<byte> data, out int written)
+        => TryCryptUpdate(
+            sessionHandle,
+            signature,
+            data,
+            out written,
+            FunctionList->C_VerifyRecover,
+            "C_VerifyRecover",
+            "recovered data");
 
     public void DigestInit(CK_SESSION_HANDLE sessionHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
         => InitializeMultiPartDigestOperation(
@@ -1187,6 +1330,68 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         ThrowIfFailed(result, "C_GenerateRandom");
     }
 
+    public void SeedRandom(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> seed)
+    {
+        EnsureInitialized();
+
+        if (FunctionList->C_SeedRandom is null)
+        {
+            throw new InvalidOperationException("The PKCS#11 function list does not expose C_SeedRandom.");
+        }
+
+        CK_RV result;
+        if (seed.IsEmpty)
+        {
+            result = FunctionList->C_SeedRandom(sessionHandle, null, 0);
+        }
+        else
+        {
+            fixed (byte* seedPointer = seed)
+            {
+                result = FunctionList->C_SeedRandom(sessionHandle, seedPointer, (CK_ULONG)(nuint)seed.Length);
+            }
+        }
+
+        ThrowIfFailed(result, "C_SeedRandom");
+    }
+
+    public CK_SLOT_ID WaitForSlotEvent()
+    {
+        EnsureInitialized();
+
+        if (FunctionList->C_WaitForSlotEvent is null)
+        {
+            throw new InvalidOperationException("The PKCS#11 function list does not expose C_WaitForSlotEvent.");
+        }
+
+        CK_SLOT_ID slotId = default;
+        CK_RV result = FunctionList->C_WaitForSlotEvent(new CK_FLAGS(0), &slotId, null);
+        ThrowIfFailed(result, "C_WaitForSlotEvent");
+        return slotId;
+    }
+
+    public bool TryWaitForSlotEvent(out CK_SLOT_ID slotId)
+    {
+        EnsureInitialized();
+
+        if (FunctionList->C_WaitForSlotEvent is null)
+        {
+            throw new InvalidOperationException("The PKCS#11 function list does not expose C_WaitForSlotEvent.");
+        }
+
+        CK_SLOT_ID nativeSlotId = default;
+        CK_RV result = FunctionList->C_WaitForSlotEvent(new CK_FLAGS(Pkcs11SlotEventFlags.DontBlock), &nativeSlotId, null);
+        if (result == Pkcs11ReturnValues.NoEvent)
+        {
+            slotId = default;
+            return false;
+        }
+
+        ThrowIfFailed(result, "C_WaitForSlotEvent");
+        slotId = nativeSlotId;
+        return true;
+    }
+
     public void EncryptInit(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter)
         => InitializeMultiPartCryptOperation(
             sessionHandle,
@@ -1205,6 +1410,26 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
             FunctionList->C_EncryptUpdate,
             "C_EncryptUpdate",
             "encrypted output");
+
+    public bool TryDigestEncryptUpdate(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> input, Span<byte> output, out int written)
+        => TryCryptUpdate(
+            sessionHandle,
+            input,
+            output,
+            out written,
+            FunctionList->C_DigestEncryptUpdate,
+            "C_DigestEncryptUpdate",
+            "digested and encrypted output");
+
+    public bool TrySignEncryptUpdate(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> input, Span<byte> output, out int written)
+        => TryCryptUpdate(
+            sessionHandle,
+            input,
+            output,
+            out written,
+            FunctionList->C_SignEncryptUpdate,
+            "C_SignEncryptUpdate",
+            "signed and encrypted output");
 
     public bool TryEncryptFinal(CK_SESSION_HANDLE sessionHandle, Span<byte> output, out int written)
         => TryCryptFinal(
@@ -1233,6 +1458,26 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
             FunctionList->C_DecryptUpdate,
             "C_DecryptUpdate",
             "decrypted output");
+
+    public bool TryDecryptDigestUpdate(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> input, Span<byte> output, out int written)
+        => TryCryptUpdate(
+            sessionHandle,
+            input,
+            output,
+            out written,
+            FunctionList->C_DecryptDigestUpdate,
+            "C_DecryptDigestUpdate",
+            "decrypted and digested output");
+
+    public bool TryDecryptVerifyUpdate(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> input, Span<byte> output, out int written)
+        => TryCryptUpdate(
+            sessionHandle,
+            input,
+            output,
+            out written,
+            FunctionList->C_DecryptVerifyUpdate,
+            "C_DecryptVerifyUpdate",
+            "decrypted and verified output");
 
     public bool TryDecryptFinal(CK_SESSION_HANDLE sessionHandle, Span<byte> output, out int written)
         => TryCryptFinal(
@@ -1320,30 +1565,34 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (_lifecycleSync)
         {
-            return;
-        }
-
-        try
-        {
-            if (_isInitialized && _ownsInitialization)
+            if (_disposed)
             {
-                try
+                return;
+            }
+
+            _disposed = true;
+
+            try
+            {
+                if (_isInitialized && _ownsInitialization)
                 {
-                    InvokeFinalize();
-                }
-                catch (Pkcs11Exception)
-                {
+                    try
+                    {
+                        InvokeFinalize();
+                    }
+                    catch (Pkcs11Exception)
+                    {
+                    }
                 }
             }
-        }
-        finally
-        {
-            _isInitialized = false;
-            _ownsInitialization = false;
-            NativeLibrary.Free(_handle);
-            _disposed = true;
+            finally
+            {
+                _isInitialized = false;
+                _ownsInitialization = false;
+                NativeLibrary.Free(_handle);
+            }
         }
     }
 
@@ -1421,7 +1670,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             InitializeCryptOperation(sessionHandle, keyHandle, &mechanism, init, initOperation);
             InvokeCrypt(sessionHandle, input, null, &outputLength, invoke, invokeOperation);
             DrainActiveCryptOperation(sessionHandle, input, outputLength, invoke, invokeOperation, outputName);
@@ -1448,7 +1697,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             InitializeMechanismOperation(sessionHandle, &mechanism, init, initOperation);
             InvokeCrypt(sessionHandle, input, null, &outputLength, invoke, invokeOperation);
             DrainActiveCryptOperation(sessionHandle, input, outputLength, invoke, invokeOperation, outputName);
@@ -1476,7 +1725,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             InitializeCryptOperation(sessionHandle, keyHandle, &mechanism, init, initOperation);
 
             CK_ULONG outputLength = (CK_ULONG)(nuint)output.Length;
@@ -1519,7 +1768,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             InitializeMechanismOperation(sessionHandle, &mechanism, init, initOperation);
 
             CK_ULONG outputLength = (CK_ULONG)(nuint)output.Length;
@@ -1544,13 +1793,95 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         }
     }
 
-    private static CK_MECHANISM CreateMechanism(CK_MECHANISM_TYPE mechanismType, byte* mechanismParameterPointer, int mechanismParameterLength)
+    private static CK_MECHANISM CreateRawMechanism(CK_MECHANISM_TYPE mechanismType, byte* mechanismParameterPointer, int mechanismParameterLength)
         => new()
         {
             Mechanism = mechanismType,
             Parameter = mechanismParameterLength == 0 ? null : mechanismParameterPointer,
             ParameterLength = (CK_ULONG)(nuint)mechanismParameterLength,
         };
+
+    private static CK_GCM_PARAMS CreateGcmParams(byte* mechanismParameterPointer, int mechanismParameterLength)
+    {
+        int headerLength = IntPtr.Size * 4;
+        if (mechanismParameterLength < headerLength)
+        {
+            throw new ArgumentException("CKM_AES_GCM parameters are incomplete.", nameof(mechanismParameterLength));
+        }
+
+        ReadOnlySpan<byte> parameter = new(mechanismParameterPointer, mechanismParameterLength);
+        nuint ivLength = ReadPackedNuint(parameter);
+        nuint ivBits = ReadPackedNuint(parameter[IntPtr.Size..]);
+        nuint aadLength = ReadPackedNuint(parameter[(IntPtr.Size * 2)..]);
+        nuint tagBits = ReadPackedNuint(parameter[(IntPtr.Size * 3)..]);
+        nuint payloadLength = ivLength + aadLength;
+
+        if (payloadLength > (nuint)(mechanismParameterLength - headerLength))
+        {
+            throw new ArgumentException("CKM_AES_GCM parameter payload is truncated.", nameof(mechanismParameterLength));
+        }
+
+        byte* payloadPointer = mechanismParameterPointer + headerLength;
+        byte* ivPointer = ivLength == 0 ? null : payloadPointer;
+        byte* aadPointer = aadLength == 0 ? null : payloadPointer + (int)ivLength;
+
+        return new CK_GCM_PARAMS
+        {
+            Iv = ivPointer,
+            IvLen = (CK_ULONG)ivLength,
+            IvBits = (CK_ULONG)ivBits,
+            Aad = aadPointer,
+            AadLen = (CK_ULONG)aadLength,
+            TagBits = (CK_ULONG)tagBits,
+        };
+    }
+
+    private static CK_RSA_PKCS_OAEP_PARAMS CreateRsaOaepParams(byte* mechanismParameterPointer, int mechanismParameterLength)
+    {
+        int headerLength = IntPtr.Size * 4;
+        if (mechanismParameterLength < headerLength)
+        {
+            throw new ArgumentException("CKM_RSA_PKCS_OAEP parameters are incomplete.", nameof(mechanismParameterLength));
+        }
+
+        ReadOnlySpan<byte> parameter = new(mechanismParameterPointer, mechanismParameterLength);
+        nuint hashAlgorithm = ReadPackedNuint(parameter);
+        nuint mgf = ReadPackedNuint(parameter[IntPtr.Size..]);
+        nuint source = ReadPackedNuint(parameter[(IntPtr.Size * 2)..]);
+        nuint sourceDataLength = ReadPackedNuint(parameter[(IntPtr.Size * 3)..]);
+
+        if (sourceDataLength > (nuint)(mechanismParameterLength - headerLength))
+        {
+            throw new ArgumentException("CKM_RSA_PKCS_OAEP parameter payload is truncated.", nameof(mechanismParameterLength));
+        }
+
+        byte* payloadPointer = mechanismParameterPointer + headerLength;
+        return new CK_RSA_PKCS_OAEP_PARAMS
+        {
+            HashAlg = new CK_MECHANISM_TYPE(hashAlgorithm),
+            Mgf = new CK_RSA_PKCS_MGF_TYPE(mgf),
+            Source = new CK_RSA_PKCS_OAEP_SOURCE_TYPE(source),
+            SourceData = sourceDataLength == 0 ? null : payloadPointer,
+            SourceDataLen = (CK_ULONG)sourceDataLength,
+        };
+    }
+
+    private static CK_RSA_PKCS_PSS_PARAMS CreateRsaPssParams(byte* mechanismParameterPointer, int mechanismParameterLength)
+    {
+        int expectedLength = IntPtr.Size * 3;
+        if (mechanismParameterLength < expectedLength)
+        {
+            throw new ArgumentException("CKM_RSA_PKCS_PSS parameters are incomplete.", nameof(mechanismParameterLength));
+        }
+
+        ReadOnlySpan<byte> parameter = new(mechanismParameterPointer, mechanismParameterLength);
+        return new CK_RSA_PKCS_PSS_PARAMS
+        {
+            HashAlg = new CK_MECHANISM_TYPE(ReadPackedNuint(parameter)),
+            Mgf = new CK_RSA_PKCS_MGF_TYPE(ReadPackedNuint(parameter[IntPtr.Size..])),
+            SaltLen = (CK_ULONG)ReadPackedNuint(parameter[(IntPtr.Size * 2)..]),
+        };
+    }
 
     private static CK_ECDH1_DERIVE_PARAMS CreateEcdh1DeriveParams(byte* mechanismParameterPointer, int mechanismParameterLength)
     {
@@ -1605,7 +1936,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             InitializeCryptOperation(sessionHandle, keyHandle, &mechanism, init, initOperation);
         }
     }
@@ -1626,7 +1957,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
         fixed (byte* mechanismParameterPointer = mechanismParameter)
         {
-            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length);
+            CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
             InitializeMechanismOperation(sessionHandle, &mechanism, init, initOperation);
         }
     }
@@ -1736,6 +2067,35 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         ThrowIfFailed(result, finalOperation);
         written = ToInt32Checked(outputLength, outputName);
         return true;
+    }
+
+    private int GetCryptInvokeOutputLength(
+        CK_SESSION_HANDLE sessionHandle,
+        ReadOnlySpan<byte> input,
+        delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke,
+        string invokeOperation,
+        string outputName)
+    {
+        EnsureUpdateFunction(invoke, invokeOperation);
+
+        CK_ULONG outputLength = default;
+        CK_RV result;
+
+        if (input.IsEmpty)
+        {
+            result = invoke(sessionHandle, null, 0, null, &outputLength);
+        }
+        else
+        {
+            fixed (byte* inputPointer = input)
+            {
+                result = invoke(sessionHandle, inputPointer, (CK_ULONG)(nuint)input.Length, null, &outputLength);
+            }
+        }
+
+        ThrowIfFailed(result, invokeOperation);
+        DrainActiveCryptOperation(sessionHandle, input, outputLength, invoke, invokeOperation, outputName);
+        return ToInt32Checked(outputLength, outputName);
     }
 
     private static void EnsureCryptFunctions(
@@ -1922,10 +2282,24 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         }
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MarshalledMechanismParameters
+    {
+        public CK_ECDH1_DERIVE_PARAMS Ecdh1DeriveParams;
+        public CK_GCM_PARAMS GcmParams;
+        public CK_RSA_PKCS_OAEP_PARAMS OaepParams;
+        public CK_RSA_PKCS_PSS_PARAMS PssParams;
+    }
+
     private static class Pkcs11SessionFlags
     {
         public const nuint ReadWriteSession = 0x00000002u;
         public const nuint SerialSession = 0x00000004u;
+    }
+
+    private static class Pkcs11SlotEventFlags
+    {
+        public const nuint DontBlock = 0x00000001u;
     }
 
     private static int ToInt32Checked(CK_ULONG value, string name)
@@ -1955,7 +2329,8 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         if (!result.IsSuccess)
         {
-            throw new Pkcs11Exception(operation, result);
+            Pkcs11ErrorMetadata metadata = Pkcs11ReturnValueTaxonomy.Classify(result);
+            throw new Pkcs11Exception(operation, result, metadata);
         }
     }
 }

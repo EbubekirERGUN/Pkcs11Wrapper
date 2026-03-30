@@ -19,7 +19,10 @@ The current wrapper and validation surface covers:
 - Multipart encrypt/decrypt and operation-state resume paths
 - Sign/verify operations
 - Administrative operations: `CloseAllSessions`, `InitPin`, `SetPin`, `InitToken`
+- Error reporting with taxonomy metadata (including retryability hints) while preserving raw `CK_RV`
 - Validation assets: SoftHSM fixture provisioning, regression scripts, NativeAOT smoke, GitHub Actions CI
+
+GitHub Actions keeps SoftHSM as the default push/PR path and also provides an optional manual vendor PKCS#11 regression lane for maintainers. Setup details are in `docs/ci.md`.
 
 `InitToken` regression coverage exists, but provisioning-style validation remains opt-in rather than part of every generic runtime scenario.
 

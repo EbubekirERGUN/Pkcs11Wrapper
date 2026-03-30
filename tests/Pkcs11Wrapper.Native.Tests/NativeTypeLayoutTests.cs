@@ -20,6 +20,13 @@ public sealed class NativeTypeLayoutTests
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_MECHANISM_TYPE>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_OBJECT_HANDLE>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_MECHANISM>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_RSA_PKCS_MGF_TYPE>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_RSA_PKCS_OAEP_SOURCE_TYPE>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_GCM_PARAMS>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_RSA_PKCS_OAEP_PARAMS>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_RSA_PKCS_PSS_PARAMS>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_EC_KDF_TYPE>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_ECDH1_DERIVE_PARAMS>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_MECHANISM_INFO>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_VERSION>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_INFO>());
@@ -41,7 +48,14 @@ public sealed class NativeTypeLayoutTests
         Assert.Equal(IntPtr.Size, Unsafe.SizeOf<CK_USER_TYPE>());
         Assert.Equal(IntPtr.Size, Unsafe.SizeOf<CK_MECHANISM_TYPE>());
         Assert.Equal(IntPtr.Size, Unsafe.SizeOf<CK_OBJECT_HANDLE>());
+        Assert.Equal(IntPtr.Size, Unsafe.SizeOf<CK_RSA_PKCS_MGF_TYPE>());
+        Assert.Equal(IntPtr.Size, Unsafe.SizeOf<CK_RSA_PKCS_OAEP_SOURCE_TYPE>());
+        Assert.Equal(IntPtr.Size, Unsafe.SizeOf<CK_EC_KDF_TYPE>());
         Assert.Equal(3 * IntPtr.Size, Unsafe.SizeOf<CK_MECHANISM>());
+        Assert.Equal(6 * IntPtr.Size, Unsafe.SizeOf<CK_GCM_PARAMS>());
+        Assert.Equal(5 * IntPtr.Size, Unsafe.SizeOf<CK_RSA_PKCS_OAEP_PARAMS>());
+        Assert.Equal(3 * IntPtr.Size, Unsafe.SizeOf<CK_RSA_PKCS_PSS_PARAMS>());
+        Assert.Equal(5 * IntPtr.Size, Unsafe.SizeOf<CK_ECDH1_DERIVE_PARAMS>());
         Assert.Equal(3 * IntPtr.Size, Unsafe.SizeOf<CK_MECHANISM_INFO>());
         Assert.Equal(1, Unsafe.SizeOf<CK_BBOOL>());
     }

@@ -6,9 +6,22 @@ on:
       - main
       - master
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_vendor_lane:
+        description: Run optional vendor PKCS#11 regression lane
+        required: false
+        default: false
+        type: boolean
+      vendor_dependency_install_command:
+        description: Optional shell command to install vendor module dependencies
+        required: false
+        default: ""
+        type: string
 
 jobs:
   build-test-aot:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_vendor_lane }}
     runs-on: ubuntu-latest
     env:
       DOTNET_NOLOGO: true
@@ -40,3 +53,56 @@ jobs:
 
       - name: Native AOT smoke
         run: ./eng/run-smoke-aot.sh
+
+  vendor-regression:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vendor_lane && vars.VENDOR_PKCS11_MODULE_PATH != '' && vars.VENDOR_PKCS11_TOKEN_LABEL != '' && vars.VENDOR_PKCS11_FIND_LABEL != '' && vars.VENDOR_PKCS11_SIGN_FIND_LABEL != '' && secrets.VENDOR_PKCS11_USER_PIN != '' }}
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      CI: true
+      PKCS11_USE_EXISTING_ENV: "1"
+      PKCS11_STRICT_REQUIRED: "1"
+      PKCS11_MODULE_PATH: ${{ vars.VENDOR_PKCS11_MODULE_PATH }}
+      PKCS11_TOKEN_LABEL: ${{ vars.VENDOR_PKCS11_TOKEN_LABEL }}
+      PKCS11_FIND_LABEL: ${{ vars.VENDOR_PKCS11_FIND_LABEL }}
+      PKCS11_SIGN_FIND_LABEL: ${{ vars.VENDOR_PKCS11_SIGN_FIND_LABEL }}
+      PKCS11_USER_PIN: ${{ secrets.VENDOR_PKCS11_USER_PIN }}
+      PKCS11_SO_PIN: ${{ secrets.VENDOR_PKCS11_SO_PIN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install baseline native dependencies
+        run: sudo apt-get update && sudo apt-get install -y opensc
+
+      - name: Install vendor dependencies (optional)
+        if: ${{ inputs.vendor_dependency_install_command != '' }}
+        run: ${{ inputs.vendor_dependency_install_command }}
+
+      - name: Make engineering scripts executable
+        run: chmod +x eng/run-regression-tests.sh
+
+      - name: Restore
+        run: dotnet restore Pkcs11Wrapper.sln
+
+      - name: Build
+        run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore
+
+      - name: Vendor regression tests
+        run: ./eng/run-regression-tests.sh --use-existing-env
+
+  vendor-regression-config-missing:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vendor_lane && !(vars.VENDOR_PKCS11_MODULE_PATH != '' && vars.VENDOR_PKCS11_TOKEN_LABEL != '' && vars.VENDOR_PKCS11_FIND_LABEL != '' && vars.VENDOR_PKCS11_SIGN_FIND_LABEL != '' && secrets.VENDOR_PKCS11_USER_PIN != '') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vendor lane skipped because configuration is missing
+        run: |
+          echo 'Optional vendor lane was requested but required configuration is missing.'
+          echo 'Set repository Variables: VENDOR_PKCS11_MODULE_PATH, VENDOR_PKCS11_TOKEN_LABEL, VENDOR_PKCS11_FIND_LABEL, VENDOR_PKCS11_SIGN_FIND_LABEL.'
+          echo 'Set repository Secret: VENDOR_PKCS11_USER_PIN (and optional VENDOR_PKCS11_SO_PIN).'
