@@ -432,6 +432,24 @@ public readonly struct CK_RSA_PKCS_OAEP_SOURCE_TYPE : IEquatable<CK_RSA_PKCS_OAE
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public unsafe struct CK_AES_CTR_PARAMS
+{
+    public CK_ULONG CounterBits;
+    public fixed byte Cb[16];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CK_CCM_PARAMS
+{
+    public CK_ULONG DataLen;
+    public byte* Nonce;
+    public CK_ULONG NonceLen;
+    public byte* Aad;
+    public CK_ULONG AadLen;
+    public CK_ULONG MacLen;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public unsafe struct CK_GCM_PARAMS
 {
     public byte* Iv;
@@ -623,7 +641,19 @@ public unsafe struct CK_FUNCTION_LIST
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_MECHANISM*, CK_OBJECT_HANDLE, CK_ATTRIBUTE*, CK_ULONG, CK_OBJECT_HANDLE*, CK_RV> C_DeriveKey;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, CK_RV> C_SeedRandom;
     public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, byte*, CK_ULONG, CK_RV> C_GenerateRandom;
-    public void* C_GetFunctionStatus;
-    public void* C_CancelFunction;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_RV> C_GetFunctionStatus;
+    public delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, CK_RV> C_CancelFunction;
     public delegate* unmanaged[Cdecl]<CK_FLAGS, CK_SLOT_ID*, void*, CK_RV> C_WaitForSlotEvent;
+}
+
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CK_C_INITIALIZE_ARGS
+{
+    public delegate* unmanaged[Cdecl]<void**, CK_RV> CreateMutex;
+    public delegate* unmanaged[Cdecl]<void*, CK_RV> DestroyMutex;
+    public delegate* unmanaged[Cdecl]<void*, CK_RV> LockMutex;
+    public delegate* unmanaged[Cdecl]<void*, CK_RV> UnlockMutex;
+    public CK_FLAGS Flags;
+    public void* Reserved;
 }

@@ -10,9 +10,10 @@ namespace Pkcs11Wrapper;
 
 public sealed class Pkcs11Module : IDisposable
 {
-    private static readonly CK_RV BufferTooSmallResult = Pkcs11ResultCodes.BufferTooSmall;
-    private static readonly CK_RV AttributeSensitiveResult = Pkcs11ResultCodes.AttributeSensitive;
-    private static readonly CK_RV AttributeTypeInvalidResult = Pkcs11ResultCodes.AttributeTypeInvalid;
+    private const Pkcs11InitializeFlags SupportedInitializeFlags =
+        Pkcs11InitializeFlags.LibraryCannotCreateOsThreads |
+        Pkcs11InitializeFlags.UseOperatingSystemLocking;
+
     private readonly Pkcs11NativeModule _nativeModule;
     private readonly object _lifecycleSync = new();
     private readonly object _sessionStateLock = new();
@@ -24,14 +25,54 @@ public sealed class Pkcs11Module : IDisposable
 
     public CK_VERSION CryptokiVersion => _nativeModule.CryptokiVersion;
 
+    public CK_VERSION FunctionListVersion => _nativeModule.FunctionListVersion;
+
     public static Pkcs11Module Load(string libraryPath) => new(Pkcs11NativeModule.Load(libraryPath));
 
-    public void Initialize()
+    public void Initialize() => Initialize(default);
+
+    public unsafe void Initialize(Pkcs11InitializeOptions options)
     {
         lock (_lifecycleSync)
         {
             ThrowIfDisposed();
-            _nativeModule.Initialize();
+
+            if (_nativeModule.IsInitialized)
+            {
+                return;
+            }
+
+            ValidateInitializeOptions(options);
+            if (options.Flags == Pkcs11InitializeFlags.None && options.MutexCallbacks.IsEmpty)
+            {
+                _nativeModule.Initialize();
+                return;
+            }
+
+            CK_C_INITIALIZE_ARGS initializeArgs = new()
+            {
+                CreateMutex = options.MutexCallbacks.CreateMutex,
+                DestroyMutex = options.MutexCallbacks.DestroyMutex,
+                LockMutex = options.MutexCallbacks.LockMutex,
+                UnlockMutex = options.MutexCallbacks.UnlockMutex,
+                Flags = (CK_FLAGS)(nuint)(ulong)options.Flags,
+                Reserved = null
+            };
+
+            _nativeModule.Initialize(&initializeArgs);
+        }
+    }
+
+    private static void ValidateInitializeOptions(Pkcs11InitializeOptions options)
+    {
+        if ((options.Flags & ~SupportedInitializeFlags) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), options.Flags, "Unsupported PKCS#11 initialize flags were supplied.");
+        }
+
+        if (!options.MutexCallbacks.IsEmpty && !options.MutexCallbacks.IsComplete)
+        {
+            throw new ArgumentException("Mutex callbacks must be omitted or supplied as a complete set.", nameof(options));
         }
     }
 
@@ -308,175 +349,55 @@ public sealed class Pkcs11Module : IDisposable
         return success;
     }
 
-    internal unsafe Pkcs11ObjectHandle CreateObject(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+    internal Pkcs11ObjectHandle CreateObject(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
 
-        CK_ATTRIBUTE[]? rentedTemplate = null;
-        byte[]? rentedValueBuffer = null;
-        int totalValueLength = GetTotalAttributeValueLength(attributes);
-
-        Span<CK_ATTRIBUTE> template = attributes.Length <= 8
-            ? stackalloc CK_ATTRIBUTE[attributes.Length]
-            : (rentedTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(attributes.Length));
-
-        Span<byte> valueBuffer = totalValueLength <= 256
-            ? stackalloc byte[totalValueLength]
-            : (rentedValueBuffer = ArrayPool<byte>.Shared.Rent(totalValueLength));
-
-        try
-        {
-            fixed (byte* valueBufferPointer = valueBuffer)
-            {
-                PopulateAttributeTemplate(attributes, template, valueBufferPointer);
-                return new Pkcs11ObjectHandle((nuint)_nativeModule.CreateObject(sessionHandle, template[..attributes.Length]).Value);
-            }
-        }
-        finally
-        {
-            ReturnPackedAttributeTemplate(rentedTemplate, rentedValueBuffer, totalValueLength);
-        }
+        using PackedAttributeTemplate packedTemplate = PackedAttributeTemplate.Create(attributes);
+        return new Pkcs11ObjectHandle((nuint)_nativeModule.CreateObject(sessionHandle, packedTemplate.Template).Value);
     }
 
-    internal unsafe Pkcs11ObjectHandle CopyObject(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle sourceObjectHandle, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+    internal Pkcs11ObjectHandle CopyObject(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle sourceObjectHandle, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
 
-        CK_ATTRIBUTE[]? rentedTemplate = null;
-        byte[]? rentedValueBuffer = null;
-        int totalValueLength = GetTotalAttributeValueLength(attributes);
-
-        Span<CK_ATTRIBUTE> template = attributes.Length <= 8
-            ? stackalloc CK_ATTRIBUTE[attributes.Length]
-            : (rentedTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(attributes.Length));
-
-        Span<byte> valueBuffer = totalValueLength <= 256
-            ? stackalloc byte[totalValueLength]
-            : (rentedValueBuffer = ArrayPool<byte>.Shared.Rent(totalValueLength));
-
-        try
-        {
-            fixed (byte* valueBufferPointer = valueBuffer)
-            {
-                PopulateAttributeTemplate(attributes, template, valueBufferPointer);
-                return new Pkcs11ObjectHandle((nuint)_nativeModule.CopyObject(sessionHandle, sourceObjectHandle.NativeValue, template[..attributes.Length]).Value);
-            }
-        }
-        finally
-        {
-            ReturnPackedAttributeTemplate(rentedTemplate, rentedValueBuffer, totalValueLength);
-        }
+        using PackedAttributeTemplate packedTemplate = PackedAttributeTemplate.Create(attributes);
+        return new Pkcs11ObjectHandle((nuint)_nativeModule.CopyObject(sessionHandle, sourceObjectHandle.NativeValue, packedTemplate.Template).Value);
     }
 
-    internal unsafe void SetAttributeValue(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle objectHandle, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+    internal void SetAttributeValue(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle objectHandle, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
 
-        CK_ATTRIBUTE[]? rentedTemplate = null;
-        byte[]? rentedValueBuffer = null;
-        int totalValueLength = GetTotalAttributeValueLength(attributes);
-
-        Span<CK_ATTRIBUTE> template = attributes.Length <= 8
-            ? stackalloc CK_ATTRIBUTE[attributes.Length]
-            : (rentedTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(attributes.Length));
-
-        Span<byte> valueBuffer = totalValueLength <= 256
-            ? stackalloc byte[totalValueLength]
-            : (rentedValueBuffer = ArrayPool<byte>.Shared.Rent(totalValueLength));
-
-        try
-        {
-            fixed (byte* valueBufferPointer = valueBuffer)
-            {
-                PopulateAttributeTemplate(attributes, template, valueBufferPointer);
-                _nativeModule.SetAttributeValue(sessionHandle, objectHandle.NativeValue, template[..attributes.Length]);
-            }
-        }
-        finally
-        {
-            ReturnPackedAttributeTemplate(rentedTemplate, rentedValueBuffer, totalValueLength);
-        }
+        using PackedAttributeTemplate packedTemplate = PackedAttributeTemplate.Create(attributes);
+        _nativeModule.SetAttributeValue(sessionHandle, objectHandle.NativeValue, packedTemplate.Template);
     }
 
-    internal unsafe Pkcs11ObjectHandle GenerateKey(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11Mechanism mechanism, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+    internal Pkcs11ObjectHandle GenerateKey(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11Mechanism mechanism, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
 
-        CK_ATTRIBUTE[]? rentedTemplate = null;
-        byte[]? rentedValueBuffer = null;
-        int totalValueLength = GetTotalAttributeValueLength(attributes);
-
-        Span<CK_ATTRIBUTE> template = attributes.Length <= 8
-            ? stackalloc CK_ATTRIBUTE[attributes.Length]
-            : (rentedTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(attributes.Length));
-
-        Span<byte> valueBuffer = totalValueLength <= 256
-            ? stackalloc byte[totalValueLength]
-            : (rentedValueBuffer = ArrayPool<byte>.Shared.Rent(totalValueLength));
-
-        try
-        {
-            fixed (byte* valueBufferPointer = valueBuffer)
-            {
-                PopulateAttributeTemplate(attributes, template, valueBufferPointer);
-                return new Pkcs11ObjectHandle((nuint)_nativeModule.GenerateKey(sessionHandle, mechanism.Type.NativeValue, mechanism.Parameter, template[..attributes.Length]).Value);
-            }
-        }
-        finally
-        {
-            ReturnPackedAttributeTemplate(rentedTemplate, rentedValueBuffer, totalValueLength);
-        }
+        using PackedAttributeTemplate packedTemplate = PackedAttributeTemplate.Create(attributes);
+        return new Pkcs11ObjectHandle((nuint)_nativeModule.GenerateKey(sessionHandle, mechanism.Type.NativeValue, mechanism.Parameter, packedTemplate.Template).Value);
     }
 
-    internal unsafe Pkcs11GeneratedKeyPair GenerateKeyPair(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11Mechanism mechanism, ReadOnlySpan<Pkcs11ObjectAttribute> publicKeyAttributes, ReadOnlySpan<Pkcs11ObjectAttribute> privateKeyAttributes)
+    internal Pkcs11GeneratedKeyPair GenerateKeyPair(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11Mechanism mechanism, ReadOnlySpan<Pkcs11ObjectAttribute> publicKeyAttributes, ReadOnlySpan<Pkcs11ObjectAttribute> privateKeyAttributes)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
 
-        CK_ATTRIBUTE[]? rentedPublicTemplate = null;
-        byte[]? rentedPublicValueBuffer = null;
-        int publicValueLength = GetTotalAttributeValueLength(publicKeyAttributes);
-        Span<CK_ATTRIBUTE> publicTemplate = publicKeyAttributes.Length <= 8
-            ? stackalloc CK_ATTRIBUTE[publicKeyAttributes.Length]
-            : (rentedPublicTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(publicKeyAttributes.Length));
-        Span<byte> publicValueBuffer = publicValueLength <= 256
-            ? stackalloc byte[publicValueLength]
-            : (rentedPublicValueBuffer = ArrayPool<byte>.Shared.Rent(publicValueLength));
+        using PackedAttributeTemplate packedPublicTemplate = PackedAttributeTemplate.Create(publicKeyAttributes);
+        using PackedAttributeTemplate packedPrivateTemplate = PackedAttributeTemplate.Create(privateKeyAttributes);
 
-        CK_ATTRIBUTE[]? rentedPrivateTemplate = null;
-        byte[]? rentedPrivateValueBuffer = null;
-        int privateValueLength = GetTotalAttributeValueLength(privateKeyAttributes);
-        Span<CK_ATTRIBUTE> privateTemplate = privateKeyAttributes.Length <= 8
-            ? stackalloc CK_ATTRIBUTE[privateKeyAttributes.Length]
-            : (rentedPrivateTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(privateKeyAttributes.Length));
-        Span<byte> privateValueBuffer = privateValueLength <= 256
-            ? stackalloc byte[privateValueLength]
-            : (rentedPrivateValueBuffer = ArrayPool<byte>.Shared.Rent(privateValueLength));
+        (CK_OBJECT_HANDLE publicKeyHandle, CK_OBJECT_HANDLE privateKeyHandle) = _nativeModule.GenerateKeyPair(
+            sessionHandle,
+            mechanism.Type.NativeValue,
+            mechanism.Parameter,
+            packedPublicTemplate.Template,
+            packedPrivateTemplate.Template);
 
-        try
-        {
-            fixed (byte* publicValueBufferPointer = publicValueBuffer)
-            fixed (byte* privateValueBufferPointer = privateValueBuffer)
-            {
-                PopulateAttributeTemplate(publicKeyAttributes, publicTemplate, publicValueBufferPointer);
-                PopulateAttributeTemplate(privateKeyAttributes, privateTemplate, privateValueBufferPointer);
-
-                (CK_OBJECT_HANDLE publicKeyHandle, CK_OBJECT_HANDLE privateKeyHandle) = _nativeModule.GenerateKeyPair(
-                    sessionHandle,
-                    mechanism.Type.NativeValue,
-                    mechanism.Parameter,
-                    publicTemplate[..publicKeyAttributes.Length],
-                    privateTemplate[..privateKeyAttributes.Length]);
-
-                return new Pkcs11GeneratedKeyPair(
-                    new Pkcs11ObjectHandle((nuint)publicKeyHandle.Value),
-                    new Pkcs11ObjectHandle((nuint)privateKeyHandle.Value));
-            }
-        }
-        finally
-        {
-            ReturnPackedAttributeTemplate(rentedPrivateTemplate, rentedPrivateValueBuffer, privateValueLength);
-            ReturnPackedAttributeTemplate(rentedPublicTemplate, rentedPublicValueBuffer, publicValueLength);
-        }
+        return new Pkcs11GeneratedKeyPair(
+            new Pkcs11ObjectHandle((nuint)publicKeyHandle.Value),
+            new Pkcs11ObjectHandle((nuint)privateKeyHandle.Value));
     }
 
     internal int GetWrapOutputLength(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle wrappingKeyHandle, Pkcs11Mechanism mechanism, Pkcs11ObjectHandle keyHandle)
@@ -491,64 +412,20 @@ public sealed class Pkcs11Module : IDisposable
         return _nativeModule.TryWrapKey(sessionHandle, wrappingKeyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter, keyHandle.NativeValue, wrappedKey, out written);
     }
 
-    internal unsafe Pkcs11ObjectHandle UnwrapKey(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle unwrappingKeyHandle, Pkcs11Mechanism mechanism, ReadOnlySpan<byte> wrappedKey, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+    internal Pkcs11ObjectHandle UnwrapKey(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle unwrappingKeyHandle, Pkcs11Mechanism mechanism, ReadOnlySpan<byte> wrappedKey, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
 
-        CK_ATTRIBUTE[]? rentedTemplate = null;
-        byte[]? rentedValueBuffer = null;
-        int totalValueLength = GetTotalAttributeValueLength(attributes);
-
-        Span<CK_ATTRIBUTE> template = attributes.Length <= 8
-            ? stackalloc CK_ATTRIBUTE[attributes.Length]
-            : (rentedTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(attributes.Length));
-
-        Span<byte> valueBuffer = totalValueLength <= 256
-            ? stackalloc byte[totalValueLength]
-            : (rentedValueBuffer = ArrayPool<byte>.Shared.Rent(totalValueLength));
-
-        try
-        {
-            fixed (byte* valueBufferPointer = valueBuffer)
-            {
-                PopulateAttributeTemplate(attributes, template, valueBufferPointer);
-                return new Pkcs11ObjectHandle((nuint)_nativeModule.UnwrapKey(sessionHandle, unwrappingKeyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter, wrappedKey, template[..attributes.Length]).Value);
-            }
-        }
-        finally
-        {
-            ReturnPackedAttributeTemplate(rentedTemplate, rentedValueBuffer, totalValueLength);
-        }
+        using PackedAttributeTemplate packedTemplate = PackedAttributeTemplate.Create(attributes);
+        return new Pkcs11ObjectHandle((nuint)_nativeModule.UnwrapKey(sessionHandle, unwrappingKeyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter, wrappedKey, packedTemplate.Template).Value);
     }
 
-    internal unsafe Pkcs11ObjectHandle DeriveKey(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle baseKeyHandle, Pkcs11Mechanism mechanism, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+    internal Pkcs11ObjectHandle DeriveKey(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle baseKeyHandle, Pkcs11Mechanism mechanism, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);
 
-        CK_ATTRIBUTE[]? rentedTemplate = null;
-        byte[]? rentedValueBuffer = null;
-        int totalValueLength = GetTotalAttributeValueLength(attributes);
-
-        Span<CK_ATTRIBUTE> template = attributes.Length <= 8
-            ? stackalloc CK_ATTRIBUTE[attributes.Length]
-            : (rentedTemplate = ArrayPool<CK_ATTRIBUTE>.Shared.Rent(attributes.Length));
-
-        Span<byte> valueBuffer = totalValueLength <= 256
-            ? stackalloc byte[totalValueLength]
-            : (rentedValueBuffer = ArrayPool<byte>.Shared.Rent(totalValueLength));
-
-        try
-        {
-            fixed (byte* valueBufferPointer = valueBuffer)
-            {
-                PopulateAttributeTemplate(attributes, template, valueBufferPointer);
-                return new Pkcs11ObjectHandle((nuint)_nativeModule.DeriveKey(sessionHandle, baseKeyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter, template[..attributes.Length]).Value);
-            }
-        }
-        finally
-        {
-            ReturnPackedAttributeTemplate(rentedTemplate, rentedValueBuffer, totalValueLength);
-        }
+        using PackedAttributeTemplate packedTemplate = PackedAttributeTemplate.Create(attributes);
+        return new Pkcs11ObjectHandle((nuint)_nativeModule.DeriveKey(sessionHandle, baseKeyHandle.NativeValue, mechanism.Type.NativeValue, mechanism.Parameter, packedTemplate.Template).Value);
     }
 
     internal void DestroyObject(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle objectHandle)
@@ -807,6 +684,18 @@ public sealed class Pkcs11Module : IDisposable
             authenticationKeyHandle?.NativeValue ?? default);
     }
 
+    internal bool TryGetFunctionStatus(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryGetFunctionStatus(sessionHandle);
+    }
+
+    internal bool TryCancelFunction(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        return _nativeModule.TryCancelFunction(sessionHandle);
+    }
+
     internal void CloseSession(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration)
     {
         if (!CanUseSession(generation, slotId, slotGeneration))
@@ -882,20 +771,6 @@ public sealed class Pkcs11Module : IDisposable
         return total;
     }
 
-    private static void ReturnPackedAttributeTemplate(CK_ATTRIBUTE[]? rentedTemplate, byte[]? rentedValueBuffer, int totalValueLength)
-    {
-        if (rentedValueBuffer is not null)
-        {
-            CryptographicOperations.ZeroMemory(rentedValueBuffer.AsSpan(0, totalValueLength));
-            ArrayPool<byte>.Shared.Return(rentedValueBuffer);
-        }
-
-        if (rentedTemplate is not null)
-        {
-            ArrayPool<CK_ATTRIBUTE>.Shared.Return(rentedTemplate, clearArray: true);
-        }
-    }
-
     private static unsafe void PopulateAttributeTemplate(ReadOnlySpan<Pkcs11ObjectAttribute> attributes, Span<CK_ATTRIBUTE> template, byte* valueBufferPointer)
     {
         int valueOffset = 0;
@@ -919,24 +794,90 @@ public sealed class Pkcs11Module : IDisposable
 
     private static Pkcs11AttributeReadResult MapAttributeQueryResult(Pkcs11NativeAttributeQuery query)
     {
-        Pkcs11AttributeReadStatus status = query.Result switch
+        Pkcs11AttributeReadStatus status;
+        if (query.Result == CK_RV.Ok)
         {
-            var result when result == CK_RV.Ok && query.IsUnavailableInformation => Pkcs11AttributeReadStatus.UnavailableInformation,
-            var result when result == CK_RV.Ok => Pkcs11AttributeReadStatus.Success,
-            var result when result == BufferTooSmallResult => Pkcs11AttributeReadStatus.BufferTooSmall,
-            var result when result == AttributeSensitiveResult => Pkcs11AttributeReadStatus.Sensitive,
-            var result when result == AttributeTypeInvalidResult => Pkcs11AttributeReadStatus.TypeInvalid,
-            _ => throw new InvalidOperationException($"Unexpected PKCS#11 attribute query result {query.Result}.")
-        };
+            status = query.IsUnavailableInformation
+                ? Pkcs11AttributeReadStatus.UnavailableInformation
+                : Pkcs11AttributeReadStatus.Success;
+        }
+        else if (query.IsBufferTooSmall)
+        {
+            status = Pkcs11AttributeReadStatus.BufferTooSmall;
+        }
+        else if (query.IsAttributeSensitive)
+        {
+            status = Pkcs11AttributeReadStatus.Sensitive;
+        }
+        else if (query.IsAttributeTypeInvalid)
+        {
+            status = Pkcs11AttributeReadStatus.TypeInvalid;
+        }
+        else
+        {
+            throw new InvalidOperationException($"Unexpected PKCS#11 attribute query result {query.Result}.");
+        }
 
         return new Pkcs11AttributeReadResult(status, query.Length);
     }
 
-    private static class Pkcs11ResultCodes
+    private sealed class PackedAttributeTemplate : IDisposable
     {
-        public static readonly CK_RV BufferTooSmall = new(0x00000150u);
-        public static readonly CK_RV AttributeSensitive = new(0x00000011u);
-        public static readonly CK_RV AttributeTypeInvalid = new(0x00000012u);
+        private readonly CK_ATTRIBUTE[] _templateBuffer;
+        private readonly byte[] _valueBuffer;
+        private readonly bool _returnTemplateToPool;
+        private readonly bool _returnValueBufferToPool;
+        private readonly int _attributeCount;
+        private readonly int _valueLength;
+
+        private PackedAttributeTemplate(int attributeCount, int valueLength)
+        {
+            _attributeCount = attributeCount;
+            _valueLength = valueLength;
+
+            _returnTemplateToPool = attributeCount > 8;
+            _templateBuffer = _returnTemplateToPool
+                ? ArrayPool<CK_ATTRIBUTE>.Shared.Rent(attributeCount)
+                : new CK_ATTRIBUTE[attributeCount];
+
+            int valueBufferCapacity = Math.Max(valueLength, 1);
+            _returnValueBufferToPool = valueLength > 256;
+            _valueBuffer = _returnValueBufferToPool
+                ? ArrayPool<byte>.Shared.Rent(valueBufferCapacity)
+                : new byte[valueBufferCapacity];
+        }
+
+        public ReadOnlySpan<CK_ATTRIBUTE> Template => _templateBuffer.AsSpan(0, _attributeCount);
+
+        public static PackedAttributeTemplate Create(ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+        {
+            PackedAttributeTemplate packedTemplate = new(attributes.Length, GetTotalAttributeValueLength(attributes));
+            packedTemplate.Populate(attributes);
+            return packedTemplate;
+        }
+
+        public void Dispose()
+        {
+            CryptographicOperations.ZeroMemory(_valueBuffer.AsSpan(0, _valueLength));
+
+            if (_returnValueBufferToPool)
+            {
+                ArrayPool<byte>.Shared.Return(_valueBuffer);
+            }
+
+            if (_returnTemplateToPool)
+            {
+                ArrayPool<CK_ATTRIBUTE>.Shared.Return(_templateBuffer, clearArray: true);
+            }
+        }
+
+        private unsafe void Populate(ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
+        {
+            fixed (byte* valueBufferPointer = _valueBuffer)
+            {
+                PopulateAttributeTemplate(attributes, _templateBuffer.AsSpan(0, _attributeCount), valueBufferPointer);
+            }
+        }
     }
 }
 

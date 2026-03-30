@@ -112,10 +112,26 @@ public static class Pkcs11MechanismTypes
 {
     public static Pkcs11MechanismType RsaPkcsKeyPairGen => new(0x00000000u);
     public static Pkcs11MechanismType RsaPkcs => new(0x00000001u);
+    public static Pkcs11MechanismType RsaX509 => new(0x00000003u);
+    public static Pkcs11MechanismType Sha1RsaPkcs => new(0x00000006u);
     public static Pkcs11MechanismType RsaPkcsOaep => new(0x00000009u);
     public static Pkcs11MechanismType RsaPkcsPss => new(0x0000000du);
     public static Pkcs11MechanismType Sha1RsaPkcsPss => new(0x0000000eu);
+    public static Pkcs11MechanismType Sha256RsaPkcs => new(0x00000040u);
+    public static Pkcs11MechanismType Sha384RsaPkcs => new(0x00000041u);
+    public static Pkcs11MechanismType Sha512RsaPkcs => new(0x00000042u);
+    public static Pkcs11MechanismType Sha256RsaPkcsPss => new(0x00000043u);
+    public static Pkcs11MechanismType Sha384RsaPkcsPss => new(0x00000044u);
+    public static Pkcs11MechanismType Sha512RsaPkcsPss => new(0x00000045u);
+    public static Pkcs11MechanismType Sha224RsaPkcs => new(0x00000046u);
+    public static Pkcs11MechanismType Sha224RsaPkcsPss => new(0x00000047u);
     public static Pkcs11MechanismType EcKeyPairGen => new(0x00001040u);
+    public static Pkcs11MechanismType Ecdsa => new(0x00001041u);
+    public static Pkcs11MechanismType EcdsaSha1 => new(0x00001042u);
+    public static Pkcs11MechanismType EcdsaSha224 => new(0x00001045u);
+    public static Pkcs11MechanismType EcdsaSha256 => new(0x00001046u);
+    public static Pkcs11MechanismType EcdsaSha384 => new(0x00001047u);
+    public static Pkcs11MechanismType EcdsaSha512 => new(0x00001048u);
     public static Pkcs11MechanismType Ecdh1Derive => new(0x00001050u);
     public static Pkcs11MechanismType GenericSecretKeyGen => new(0x00000350u);
     public static Pkcs11MechanismType Sha1 => new(0x00000220u);
@@ -129,12 +145,11 @@ public static class Pkcs11MechanismTypes
     public static Pkcs11MechanismType Sha512 => new(0x00000270u);
     public static Pkcs11MechanismType Sha512Hmac => new(0x00000271u);
     public static Pkcs11MechanismType AesKeyGen => new(0x00001080u);
-    public static Pkcs11MechanismType AesGcm => new(0x00001087u);
+    public static Pkcs11MechanismType AesEcb => new(0x00001081u);
     public static Pkcs11MechanismType AesCbc => new(0x00001082u);
     public static Pkcs11MechanismType AesCbcPad => new(0x00001085u);
+    public static Pkcs11MechanismType AesCtr => new(0x00001086u);
+    public static Pkcs11MechanismType AesGcm => new(0x00001087u);
+    public static Pkcs11MechanismType AesCcm => new(0x00001088u);
     public static Pkcs11MechanismType AesKeyWrapPad => new(0x0000210au);
-    public static Pkcs11MechanismType Sha256RsaPkcs => new(0x00000040u);
-    public static Pkcs11MechanismType Sha256RsaPkcsPss => new(0x00000043u);
-    public static Pkcs11MechanismType Sha384RsaPkcsPss => new(0x00000044u);
-    public static Pkcs11MechanismType Sha512RsaPkcsPss => new(0x00000045u);
 }

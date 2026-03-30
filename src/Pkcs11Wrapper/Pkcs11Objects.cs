@@ -224,4 +224,93 @@ public readonly ref struct Pkcs11ObjectSearchParameters
     public bool? RequireWrap { get; }
 
     public bool? RequireUnwrap { get; }
+
+    public static Pkcs11ObjectSearchParametersBuilder CreateBuilder() => new();
+}
+
+public ref struct Pkcs11ObjectSearchParametersBuilder
+{
+    private ReadOnlySpan<byte> _label;
+    private ReadOnlySpan<byte> _id;
+    private Pkcs11ObjectClass? _objectClass;
+    private Pkcs11KeyType? _keyType;
+    private bool? _requireEncrypt;
+    private bool? _requireDecrypt;
+    private bool? _requireSign;
+    private bool? _requireVerify;
+    private bool? _requireWrap;
+    private bool? _requireUnwrap;
+
+    public Pkcs11ObjectSearchParametersBuilder WithLabel(ReadOnlySpan<byte> label)
+    {
+        _label = label;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder WithId(ReadOnlySpan<byte> id)
+    {
+        _id = id;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder WithObjectClass(Pkcs11ObjectClass objectClass)
+    {
+        _objectClass = objectClass;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder WithKeyType(Pkcs11KeyType keyType)
+    {
+        _keyType = keyType;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder RequireEncrypt(bool required = true)
+    {
+        _requireEncrypt = required;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder RequireDecrypt(bool required = true)
+    {
+        _requireDecrypt = required;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder RequireSign(bool required = true)
+    {
+        _requireSign = required;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder RequireVerify(bool required = true)
+    {
+        _requireVerify = required;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder RequireWrap(bool required = true)
+    {
+        _requireWrap = required;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParametersBuilder RequireUnwrap(bool required = true)
+    {
+        _requireUnwrap = required;
+        return this;
+    }
+
+    public Pkcs11ObjectSearchParameters Build()
+        => new(
+            label: _label,
+            id: _id,
+            objectClass: _objectClass,
+            keyType: _keyType,
+            requireEncrypt: _requireEncrypt,
+            requireDecrypt: _requireDecrypt,
+            requireSign: _requireSign,
+            requireVerify: _requireVerify,
+            requireWrap: _requireWrap,
+            requireUnwrap: _requireUnwrap);
 }

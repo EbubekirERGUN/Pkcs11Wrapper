@@ -50,6 +50,7 @@ public static class Pkcs11ReturnValueTaxonomy
         [Pkcs11ReturnValues.SessionHandleInvalid.Value] = new(Pkcs11ErrorCategory.ObjectHandle, false),
 
         [Pkcs11ReturnValues.FunctionNotSupported.Value] = new(Pkcs11ErrorCategory.Capability, false),
+        [Pkcs11ReturnValues.FunctionNotParallel.Value] = new(Pkcs11ErrorCategory.Capability, false),
         [Pkcs11ReturnValues.MechanismInvalid.Value] = new(Pkcs11ErrorCategory.Capability, false),
         [Pkcs11ReturnValues.KeyTypeInconsistent.Value] = new(Pkcs11ErrorCategory.Capability, false),
         [Pkcs11ReturnValues.KeyUnwrappable.Value] = new(Pkcs11ErrorCategory.Capability, false),

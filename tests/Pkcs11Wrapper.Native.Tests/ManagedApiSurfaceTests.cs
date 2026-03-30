@@ -19,6 +19,14 @@ public sealed class ManagedApiSurfaceTests
     }
 
     [Fact]
+    public void InitializeFlagsAndModuleOverloadMatchPkcs11Constants()
+    {
+        Assert.Equal(0x00000001ul, (ulong)Pkcs11InitializeFlags.LibraryCannotCreateOsThreads);
+        Assert.Equal(0x00000002ul, (ulong)Pkcs11InitializeFlags.UseOperatingSystemLocking);
+        Assert.NotNull(typeof(Pkcs11Module).GetMethod(nameof(Pkcs11Module.Initialize), [typeof(Pkcs11InitializeOptions)]));
+    }
+
+    [Fact]
     public void SlotIdExposesPointerSizedValue()
     {
         nuint nativeValue = (nuint)IntPtr.Size;
@@ -88,14 +96,26 @@ public sealed class ManagedApiSurfaceTests
         Assert.Equal((nuint)0x0000001fu, Pkcs11KeyTypes.Aes.Value);
         Assert.Equal((nuint)0x00000000u, Pkcs11MechanismTypes.RsaPkcsKeyPairGen.Value);
         Assert.Equal((nuint)0x00000001u, Pkcs11MechanismTypes.RsaPkcs.Value);
+        Assert.Equal((nuint)0x00000003u, Pkcs11MechanismTypes.RsaX509.Value);
+        Assert.Equal((nuint)0x00000006u, Pkcs11MechanismTypes.Sha1RsaPkcs.Value);
         Assert.Equal((nuint)0x00000009u, Pkcs11MechanismTypes.RsaPkcsOaep.Value);
         Assert.Equal((nuint)0x0000000du, Pkcs11MechanismTypes.RsaPkcsPss.Value);
         Assert.Equal((nuint)0x0000000eu, Pkcs11MechanismTypes.Sha1RsaPkcsPss.Value);
+        Assert.Equal((nuint)0x00000046u, Pkcs11MechanismTypes.Sha224RsaPkcs.Value);
+        Assert.Equal((nuint)0x00000047u, Pkcs11MechanismTypes.Sha224RsaPkcsPss.Value);
         Assert.Equal((nuint)0x00001040u, Pkcs11MechanismTypes.EcKeyPairGen.Value);
+        Assert.Equal((nuint)0x00001041u, Pkcs11MechanismTypes.Ecdsa.Value);
+        Assert.Equal((nuint)0x00001042u, Pkcs11MechanismTypes.EcdsaSha1.Value);
+        Assert.Equal((nuint)0x00001045u, Pkcs11MechanismTypes.EcdsaSha224.Value);
+        Assert.Equal((nuint)0x00001046u, Pkcs11MechanismTypes.EcdsaSha256.Value);
+        Assert.Equal((nuint)0x00001047u, Pkcs11MechanismTypes.EcdsaSha384.Value);
+        Assert.Equal((nuint)0x00001048u, Pkcs11MechanismTypes.EcdsaSha512.Value);
         Assert.Equal((nuint)0x00001050u, Pkcs11MechanismTypes.Ecdh1Derive.Value);
         Assert.Equal((nuint)0x00000350u, Pkcs11MechanismTypes.GenericSecretKeyGen.Value);
         Assert.Equal((nuint)0x00001080u, Pkcs11MechanismTypes.AesKeyGen.Value);
+        Assert.Equal((nuint)0x00001081u, Pkcs11MechanismTypes.AesEcb.Value);
         Assert.Equal((nuint)0x00001087u, Pkcs11MechanismTypes.AesGcm.Value);
+        Assert.Equal((nuint)0x00001088u, Pkcs11MechanismTypes.AesCcm.Value);
         Assert.Equal((nuint)0x00000220u, Pkcs11MechanismTypes.Sha1.Value);
         Assert.Equal((nuint)0x00000221u, Pkcs11MechanismTypes.Sha1Hmac.Value);
         Assert.Equal((nuint)0x00000255u, Pkcs11MechanismTypes.Sha224.Value);
@@ -107,7 +127,10 @@ public sealed class ManagedApiSurfaceTests
         Assert.Equal((nuint)0x00000270u, Pkcs11MechanismTypes.Sha512.Value);
         Assert.Equal((nuint)0x00000271u, Pkcs11MechanismTypes.Sha512Hmac.Value);
         Assert.Equal((nuint)0x00001082u, Pkcs11MechanismTypes.AesCbc.Value);
+        Assert.Equal((nuint)0x00001086u, Pkcs11MechanismTypes.AesCtr.Value);
         Assert.Equal((nuint)0x0000210au, Pkcs11MechanismTypes.AesKeyWrapPad.Value);
+        Assert.Equal((nuint)0x00000041u, Pkcs11MechanismTypes.Sha384RsaPkcs.Value);
+        Assert.Equal((nuint)0x00000042u, Pkcs11MechanismTypes.Sha512RsaPkcs.Value);
         Assert.Equal((nuint)0x00000040u, Pkcs11MechanismTypes.Sha256RsaPkcs.Value);
         Assert.Equal((nuint)0x00000043u, Pkcs11MechanismTypes.Sha256RsaPkcsPss.Value);
         Assert.Equal((nuint)0x00000044u, Pkcs11MechanismTypes.Sha384RsaPkcsPss.Value);
@@ -125,6 +148,31 @@ public sealed class ManagedApiSurfaceTests
         Assert.Equal(IntPtr.Size, Pkcs11ObjectAttribute.Nuint(Pkcs11AttributeTypes.Class, 7).Value.Length);
         Assert.Equal(IntPtr.Size, Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.Data).Value.Length);
         Assert.Equal(IntPtr.Size, Pkcs11ObjectAttribute.KeyType(Pkcs11AttributeTypes.KeyType, Pkcs11KeyTypes.Aes).Value.Length);
+    }
+
+    [Fact]
+    public void ObjectSearchBuilderBuildsExpectedFilters()
+    {
+        byte[] label = [0x01, 0x02, 0x03];
+        byte[] id = [0x10, 0x11];
+
+        Pkcs11ObjectSearchParameters search = Pkcs11ObjectSearchParameters.CreateBuilder()
+            .WithLabel(label)
+            .WithId(id)
+            .WithObjectClass(Pkcs11ObjectClasses.SecretKey)
+            .WithKeyType(Pkcs11KeyTypes.Aes)
+            .RequireEncrypt()
+            .RequireDecrypt()
+            .Build();
+
+        Assert.Equal(label, search.Label.ToArray());
+        Assert.Equal(id, search.Id.ToArray());
+        Assert.Equal(Pkcs11ObjectClasses.SecretKey, search.ObjectClass);
+        Assert.Equal(Pkcs11KeyTypes.Aes, search.KeyType);
+        Assert.Equal(true, search.RequireEncrypt);
+        Assert.Equal(true, search.RequireDecrypt);
+        Assert.Null(search.RequireSign);
+        Assert.Null(search.RequireVerify);
     }
 
     [Fact]
@@ -239,6 +287,18 @@ public sealed class ManagedApiSurfaceTests
     }
 
     [Fact]
+    public void Phase16FunctionStatusAndCancelApisAreExposed()
+    {
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TryGetFunctionStatus), Type.EmptyTypes));
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TryCancelFunction), Type.EmptyTypes));
+        Assert.NotNull(typeof(Pkcs11Module).GetProperty(nameof(Pkcs11Module.FunctionListVersion)));
+
+        Assert.Equal(typeof(bool), typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TryGetFunctionStatus), Type.EmptyTypes)!.ReturnType);
+        Assert.Equal(typeof(bool), typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.TryCancelFunction), Type.EmptyTypes)!.ReturnType);
+        Assert.Equal(typeof(CK_VERSION), typeof(Pkcs11Module).GetProperty(nameof(Pkcs11Module.FunctionListVersion))!.PropertyType);
+    }
+
+    [Fact]
     public void ProvisioningHelpersExposeExpectedDefaults()
     {
         Pkcs11ObjectAttribute[] aes = Pkcs11ProvisioningTemplates.CreateAesEncryptDecryptSecretKey("aes"u8, [0xA1], token: false, extractable: true, valueLength: 24);
@@ -273,10 +333,14 @@ public sealed class ManagedApiSurfaceTests
     [Fact]
     public void MechanismParameterHelpersExposeExpectedPackingAndDefaults()
     {
+        byte[] ctr = Pkcs11MechanismParameters.AesCtr([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01], counterBits: 32);
+        byte[] ccm = Pkcs11MechanismParameters.AesCcm(64, [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5], [0x01, 0x02], macLength: 16);
         byte[] gcm = Pkcs11MechanismParameters.AesGcm([0x01, 0x02, 0x03, 0x04], [0xAA, 0xBB], tagBits: 96);
         byte[] oaep = Pkcs11MechanismParameters.RsaOaep(Pkcs11MechanismTypes.Sha256, Pkcs11RsaMgfTypes.Mgf1Sha256, [0x10, 0x20]);
         byte[] pss = Pkcs11MechanismParameters.RsaPss(Pkcs11MechanismTypes.Sha384, Pkcs11RsaMgfTypes.Mgf1Sha384, 48);
 
+        Assert.Equal(IntPtr.Size + 16, ctr.Length);
+        Assert.Equal(IntPtr.Size * 4 + 8, ccm.Length);
         Assert.Equal(IntPtr.Size * 4 + 6, gcm.Length);
         Assert.Equal(IntPtr.Size * 4 + 2, oaep.Length);
         Assert.Equal(IntPtr.Size * 3, pss.Length);
@@ -298,6 +362,26 @@ public sealed class ManagedApiSurfaceTests
         Assert.Equal(Pkcs11ErrorMetadata.Unknown, unknown);
     }
 
+    [Theory]
+    [InlineData(0x00000190u, Pkcs11ErrorCategory.Lifecycle, true)]
+    [InlineData(0x00000191u, Pkcs11ErrorCategory.StateConflict, false)]
+    [InlineData(0x00000150u, Pkcs11ErrorCategory.InputValidation, true)]
+    [InlineData(0x00000101u, Pkcs11ErrorCategory.Authentication, true)]
+    [InlineData(0x00000082u, Pkcs11ErrorCategory.ObjectHandle, false)]
+    [InlineData(0x00000051u, Pkcs11ErrorCategory.Capability, false)]
+    [InlineData(0x00000070u, Pkcs11ErrorCategory.Capability, false)]
+    [InlineData(0x000000b1u, Pkcs11ErrorCategory.Resource, true)]
+    [InlineData(0x000000e0u, Pkcs11ErrorCategory.Device, true)]
+    [InlineData(0x000000b0u, Pkcs11ErrorCategory.Session, true)]
+    [InlineData(0x000000c0u, Pkcs11ErrorCategory.Integrity, false)]
+    public void ReturnValueTaxonomyClassifiesRepresentativeCodes(uint rawResult, Pkcs11ErrorCategory expectedCategory, bool expectedRetryable)
+    {
+        Pkcs11ErrorMetadata metadata = Pkcs11ReturnValueTaxonomy.Classify(new CK_RV((nuint)rawResult));
+
+        Assert.Equal(expectedCategory, metadata.Category);
+        Assert.Equal(expectedRetryable, metadata.IsRetryable);
+    }
+
     [Fact]
     public void Pkcs11ExceptionExposesRawResultAndTaxonomyMetadata()
     {
@@ -309,5 +393,16 @@ public sealed class ManagedApiSurfaceTests
         Assert.Equal(Pkcs11ErrorCategory.Authentication, exception.ErrorCategory);
         Assert.False(exception.IsRetryable);
         Assert.Equal(Pkcs11ErrorCategory.Authentication, exception.ErrorMetadata.Category);
+    }
+
+    [Fact]
+    public void Pkcs11ExceptionUsesUnknownMetadataForUnknownReturnValues()
+    {
+        Pkcs11Exception exception = new("C_VendorExtension", new CK_RV(0xf00dbabEu));
+
+        Assert.Equal(Pkcs11ErrorCategory.Unknown, exception.ErrorCategory);
+        Assert.False(exception.IsRetryable);
+        Assert.Equal(Pkcs11ErrorMetadata.Unknown, exception.ErrorMetadata);
+        Assert.Equal((nuint)0xf00dbabEu, exception.RawResult.Value);
     }
 }

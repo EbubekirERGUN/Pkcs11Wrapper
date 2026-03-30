@@ -89,6 +89,38 @@ public static class Pkcs11EcKdfTypes
 
 public static class Pkcs11MechanismParameters
 {
+    public static byte[] AesCtr(ReadOnlySpan<byte> counterBlock, nuint counterBits = 128)
+    {
+        if (counterBlock.Length != 16)
+        {
+            throw new ArgumentException("CKM_AES_CTR counter block must be exactly 16 bytes.", nameof(counterBlock));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(counterBits, (nuint)128);
+
+        int headerLength = IntPtr.Size;
+        byte[] parameter = new byte[headerLength + counterBlock.Length];
+        WriteNuint(parameter, 0, counterBits);
+        counterBlock.CopyTo(parameter.AsSpan(headerLength));
+        return parameter;
+    }
+
+    public static byte[] AesCcm(nuint dataLength, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> additionalAuthenticatedData = default, nuint macLength = 16)
+    {
+        int headerLength = IntPtr.Size * 4;
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(additionalAuthenticatedData.Length, int.MaxValue - nonce.Length - headerLength);
+
+        byte[] parameter = new byte[headerLength + nonce.Length + additionalAuthenticatedData.Length];
+        WriteNuint(parameter, 0, dataLength);
+        WriteNuint(parameter, IntPtr.Size, (nuint)nonce.Length);
+        WriteNuint(parameter, IntPtr.Size * 2, (nuint)additionalAuthenticatedData.Length);
+        WriteNuint(parameter, IntPtr.Size * 3, macLength);
+
+        nonce.CopyTo(parameter.AsSpan(headerLength));
+        additionalAuthenticatedData.CopyTo(parameter.AsSpan(headerLength + nonce.Length));
+        return parameter;
+    }
+
     public static byte[] AesGcm(ReadOnlySpan<byte> iv, ReadOnlySpan<byte> additionalAuthenticatedData = default, nuint tagBits = 128, nuint? ivBits = null)
     {
         nuint effectiveIvBits = ivBits ?? checked((nuint)iv.Length * (nuint)8);

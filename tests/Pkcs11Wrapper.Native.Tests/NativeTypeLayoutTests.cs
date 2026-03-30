@@ -22,6 +22,8 @@ public sealed class NativeTypeLayoutTests
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_MECHANISM>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_RSA_PKCS_MGF_TYPE>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_RSA_PKCS_OAEP_SOURCE_TYPE>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_AES_CTR_PARAMS>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_CCM_PARAMS>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_GCM_PARAMS>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_RSA_PKCS_OAEP_PARAMS>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_RSA_PKCS_PSS_PARAMS>());
@@ -34,6 +36,7 @@ public sealed class NativeTypeLayoutTests
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_TOKEN_INFO>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_SESSION_INFO>());
         Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_FUNCTION_LIST>());
+        Assert.True(Pkcs11NativeTypeValidation.IsBlittable<CK_C_INITIALIZE_ARGS>());
     }
 
     [Fact]
@@ -52,11 +55,14 @@ public sealed class NativeTypeLayoutTests
         Assert.Equal(IntPtr.Size, Unsafe.SizeOf<CK_RSA_PKCS_OAEP_SOURCE_TYPE>());
         Assert.Equal(IntPtr.Size, Unsafe.SizeOf<CK_EC_KDF_TYPE>());
         Assert.Equal(3 * IntPtr.Size, Unsafe.SizeOf<CK_MECHANISM>());
+        Assert.Equal(IntPtr.Size + 16, Unsafe.SizeOf<CK_AES_CTR_PARAMS>());
+        Assert.Equal(6 * IntPtr.Size, Unsafe.SizeOf<CK_CCM_PARAMS>());
         Assert.Equal(6 * IntPtr.Size, Unsafe.SizeOf<CK_GCM_PARAMS>());
         Assert.Equal(5 * IntPtr.Size, Unsafe.SizeOf<CK_RSA_PKCS_OAEP_PARAMS>());
         Assert.Equal(3 * IntPtr.Size, Unsafe.SizeOf<CK_RSA_PKCS_PSS_PARAMS>());
         Assert.Equal(5 * IntPtr.Size, Unsafe.SizeOf<CK_ECDH1_DERIVE_PARAMS>());
         Assert.Equal(3 * IntPtr.Size, Unsafe.SizeOf<CK_MECHANISM_INFO>());
+        Assert.Equal(6 * IntPtr.Size, Unsafe.SizeOf<CK_C_INITIALIZE_ARGS>());
         Assert.Equal(1, Unsafe.SizeOf<CK_BBOOL>());
     }
 
@@ -148,6 +154,17 @@ public sealed class NativeTypeLayoutTests
     }
 
     [Fact]
+    public void CkInitializeArgsLayoutMatchesLinuxAbi()
+    {
+        Assert.Equal(0, Marshal.OffsetOf<CK_C_INITIALIZE_ARGS>(nameof(CK_C_INITIALIZE_ARGS.CreateMutex)).ToInt32());
+        Assert.Equal(IntPtr.Size, Marshal.OffsetOf<CK_C_INITIALIZE_ARGS>(nameof(CK_C_INITIALIZE_ARGS.DestroyMutex)).ToInt32());
+        Assert.Equal(2 * IntPtr.Size, Marshal.OffsetOf<CK_C_INITIALIZE_ARGS>(nameof(CK_C_INITIALIZE_ARGS.LockMutex)).ToInt32());
+        Assert.Equal(3 * IntPtr.Size, Marshal.OffsetOf<CK_C_INITIALIZE_ARGS>(nameof(CK_C_INITIALIZE_ARGS.UnlockMutex)).ToInt32());
+        Assert.Equal(4 * IntPtr.Size, Marshal.OffsetOf<CK_C_INITIALIZE_ARGS>(nameof(CK_C_INITIALIZE_ARGS.Flags)).ToInt32());
+        Assert.Equal(5 * IntPtr.Size, Marshal.OffsetOf<CK_C_INITIALIZE_ARGS>(nameof(CK_C_INITIALIZE_ARGS.Reserved)).ToInt32());
+    }
+
+    [Fact]
     public void FunctionListPrefixMatchesExpectedOrder()
     {
         int pointerSize = IntPtr.Size;
@@ -198,5 +215,8 @@ public sealed class NativeTypeLayoutTests
         Assert.Equal(expectedInitializeOffset + (62 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_DeriveKey)).ToInt32());
         Assert.Equal(expectedInitializeOffset + (63 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_SeedRandom)).ToInt32());
         Assert.Equal(expectedInitializeOffset + (64 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_GenerateRandom)).ToInt32());
+        Assert.Equal(expectedInitializeOffset + (65 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_GetFunctionStatus)).ToInt32());
+        Assert.Equal(expectedInitializeOffset + (66 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_CancelFunction)).ToInt32());
+        Assert.Equal(expectedInitializeOffset + (67 * pointerSize), Marshal.OffsetOf<CK_FUNCTION_LIST>(nameof(CK_FUNCTION_LIST.C_WaitForSlotEvent)).ToInt32());
     }
 }

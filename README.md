@@ -11,6 +11,7 @@ This README stays at the repository workflow level. For implementation details a
 The current wrapper and validation surface covers:
 
 - Module lifecycle: load, initialize, finalize, module info
+- Optional initialize-time `CK_C_INITIALIZE_ARGS` flags and custom mutex callback wiring
 - Slot, token, and mechanism enumeration
 - Session open/close plus user and security-officer login flows
 - Object search plus attribute read/write helpers
@@ -25,6 +26,12 @@ The current wrapper and validation surface covers:
 GitHub Actions keeps SoftHSM as the default push/PR path and also provides an optional manual vendor PKCS#11 regression lane for maintainers. Setup details are in `docs/ci.md`.
 
 `InitToken` regression coverage exists, but provisioning-style validation remains opt-in rather than part of every generic runtime scenario.
+
+## Current gaps (tracked)
+
+- PKCS#11 v3 message-based entry points (`C_MessageEncrypt*`, `C_MessageDecrypt*`, `C_MessageSign*`, `C_MessageVerify*`) are not modeled yet.
+- Typed mechanism parameter helpers/marshalling cover ECDH, AES-GCM/CTR/CCM, and RSA-OAEP/PSS paths; less common mechanisms may still use raw byte payloads.
+- Runtime SoftHSM regression tests prioritize core interoperability paths; additional mechanism matrices can be expanded per vendor profile.
 
 ## Requirements
 

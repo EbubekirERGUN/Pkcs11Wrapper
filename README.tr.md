@@ -11,6 +11,7 @@ Bu README depo seviyesi is akislarini ozetler. Uygulama ayrintilari ve gelistiri
 Mevcut wrapper ve dogrulama kapsaminda sunlar bulunur:
 
 - Modul yasam dongusu: load, initialize, finalize, module info
+- Opsiyonel initialize aninda `CK_C_INITIALIZE_ARGS` bayraklari ve ozel mutex callback baglama destegi
 - Slot, token ve mechanism listeleme
 - Session acma/kapama ile user ve security-officer login akislar
 - Object search ile attribute read/write yardimcilari
@@ -25,6 +26,12 @@ Mevcut wrapper ve dogrulama kapsaminda sunlar bulunur:
 GitHub Actions tarafinda push/PR icin varsayilan yol SoftHSM olarak kalir; bakimcilar icin manuel tetiklenen opsiyonel bir vendor PKCS#11 regression lane de bulunur. Kurulum ayrintilari `docs/ci.md` icindedir.
 
 `InitToken` regression kapsami vardir; ancak provisioning odakli bu dogrulama, her genel calistirma senaryosunun zorunlu parcasi degil, opt-in bir yoldur.
+
+## Acik kalanlar (izlenen)
+
+- PKCS#11 v3 message-based giris noktalarinin (`C_MessageEncrypt*`, `C_MessageDecrypt*`, `C_MessageSign*`, `C_MessageVerify*`) modellemesi henuz yoktur.
+- Typed mechanism parameter helper/marshalling ECDH, AES-GCM/CTR/CCM ve RSA-OAEP/PSS yollarini kapsar; daha az yaygin bazi mechanism'ler halen ham byte payload kullanabilir.
+- SoftHSM runtime regression testleri cekirdek birlikte calisabilirlik akislarina odaklanir; ek mechanism matrisleri vendor profiline gore genisletilebilir.
 
 ## Gereksinimler
 

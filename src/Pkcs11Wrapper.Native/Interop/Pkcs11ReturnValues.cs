@@ -12,6 +12,7 @@ internal static class Pkcs11ReturnValues
     public static readonly CK_RV DeviceMemory = new(0x00000031u);
     public static readonly CK_RV DeviceRemoved = new(0x00000032u);
     public static readonly CK_RV FunctionFailed = new(0x00000006u);
+    public static readonly CK_RV FunctionNotParallel = new(0x00000051u);
     public static readonly CK_RV FunctionNotSupported = new(0x00000054u);
     public static readonly CK_RV GeneralError = new(0x00000005u);
     public static readonly CK_RV HostMemory = new(0x00000002u);

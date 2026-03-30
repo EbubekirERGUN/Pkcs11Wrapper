@@ -501,6 +501,18 @@ public sealed class Pkcs11Session : IDisposable
         _module.SetOperationState(_sessionHandle, _generation, SlotId, _slotGeneration, state, encryptionKeyHandle, authenticationKeyHandle);
     }
 
+    public bool TryGetFunctionStatus()
+    {
+        ThrowIfDisposed();
+        return _module.TryGetFunctionStatus(_sessionHandle, _generation, SlotId, _slotGeneration);
+    }
+
+    public bool TryCancelFunction()
+    {
+        ThrowIfDisposed();
+        return _module.TryCancelFunction(_sessionHandle, _generation, SlotId, _slotGeneration);
+    }
+
     public void GenerateRandom(Span<byte> destination)
     {
         ThrowIfDisposed();

@@ -8,10 +8,13 @@ namespace Pkcs11Wrapper.Native;
 public sealed unsafe class Pkcs11NativeModule : IDisposable
 {
     private const nuint Pkcs11Ecdh1DeriveMechanism = 0x00001050u;
+    private const nuint Pkcs11AesCtrMechanism = 0x00001086u;
     private const nuint Pkcs11AesGcmMechanism = 0x00001087u;
+    private const nuint Pkcs11AesCcmMechanism = 0x00001088u;
     private const nuint Pkcs11RsaPkcsOaepMechanism = 0x00000009u;
     private const nuint Pkcs11RsaPkcsPssMechanism = 0x0000000du;
     private const nuint Pkcs11Sha1RsaPkcsPssMechanism = 0x0000000eu;
+    private const nuint Pkcs11Sha224RsaPkcsPssMechanism = 0x00000047u;
     private const nuint Pkcs11Sha256RsaPkcsPssMechanism = 0x00000043u;
     private const nuint Pkcs11Sha384RsaPkcsPssMechanism = 0x00000044u;
     private const nuint Pkcs11Sha512RsaPkcsPssMechanism = 0x00000045u;
@@ -38,6 +41,8 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     }
 
     public CK_VERSION CryptokiVersion => FunctionList->Version;
+
+    public CK_VERSION FunctionListVersion => GetFunctionListVersion();
 
     public bool IsDisposed => _disposed;
 
@@ -72,7 +77,9 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         }
     }
 
-    public void Initialize()
+    public void Initialize() => Initialize(null);
+
+    public void Initialize(CK_C_INITIALIZE_ARGS* initializeArgs)
     {
         lock (_lifecycleSync)
         {
@@ -83,12 +90,9 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 return;
             }
 
-            if (FunctionList->C_Initialize is null)
-            {
-                throw new InvalidOperationException("The PKCS#11 function list does not expose C_Initialize.");
-            }
+            EnsureFunctionAvailable((void*)FunctionList->C_Initialize, "C_Initialize");
 
-            CK_RV result = FunctionList->C_Initialize(null);
+            CK_RV result = FunctionList->C_Initialize(initializeArgs);
             if (result == Pkcs11ReturnValues.CryptokiAlreadyInitialized)
             {
                 _isInitialized = true;
@@ -127,15 +131,30 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetInfo is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetInfo.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetInfo, "C_GetInfo");
 
         var info = default(CK_INFO);
         CK_RV result = FunctionList->C_GetInfo(&info);
         ThrowIfFailed(result, "C_GetInfo");
         return info;
+    }
+
+    public CK_VERSION GetFunctionListVersion()
+    {
+        EnsureNotDisposed();
+
+        EnsureFunctionAvailable((void*)FunctionList->C_GetFunctionList, "C_GetFunctionList");
+
+        CK_FUNCTION_LIST* functionList = null;
+        CK_RV result = FunctionList->C_GetFunctionList(&functionList);
+        ThrowIfFailed(result, "C_GetFunctionList");
+
+        if (functionList is null)
+        {
+            throw new InvalidOperationException("C_GetFunctionList returned a null function list pointer.");
+        }
+
+        return functionList->Version;
     }
 
     public int GetSlotCount(bool tokenPresentOnly)
@@ -190,10 +209,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetSlotInfo is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetSlotInfo.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetSlotInfo, "C_GetSlotInfo");
 
         var slotInfo = default(CK_SLOT_INFO);
         CK_RV result = FunctionList->C_GetSlotInfo(slotId, &slotInfo);
@@ -205,10 +221,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetTokenInfo is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetTokenInfo.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetTokenInfo, "C_GetTokenInfo");
 
         CK_TOKEN_INFO nativeTokenInfo = default;
         CK_RV result = FunctionList->C_GetTokenInfo(slotId, &nativeTokenInfo);
@@ -227,10 +240,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_InitToken is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_InitToken.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_InitToken, "C_InitToken");
 
         if (label.Length != 32)
         {
@@ -311,10 +321,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetMechanismInfo is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetMechanismInfo.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetMechanismInfo, "C_GetMechanismInfo");
 
         CK_MECHANISM_INFO info = default;
         CK_RV result = FunctionList->C_GetMechanismInfo(slotId, mechanismType, &info);
@@ -326,10 +333,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_OpenSession is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_OpenSession.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_OpenSession, "C_OpenSession");
 
         CK_SESSION_HANDLE sessionHandle = default;
         nuint flagsValue = Pkcs11SessionFlags.SerialSession;
@@ -348,10 +352,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_CloseSession is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_CloseSession.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_CloseSession, "C_CloseSession");
 
         CK_RV result = FunctionList->C_CloseSession(sessionHandle);
         ThrowIfFailed(result, "C_CloseSession");
@@ -361,10 +362,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_CloseAllSessions is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_CloseAllSessions.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_CloseAllSessions, "C_CloseAllSessions");
 
         CK_RV result = FunctionList->C_CloseAllSessions(slotId);
         ThrowIfFailed(result, "C_CloseAllSessions");
@@ -374,10 +372,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetSessionInfo is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetSessionInfo.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetSessionInfo, "C_GetSessionInfo");
 
         CK_SESSION_INFO sessionInfo = default;
         CK_RV result = FunctionList->C_GetSessionInfo(sessionHandle, &sessionInfo);
@@ -389,10 +384,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_Login is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_Login.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_Login, "C_Login");
 
         CK_ULONG pinLength = (CK_ULONG)(nuint)pinUtf8.Length;
         CK_RV result;
@@ -416,10 +408,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_Logout is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_Logout.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_Logout, "C_Logout");
 
         CK_RV result = FunctionList->C_Logout(sessionHandle);
         ThrowIfFailed(result, "C_Logout");
@@ -429,10 +418,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_InitPIN is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_InitPIN.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_InitPIN, "C_InitPIN");
 
         CK_ULONG pinLength = (CK_ULONG)(nuint)pinUtf8.Length;
         CK_RV result;
@@ -456,10 +442,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_SetPIN is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_SetPIN.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_SetPIN, "C_SetPIN");
 
         CK_ULONG oldPinLength = (CK_ULONG)(nuint)oldPinUtf8.Length;
         CK_ULONG newPinLength = (CK_ULONG)(nuint)newPinUtf8.Length;
@@ -499,20 +482,9 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_FindObjectsInit is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_FindObjectsInit.");
-        }
-
-        if (FunctionList->C_FindObjects is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_FindObjects.");
-        }
-
-        if (FunctionList->C_FindObjectsFinal is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_FindObjectsFinal.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_FindObjectsInit, "C_FindObjectsInit");
+        EnsureFunctionAvailable((void*)FunctionList->C_FindObjects, "C_FindObjects");
+        EnsureFunctionAvailable((void*)FunctionList->C_FindObjectsFinal, "C_FindObjectsFinal");
 
         bool searchInitialized = false;
 
@@ -576,10 +548,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetAttributeValue is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetAttributeValue.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetAttributeValue, "C_GetAttributeValue");
 
         CK_ATTRIBUTE attribute = new()
         {
@@ -653,10 +622,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_CreateObject is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_CreateObject.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_CreateObject, "C_CreateObject");
 
         CK_OBJECT_HANDLE objectHandle = default;
         CK_RV result;
@@ -681,10 +647,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_CopyObject is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_CopyObject.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_CopyObject, "C_CopyObject");
 
         CK_OBJECT_HANDLE objectHandle = default;
         CK_RV result;
@@ -709,10 +672,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_SetAttributeValue is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_SetAttributeValue.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_SetAttributeValue, "C_SetAttributeValue");
 
         CK_RV result;
 
@@ -735,10 +695,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_DestroyObject is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_DestroyObject.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_DestroyObject, "C_DestroyObject");
 
         CK_RV result = FunctionList->C_DestroyObject(sessionHandle, objectHandle);
         ThrowIfFailed(result, "C_DestroyObject");
@@ -748,10 +705,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GenerateKey is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GenerateKey.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GenerateKey, "C_GenerateKey");
 
         CK_OBJECT_HANDLE keyHandle = default;
         fixed (byte* mechanismParameterPointer = mechanismParameter)
@@ -781,10 +735,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GenerateKeyPair is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GenerateKeyPair.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GenerateKeyPair, "C_GenerateKeyPair");
 
         CK_OBJECT_HANDLE publicKeyHandle = default;
         CK_OBJECT_HANDLE privateKeyHandle = default;
@@ -815,10 +766,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_WrapKey is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_WrapKey.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_WrapKey, "C_WrapKey");
 
         CK_ULONG wrappedKeyLength = default;
         fixed (byte* mechanismParameterPointer = mechanismParameter)
@@ -835,10 +783,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_WrapKey is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_WrapKey.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_WrapKey, "C_WrapKey");
 
         CK_ULONG wrappedKeyLength = (CK_ULONG)(nuint)wrappedKey.Length;
 
@@ -864,10 +809,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_UnwrapKey is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_UnwrapKey.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_UnwrapKey, "C_UnwrapKey");
 
         CK_OBJECT_HANDLE keyHandle = default;
         fixed (byte* mechanismParameterPointer = mechanismParameter)
@@ -895,10 +837,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_DeriveKey is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_DeriveKey.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_DeriveKey, "C_DeriveKey");
 
         CK_OBJECT_HANDLE keyHandle = default;
         fixed (byte* mechanismParameterPointer = mechanismParameter)
@@ -935,6 +874,17 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
             };
         }
 
+        if (mechanismValue == Pkcs11AesCtrMechanism)
+        {
+            marshalledMechanismParameters.CtrParams = CreateAesCtrParams(mechanismParameterPointer, mechanismParameterLength);
+            return new CK_MECHANISM
+            {
+                Mechanism = mechanismType,
+                Parameter = Unsafe.AsPointer(ref marshalledMechanismParameters.CtrParams),
+                ParameterLength = (CK_ULONG)(nuint)sizeof(CK_AES_CTR_PARAMS),
+            };
+        }
+
         if (mechanismValue == Pkcs11AesGcmMechanism)
         {
             marshalledMechanismParameters.GcmParams = CreateGcmParams(mechanismParameterPointer, mechanismParameterLength);
@@ -943,6 +893,17 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 Mechanism = mechanismType,
                 Parameter = Unsafe.AsPointer(ref marshalledMechanismParameters.GcmParams),
                 ParameterLength = (CK_ULONG)(nuint)sizeof(CK_GCM_PARAMS),
+            };
+        }
+
+        if (mechanismValue == Pkcs11AesCcmMechanism)
+        {
+            marshalledMechanismParameters.CcmParams = CreateAesCcmParams(mechanismParameterPointer, mechanismParameterLength);
+            return new CK_MECHANISM
+            {
+                Mechanism = mechanismType,
+                Parameter = Unsafe.AsPointer(ref marshalledMechanismParameters.CcmParams),
+                ParameterLength = (CK_ULONG)(nuint)sizeof(CK_CCM_PARAMS),
             };
         }
 
@@ -957,7 +918,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
             };
         }
 
-        if (mechanismValue is Pkcs11RsaPkcsPssMechanism or Pkcs11Sha1RsaPkcsPssMechanism or Pkcs11Sha256RsaPkcsPssMechanism or Pkcs11Sha384RsaPkcsPssMechanism or Pkcs11Sha512RsaPkcsPssMechanism)
+        if (mechanismValue is Pkcs11RsaPkcsPssMechanism or Pkcs11Sha1RsaPkcsPssMechanism or Pkcs11Sha224RsaPkcsPssMechanism or Pkcs11Sha256RsaPkcsPssMechanism or Pkcs11Sha384RsaPkcsPssMechanism or Pkcs11Sha512RsaPkcsPssMechanism)
         {
             marshalledMechanismParameters.PssParams = CreateRsaPssParams(mechanismParameterPointer, mechanismParameterLength);
             return new CK_MECHANISM
@@ -975,10 +936,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetObjectSize is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetObjectSize.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetObjectSize, "C_GetObjectSize");
 
         CK_ULONG objectSize = default;
         CK_RV result = FunctionList->C_GetObjectSize(sessionHandle, objectHandle, &objectSize);
@@ -1085,10 +1043,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_DigestKey is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_DigestKey.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_DigestKey, "C_DigestKey");
 
         CK_RV result = FunctionList->C_DigestKey(sessionHandle, keyHandle);
         ThrowIfFailed(result, "C_DigestKey");
@@ -1216,10 +1171,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_VerifyFinal is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_VerifyFinal.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_VerifyFinal, "C_VerifyFinal");
 
         CK_RV result;
         if (signature.IsEmpty)
@@ -1309,10 +1261,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GenerateRandom is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GenerateRandom.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GenerateRandom, "C_GenerateRandom");
 
         CK_RV result;
         if (destination.IsEmpty)
@@ -1334,10 +1283,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_SeedRandom is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_SeedRandom.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_SeedRandom, "C_SeedRandom");
 
         CK_RV result;
         if (seed.IsEmpty)
@@ -1359,10 +1305,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_WaitForSlotEvent is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_WaitForSlotEvent.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_WaitForSlotEvent, "C_WaitForSlotEvent");
 
         CK_SLOT_ID slotId = default;
         CK_RV result = FunctionList->C_WaitForSlotEvent(new CK_FLAGS(0), &slotId, null);
@@ -1374,10 +1317,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_WaitForSlotEvent is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_WaitForSlotEvent.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_WaitForSlotEvent, "C_WaitForSlotEvent");
 
         CK_SLOT_ID nativeSlotId = default;
         CK_RV result = FunctionList->C_WaitForSlotEvent(new CK_FLAGS(Pkcs11SlotEventFlags.DontBlock), &nativeSlotId, null);
@@ -1492,10 +1432,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetOperationState is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetOperationState.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetOperationState, "C_GetOperationState");
 
         CK_ULONG stateLength = default;
         CK_RV result = FunctionList->C_GetOperationState(sessionHandle, null, &stateLength);
@@ -1507,10 +1444,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_GetOperationState is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetOperationState.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetOperationState, "C_GetOperationState");
 
         CK_ULONG stateLength = (CK_ULONG)(nuint)destination.Length;
         CK_RV result;
@@ -1542,10 +1476,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     {
         EnsureInitialized();
 
-        if (FunctionList->C_SetOperationState is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_SetOperationState.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_SetOperationState, "C_SetOperationState");
 
         CK_RV result;
         if (state.IsEmpty)
@@ -1561,6 +1492,38 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         }
 
         ThrowIfFailed(result, "C_SetOperationState");
+    }
+
+    public bool TryGetFunctionStatus(CK_SESSION_HANDLE sessionHandle)
+    {
+        EnsureInitialized();
+
+        EnsureFunctionAvailable((void*)FunctionList->C_GetFunctionStatus, "C_GetFunctionStatus");
+
+        CK_RV result = FunctionList->C_GetFunctionStatus(sessionHandle);
+        if (result == Pkcs11ReturnValues.FunctionNotParallel || result == Pkcs11ReturnValues.FunctionNotSupported)
+        {
+            return false;
+        }
+
+        ThrowIfFailed(result, "C_GetFunctionStatus");
+        return true;
+    }
+
+    public bool TryCancelFunction(CK_SESSION_HANDLE sessionHandle)
+    {
+        EnsureInitialized();
+
+        EnsureFunctionAvailable((void*)FunctionList->C_CancelFunction, "C_CancelFunction");
+
+        CK_RV result = FunctionList->C_CancelFunction(sessionHandle);
+        if (result == Pkcs11ReturnValues.FunctionNotParallel || result == Pkcs11ReturnValues.FunctionNotSupported)
+        {
+            return false;
+        }
+
+        ThrowIfFailed(result, "C_CancelFunction");
+        return true;
     }
 
     public void Dispose()
@@ -1614,14 +1577,19 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         }
     }
 
+    private static void EnsureFunctionAvailable(void* function, string operation)
+    {
+        if (function is null)
+        {
+            throw new InvalidOperationException($"The PKCS#11 function list does not expose {operation}.");
+        }
+    }
+
     private void InvokeFinalize()
     {
-        if (FunctionList->C_Finalize is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_Finalize.");
-        }
+        EnsureFunctionAvailable((void*)_functionList->C_Finalize, "C_Finalize");
 
-        CK_RV result = FunctionList->C_Finalize(null);
+        CK_RV result = _functionList->C_Finalize(null);
         if (result == Pkcs11ReturnValues.CryptokiNotInitialized)
         {
             return;
@@ -1632,10 +1600,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
     private CK_RV GetSlotList(bool tokenPresentOnly, CK_SLOT_ID* slotList, CK_ULONG* count)
     {
-        if (FunctionList->C_GetSlotList is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetSlotList.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetSlotList, "C_GetSlotList");
 
         CK_BBOOL tokenPresent = tokenPresentOnly ? CK_BBOOL.True : CK_BBOOL.False;
         return FunctionList->C_GetSlotList(tokenPresent, slotList, count);
@@ -1643,10 +1608,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
     private CK_RV GetMechanismList(CK_SLOT_ID slotId, CK_MECHANISM_TYPE* mechanismList, CK_ULONG* count)
     {
-        if (FunctionList->C_GetMechanismList is null)
-        {
-            throw new InvalidOperationException("The PKCS#11 function list does not expose C_GetMechanismList.");
-        }
+        EnsureFunctionAvailable((void*)FunctionList->C_GetMechanismList, "C_GetMechanismList");
 
         return FunctionList->C_GetMechanismList(slotId, mechanismList, count);
     }
@@ -1800,6 +1762,61 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
             Parameter = mechanismParameterLength == 0 ? null : mechanismParameterPointer,
             ParameterLength = (CK_ULONG)(nuint)mechanismParameterLength,
         };
+
+    private static CK_AES_CTR_PARAMS CreateAesCtrParams(byte* mechanismParameterPointer, int mechanismParameterLength)
+    {
+        int expectedLength = IntPtr.Size + 16;
+        if (mechanismParameterLength < expectedLength)
+        {
+            throw new ArgumentException("CKM_AES_CTR parameters are incomplete.", nameof(mechanismParameterLength));
+        }
+
+        ReadOnlySpan<byte> parameter = new(mechanismParameterPointer, mechanismParameterLength);
+        CK_AES_CTR_PARAMS ctrParams = default;
+        ctrParams.CounterBits = (CK_ULONG)ReadPackedNuint(parameter);
+
+        for (int i = 0; i < 16; i++)
+        {
+            ctrParams.Cb[i] = parameter[IntPtr.Size + i];
+        }
+
+        return ctrParams;
+    }
+
+    private static CK_CCM_PARAMS CreateAesCcmParams(byte* mechanismParameterPointer, int mechanismParameterLength)
+    {
+        int headerLength = IntPtr.Size * 4;
+        if (mechanismParameterLength < headerLength)
+        {
+            throw new ArgumentException("CKM_AES_CCM parameters are incomplete.", nameof(mechanismParameterLength));
+        }
+
+        ReadOnlySpan<byte> parameter = new(mechanismParameterPointer, mechanismParameterLength);
+        nuint dataLength = ReadPackedNuint(parameter);
+        nuint nonceLength = ReadPackedNuint(parameter[IntPtr.Size..]);
+        nuint aadLength = ReadPackedNuint(parameter[(IntPtr.Size * 2)..]);
+        nuint macLength = ReadPackedNuint(parameter[(IntPtr.Size * 3)..]);
+        nuint payloadLength = nonceLength + aadLength;
+
+        if (payloadLength > (nuint)(mechanismParameterLength - headerLength))
+        {
+            throw new ArgumentException("CKM_AES_CCM parameter payload is truncated.", nameof(mechanismParameterLength));
+        }
+
+        byte* payloadPointer = mechanismParameterPointer + headerLength;
+        byte* noncePointer = nonceLength == 0 ? null : payloadPointer;
+        byte* aadPointer = aadLength == 0 ? null : payloadPointer + (int)nonceLength;
+
+        return new CK_CCM_PARAMS
+        {
+            DataLen = (CK_ULONG)dataLength,
+            Nonce = noncePointer,
+            NonceLen = (CK_ULONG)nonceLength,
+            Aad = aadPointer,
+            AadLen = (CK_ULONG)aadLength,
+            MacLen = (CK_ULONG)macLength,
+        };
+    }
 
     private static CK_GCM_PARAMS CreateGcmParams(byte* mechanismParameterPointer, int mechanismParameterLength)
     {
@@ -2286,7 +2303,9 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     private struct MarshalledMechanismParameters
     {
         public CK_ECDH1_DERIVE_PARAMS Ecdh1DeriveParams;
+        public CK_AES_CTR_PARAMS CtrParams;
         public CK_GCM_PARAMS GcmParams;
+        public CK_CCM_PARAMS CcmParams;
         public CK_RSA_PKCS_OAEP_PARAMS OaepParams;
         public CK_RSA_PKCS_PSS_PARAMS PssParams;
     }
@@ -2348,6 +2367,12 @@ public readonly struct Pkcs11NativeAttributeQuery
     public CK_RV Result { get; }
 
     public nuint Length { get; }
+
+    public bool IsBufferTooSmall => Result == Pkcs11ReturnValues.BufferTooSmall;
+
+    public bool IsAttributeSensitive => Result == Pkcs11ReturnValues.AttributeSensitive;
+
+    public bool IsAttributeTypeInvalid => Result == Pkcs11ReturnValues.AttributeTypeInvalid;
 
     public bool IsUnavailableInformation => Length == UnavailableInformation;
 

@@ -1,19 +1,23 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using Pkcs11Wrapper;
 using Pkcs11Wrapper.Native;
+using Pkcs11Wrapper.Native.Interop;
 
 namespace Pkcs11Wrapper.Native.Tests;
 
 public sealed class SoftHsmCryptRegressionTests
 {
-    private static readonly Pkcs11MechanismType RsaX509MechanismType = new(0x00000003u);
     private static readonly Pkcs11AttributeType SignRecoverAttributeType = new(0x00000109u);
     private static readonly Pkcs11AttributeType VerifyRecoverAttributeType = new(0x0000010Bu);
     private const nuint CkrFunctionNotSupported = 0x00000054u;
+    private const nuint CkrArgumentsBad = 0x00000007u;
     private const nuint CkrMechanismInvalid = 0x00000070u;
     private const nuint CkrMechanismParamInvalid = 0x00000071u;
+    private const nuint CkrOperationActive = 0x00000090u;
     private const nuint CkrOperationNotInitialized = 0x00000091u;
     private const nuint CkrPinIncorrect = 0x000000a0u;
     private const nuint CkrUserAlreadyLoggedIn = 0x00000100u;
@@ -114,6 +118,20 @@ public sealed class SoftHsmCryptRegressionTests
         activeContext.Session.GenerateRandom(random);
 
         Assert.Contains(random, static value => value != 0);
+    }
+
+    [Fact]
+    public void LegacyFunctionStatusAndCancelReturnFalseWhenParallelFunctionsAreUnavailable()
+    {
+        if (!TryCreateCryptContext(out TestContext? context))
+        {
+            return;
+        }
+
+        using TestContext activeContext = context!;
+
+        Assert.False(activeContext.Session.TryGetFunctionStatus());
+        Assert.False(activeContext.Session.TryCancelFunction());
     }
 
     [Fact]
@@ -392,7 +410,7 @@ public sealed class SoftHsmCryptRegressionTests
         byte[] data = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_SIGN_RECOVER_DATA_HEX") ?? "00112233445566778899AABBCCDDEEFF", 16);
 
         if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.Sha256, Pkcs11MechanismFlags.Digest) ||
-            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, RsaX509MechanismType, Pkcs11MechanismFlags.SignRecover | Pkcs11MechanismFlags.VerifyRecover))
+            !SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaX509, Pkcs11MechanismFlags.SignRecover | Pkcs11MechanismFlags.VerifyRecover))
         {
             return;
         }
@@ -419,7 +437,7 @@ public sealed class SoftHsmCryptRegressionTests
             Assert.True(activeContext.Session.TryDigestFinal(digest, out int digestWritten));
             Assert.Equal(digestLength, digestWritten);
 
-            Pkcs11Mechanism rsaX509 = new(RsaX509MechanismType);
+            Pkcs11Mechanism rsaX509 = new(Pkcs11MechanismTypes.RsaX509);
             activeContext.Session.SignRecoverInit(activeContext.SignKeyHandle, rsaX509);
             int signRecoverLength = activeContext.Session.GetSignRecoverOutputLength(data);
             Assert.True(signRecoverLength > 0);
@@ -523,9 +541,9 @@ public sealed class SoftHsmCryptRegressionTests
 
         using SignVerifyContext activeContext = context!;
         byte[] data = ParseExactHex(Environment.GetEnvironmentVariable("PKCS11_SIGN_ENCRYPT_DATA_HEX") ?? "505152535455565758595A5B5C5D5E5F", 16);
-        Pkcs11Mechanism mechanism = new(RsaX509MechanismType);
+        Pkcs11Mechanism mechanism = new(Pkcs11MechanismTypes.RsaX509);
 
-        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, RsaX509MechanismType, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify | Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt) ||
+        if (!SupportsMechanism(activeContext.Module, activeContext.Session.SlotId, Pkcs11MechanismTypes.RsaX509, Pkcs11MechanismFlags.Sign | Pkcs11MechanismFlags.Verify | Pkcs11MechanismFlags.Encrypt | Pkcs11MechanismFlags.Decrypt) ||
             !TryGetBooleanAttribute(activeContext.Session, activeContext.SignKeyHandle, Pkcs11AttributeTypes.Sign, out bool canSign) ||
             !TryGetBooleanAttribute(activeContext.Session, activeContext.SignKeyHandle, Pkcs11AttributeTypes.Decrypt, out bool canDecrypt) ||
             !TryGetBooleanAttribute(activeContext.Session, activeContext.VerifyKeyHandle, Pkcs11AttributeTypes.Verify, out bool canVerify) ||
@@ -994,7 +1012,27 @@ public sealed class SoftHsmCryptRegressionTests
             created = true;
 
             Pkcs11Mechanism mechanism = new(Pkcs11MechanismTypes.RsaPkcsOaep, Pkcs11MechanismParameters.RsaOaep(Pkcs11MechanismTypes.Sha256, Pkcs11RsaMgfTypes.Mgf1Sha256));
-            byte[] ciphertext = new byte[activeContext.Session.GetEncryptOutputLength(keyPair.PublicKeyHandle, mechanism, plaintext)];
+            int ciphertextLength;
+
+            try
+            {
+                ciphertextLength = activeContext.Session.GetEncryptOutputLength(keyPair.PublicKeyHandle, mechanism, plaintext);
+            }
+            catch (Pkcs11Exception ex) when (IsMechanismParamOrInvalid(ex.Result.Value))
+            {
+                mechanism = new(Pkcs11MechanismTypes.RsaPkcsOaep, Pkcs11MechanismParameters.RsaOaep(Pkcs11MechanismTypes.Sha1, Pkcs11RsaMgfTypes.Mgf1Sha1));
+
+                try
+                {
+                    ciphertextLength = activeContext.Session.GetEncryptOutputLength(keyPair.PublicKeyHandle, mechanism, plaintext);
+                }
+                catch (Pkcs11Exception fallbackEx) when (IsMechanismParamOrInvalid(fallbackEx.Result.Value))
+                {
+                    return;
+                }
+            }
+
+            byte[] ciphertext = new byte[ciphertextLength];
             Assert.True(activeContext.Session.TryEncrypt(keyPair.PublicKeyHandle, mechanism, plaintext, ciphertext, out int ciphertextWritten));
 
             byte[] decrypted = new byte[activeContext.Session.GetDecryptOutputLength(keyPair.PrivateKeyHandle, mechanism, ciphertext.AsSpan(0, ciphertextWritten))];
@@ -1513,6 +1551,94 @@ public sealed class SoftHsmCryptRegressionTests
         Assert.Equal(activeContext.SlotId, replacementSession.GetInfo().SlotId);
     }
 
+    [Fact]
+    public void InitializeSupportsOperatingSystemLockingFlag()
+    {
+        string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
+        if (string.IsNullOrWhiteSpace(modulePath))
+        {
+            return;
+        }
+
+        using Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
+
+        Assert.True(module.GetSlotCount() > 0);
+    }
+
+    [Fact]
+    public unsafe void InitializeSupportsCustomMutexCallbacks()
+    {
+        string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
+        if (string.IsNullOrWhiteSpace(modulePath))
+        {
+            return;
+        }
+
+        using Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        Pkcs11MutexCallbacks mutexCallbacks = new(&CreateMutex, &DestroyMutex, &LockMutex, &UnlockMutex);
+        module.Initialize(new Pkcs11InitializeOptions(mutexCallbacks: mutexCallbacks));
+
+        Assert.True(module.GetSlotCount() > 0);
+    }
+
+    [Fact]
+    public unsafe void InitializeRejectsIncompleteCustomMutexCallbackSets()
+    {
+        string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
+        if (string.IsNullOrWhiteSpace(modulePath))
+        {
+            return;
+        }
+
+        using Pkcs11Module module = Pkcs11Module.Load(modulePath);
+        Pkcs11MutexCallbacks incompleteCallbacks = new(&CreateMutex, null, null, null);
+
+        Assert.Throws<ArgumentException>(() => module.Initialize(new Pkcs11InitializeOptions(mutexCallbacks: incompleteCallbacks)));
+    }
+
+    [Fact]
+    public void DisposeModuleInvalidatesExistingSessionsAndRejectsNewOperations()
+    {
+        if (!TryCreateAdminContext(out AdminContext? context))
+        {
+            return;
+        }
+
+        using AdminContext activeContext = context!;
+        using Pkcs11Session invalidatedSession = activeContext.Module.OpenSession(activeContext.SlotId);
+        Assert.Equal(activeContext.SlotId, invalidatedSession.GetInfo().SlotId);
+
+        activeContext.Module.Dispose();
+
+        Assert.Throws<InvalidOperationException>(() => invalidatedSession.GetInfo());
+        Assert.Throws<ObjectDisposedException>(() => activeContext.Module.OpenSession(activeContext.SlotId));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe CK_RV CreateMutex(void** mutex)
+    {
+        *mutex = NativeMemory.Alloc(1);
+        return CK_RV.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe CK_RV DestroyMutex(void* mutex)
+    {
+        if (mutex is not null)
+        {
+            NativeMemory.Free(mutex);
+        }
+
+        return CK_RV.Ok;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe CK_RV LockMutex(void* mutex) => CK_RV.Ok;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe CK_RV UnlockMutex(void* mutex) => CK_RV.Ok;
+
     private static Pkcs11SlotId FindSlotByTokenLabel(Pkcs11Module module, string tokenLabel)
     {
         int slotCount = module.GetSlotCount();
@@ -1563,7 +1689,7 @@ public sealed class SoftHsmCryptRegressionTests
     }
 
     private static bool IsMechanismParamOrInvalid(nuint result)
-        => result is CkrMechanismInvalid or CkrMechanismParamInvalid;
+        => result is CkrArgumentsBad or CkrMechanismInvalid or CkrMechanismParamInvalid;
 
     private static bool IsKeyMismatchOrInvalid(nuint result)
         => result is CkrKeyTypeInconsistent or CkrKeyUnwrappable or CkrKeyFunctionNotPermitted or CkrMechanismInvalid;
@@ -1784,7 +1910,9 @@ public sealed class SoftHsmCryptRegressionTests
             CkrKeyFunctionNotPermitted or
             CkrMechanismInvalid or
             CkrMechanismParamInvalid or
-            CkrOperationNotInitialized;
+            CkrOperationActive or
+            CkrOperationNotInitialized or
+            CkrArgumentsBad;
 
     private static byte[] GetRequiredAttributeBytes(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType)
     {
