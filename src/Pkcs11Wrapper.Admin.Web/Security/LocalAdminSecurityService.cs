@@ -31,11 +31,11 @@ public sealed class LocalAdminSecurityService(
                 record.UserName,
                 record.Roles.OrderBy(static role => role, StringComparer.Ordinal).ToArray(),
                 record.CreatedUtc,
-                string.Equals(record.UserName, actor.UserName, StringComparison.OrdinalIgnoreCase),
+                string.Equals(record.UserName, actor.Name, StringComparison.OrdinalIgnoreCase),
                 bootstrap.NoticeExists && string.Equals(record.UserName, bootstrap.UserName, StringComparison.OrdinalIgnoreCase)))
             .ToArray();
 
-        return new(actor.UserName, users, bootstrap);
+        return new(actor.Name, users, bootstrap);
     }
 
     public async Task CreateUserAsync(CreateLocalAdminUserRequest request, CancellationToken cancellationToken = default)
@@ -66,7 +66,7 @@ public sealed class LocalAdminSecurityService(
 
         AdminActorInfo actor = actorContext.GetCurrent();
         string userName = ValidateUserName(request.UserName);
-        if (string.Equals(actor.UserName, userName, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(actor.Name, userName, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Current signed-in admin cannot change their own roles from this screen.");
         }
@@ -111,7 +111,7 @@ public sealed class LocalAdminSecurityService(
 
         AdminActorInfo actor = actorContext.GetCurrent();
         string normalizedUserName = ValidateUserName(userName);
-        if (string.Equals(actor.UserName, normalizedUserName, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(actor.Name, normalizedUserName, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Current signed-in admin cannot delete their own account from this screen.");
         }

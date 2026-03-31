@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Pkcs11Wrapper.Admin.Application\Pkcs11Wrapper.Admin.Application.csproj" />
     <ProjectReference Include="..\..\src\Pkcs11Wrapper.Admin.Infrastructure\Pkcs11Wrapper.Admin.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Pkcs11Wrapper.Admin.Web\Pkcs11Wrapper.Admin.Web.csproj" />
   </ItemGroup>
 
 </Project>

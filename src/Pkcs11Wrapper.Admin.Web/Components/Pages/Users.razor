@@ -68,7 +68,7 @@ else
             @if (_selectedUser is not null)
             {
                 <div class="card shadow-sm">
-                    <div class="card-header">Manage user: @_selectedUser.UserName</div>
+                    <div class="card-header">Manage user: @_selectedUser.Username</div>
                     <div class="card-body row g-3">
                         <div class="col-12 small text-muted">
                             Created: @_selectedUser.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
@@ -110,10 +110,10 @@ else
                         <div class="col-12">
                             <label class="form-label">Delete confirmation</label>
                             <input class="form-control" @bind="_deleteConfirmation" placeholder="Type username to confirm" disabled="@_selectedUser.IsCurrentUser" />
-                            <div class="form-text">Type <code>@_selectedUser.UserName</code> to delete this user.</div>
+                            <div class="form-text">Type <code>@_selectedUser.Username</code> to delete this user.</div>
                         </div>
                         <div class="col-12 d-flex gap-2 flex-wrap">
-                            <button class="btn btn-outline-danger" @onclick="DeleteUserAsync" disabled="@(_selectedUser.IsCurrentUser || !string.Equals(_deleteConfirmation, _selectedUser.UserName, StringComparison.Ordinal))">Delete user</button>
+                            <button class="btn btn-outline-danger" @onclick="DeleteUserAsync" disabled="@(_selectedUser.IsCurrentUser || !string.Equals(_deleteConfirmation, _selectedUser.Username, StringComparison.Ordinal))">Delete user</button>
                             @if (_selectedUser.IsCurrentUser)
                             {
                                 <span class="small text-muted align-self-center">Current signed-in admin cannot delete their own account from this screen.</span>

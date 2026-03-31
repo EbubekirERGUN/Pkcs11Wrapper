@@ -310,11 +310,25 @@ Rotate this password after first sign-in and then retire this file.
     private static AdminWebUserRecord Clone(AdminWebUserRecord record)
         => record with { Roles = [.. record.Roles] };
 
-    private string StorageRoot => options.Value.RootPath;
+    private string StorageRoot => ResolveStorageRoot(options.Value);
 
     private string UserFilePath => Path.Combine(StorageRoot, "admin-users.json");
 
     private string BootstrapNoticePath => Path.Combine(StorageRoot, "bootstrap-admin.txt");
+
+    private static string ResolveStorageRoot(AdminStorageOptions options)
+    {
+        foreach (string propertyName in new[] { "DataRoot", "RootPath", "Path", "StorageRootPath", "BasePath", "DataPath" })
+        {
+            object? value = typeof(AdminStorageOptions).GetProperty(propertyName)?.GetValue(options);
+            if (value is string path && !string.IsNullOrWhiteSpace(path))
+            {
+                return path;
+            }
+        }
+
+        return Path.Combine(AppContext.BaseDirectory, "App_Data");
+    }
 
     private static string GenerateBootstrapPassword()
         => Convert.ToBase64String(Guid.NewGuid().ToByteArray())

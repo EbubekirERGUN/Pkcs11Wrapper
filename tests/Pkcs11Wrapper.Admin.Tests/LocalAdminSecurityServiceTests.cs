@@ -111,7 +111,7 @@ public sealed class LocalAdminSecurityServiceTests
             string rootPath = Path.Combine(Path.GetTempPath(), "pkcs11wrapper-admin-tests", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(rootPath);
 
-            LocalAdminUserStore store = new(Options.Create(new AdminStorageOptions { RootPath = rootPath }));
+            LocalAdminUserStore store = new(Options.Create(new AdminStorageOptions { DataRoot = rootPath }));
             AuditLogService auditLog = new(new InMemoryAuditLogStore(), new TestActorContext(currentUserName));
             LocalAdminSecurityService service = new(store, auditLog, new AllowAllAuthorizationService(), new TestActorContext(currentUserName));
             await store.EnsureSeedDataAsync();

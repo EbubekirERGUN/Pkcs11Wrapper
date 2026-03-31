@@ -14,15 +14,15 @@ public static class AccountEndpoints
         string password = form["password"].ToString();
         string? returnUrl = form["returnUrl"].ToString();
 
-        AdminWebUserRecord? user = await users.ValidateCredentialsAsync(username, password);
-        if (user is null)
+        (bool success, AdminWebUserRecord? user) = await users.ValidateCredentialsAsync(username, password);
+        if (!success || user is null)
         {
             return Results.LocalRedirect($"/login?error=1&returnUrl={Uri.EscapeDataString(string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl)}");
         }
 
         List<Claim> claims =
         [
-            new(ClaimTypes.Name, user.Username),
+            new(ClaimTypes.Name, user.UserName),
             .. user.Roles.Select(role => new Claim(ClaimTypes.Role, role))
         ];
 
