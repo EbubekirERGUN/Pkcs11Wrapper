@@ -48,6 +48,16 @@
                     </NavLink>
                 </div>
 
+                <AuthorizeView Roles="operator,admin">
+                    <Authorized Context="operatorContext">
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="lab">
+                                <span class="bi bi-terminal-nav-menu" aria-hidden="true"></span> PKCS#11 Lab
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="sessions">
                         <span class="bi bi-activity-nav-menu" aria-hidden="true"></span> Sessions

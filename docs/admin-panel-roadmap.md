@@ -9,6 +9,7 @@ Build a Blazor Server administration surface on top of `Pkcs11Wrapper` so operat
 - inspect and manage keys/objects
 - monitor application-owned sessions
 - review audit events
+- run controlled PKCS#11 diagnostic/lab operations against a connected module
 
 ## Phase A - Foundation (started)
 
@@ -94,11 +95,12 @@ Current boundaries:
 
 ## Phase E - UX / product polish
 
-Status: planned
+Status: in progress
 
 Goals:
 - dashboard cards and health widgets
 - filtering/sorting/paging
+- operator-facing PKCS#11 diagnostic / lab console
 - release-ready docs and screenshots
 - optional API split if the web host needs to be decoupled later
 
@@ -107,3 +109,4 @@ Goals:
 - capability/mechanism-aware key-management UX: slot-level mechanism probing, pre-submit warnings, and disabled generate/import actions when the selected slot obviously cannot satisfy them
 - object edit affordances are now more object-aware: obvious unsupported toggles are disabled based on object class + `CKA_MODIFIABLE` visibility
 - object copy workflow delivered via `C_CopyObject`, including label/ID/capability override template fields and admin-layer validation
+- operator-facing PKCS#11 Lab page delivered: controlled transient-session diagnostic operations for module info, interface discovery, slot snapshot, mechanism list/info, session info, RNG, digest, and object search; plus request validation, audit logging, and protected-PIN reuse

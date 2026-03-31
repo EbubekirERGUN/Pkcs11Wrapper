@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
@@ -194,6 +195,49 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         {
             await auditLog.WriteAsync("Configuration", "Import", importTarget, "Failure", ex.Message, cancellationToken: cancellationToken);
             throw;
+        }
+    }
+
+    public async Task<Pkcs11LabExecutionResult> ExecuteLabAsync(Pkcs11LabRequest request, CancellationToken cancellationToken = default)
+    {
+        authorization.DemandOperator();
+        ArgumentNullException.ThrowIfNull(request);
+        ValidateLabRequest(request);
+
+        HsmDeviceProfile device = await RequireDeviceAsync(request.DeviceId, cancellationToken);
+        string target = request.SlotId is nuint slotIdValue
+            ? $"{device.Name}/slot-{slotIdValue}"
+            : device.Name;
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            using Pkcs11Module module = CreateInitializedModule(device);
+            (string Summary, string OutputText, List<string> Notes) execution = request.Operation switch
+            {
+                Pkcs11LabOperation.ModuleInfo => ExecuteModuleInfoLab(module),
+                Pkcs11LabOperation.InterfaceDiscovery => ExecuteInterfaceDiscoveryLab(module),
+                Pkcs11LabOperation.SlotSnapshot => ExecuteSlotSnapshotLab(module),
+                Pkcs11LabOperation.MechanismList => ExecuteMechanismListLab(module, request.SlotId!.Value),
+                Pkcs11LabOperation.MechanismInfo => ExecuteMechanismInfoLab(module, request.SlotId!.Value, request.MechanismTypeText!),
+                Pkcs11LabOperation.SessionInfo => ExecuteSessionInfoLab(module, request),
+                Pkcs11LabOperation.GenerateRandom => ExecuteGenerateRandomLab(module, request),
+                Pkcs11LabOperation.DigestText => ExecuteDigestTextLab(module, request),
+                Pkcs11LabOperation.FindObjects => ExecuteFindObjectsLab(device.Id, module, request),
+                _ => throw new ArgumentOutOfRangeException(nameof(request.Operation), request.Operation, "Unsupported PKCS#11 lab operation.")
+            };
+
+            stopwatch.Stop();
+            await auditLog.WriteAsync("Lab", request.Operation.ToString(), target, "Success", execution.Summary, cancellationToken: cancellationToken);
+            return new(request.Operation.ToString(), true, execution.Summary, execution.OutputText, execution.Notes, stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            string summary = $"{request.Operation} failed: {ex.Message}";
+            string output = $"{ex.GetType().Name}: {ex.Message}";
+            await auditLog.WriteAsync("Lab", request.Operation.ToString(), target, "Failure", ex.Message, cancellationToken: cancellationToken);
+            return new(request.Operation.ToString(), false, summary, output, [], stopwatch.ElapsedMilliseconds);
         }
     }
 
@@ -580,6 +624,46 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return new KeyManagementResult("CopyObject", summary, [copied.Value], request.Label.Trim(), id.Length == 0 ? null : Convert.ToHexString(id));
     }
 
+    public static void ValidateLabRequest(Pkcs11LabRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.DeviceId == Guid.Empty)
+        {
+            throw new ArgumentException("Device selection is required.", nameof(request));
+        }
+
+        if (OperationRequiresSlot(request.Operation) && request.SlotId is null)
+        {
+            throw new InvalidOperationException($"Operation '{request.Operation}' requires a slot selection.");
+        }
+
+        if (request.Operation == Pkcs11LabOperation.MechanismInfo && string.IsNullOrWhiteSpace(request.MechanismTypeText))
+        {
+            throw new ArgumentException("Mechanism type is required for mechanism-info queries.", nameof(request));
+        }
+
+        if (request.Operation == Pkcs11LabOperation.GenerateRandom && (request.RandomLength < 1 || request.RandomLength > 4096))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Random length must be between 1 and 4096 bytes.");
+        }
+
+        if (request.Operation == Pkcs11LabOperation.DigestText && string.IsNullOrWhiteSpace(request.TextInput))
+        {
+            throw new ArgumentException("Digest input text is required.", nameof(request));
+        }
+
+        if (request.Operation == Pkcs11LabOperation.FindObjects && (request.MaxObjects < 1 || request.MaxObjects > 256))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Maximum object count must be between 1 and 256.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.IdHex))
+        {
+            _ = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+        }
+    }
+
     public static void ValidateGenerateAesKeyRequest(GenerateAesKeyRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -708,6 +792,341 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         => string.IsNullOrWhiteSpace(label)
             ? $"{DestroyConfirmationPrefix}{handle}"
             : $"{DestroyConfirmationPrefix}{handle} {label.Trim()}";
+
+    private static bool OperationRequiresSlot(Pkcs11LabOperation operation)
+        => operation is Pkcs11LabOperation.MechanismList
+            or Pkcs11LabOperation.MechanismInfo
+            or Pkcs11LabOperation.SessionInfo
+            or Pkcs11LabOperation.GenerateRandom
+            or Pkcs11LabOperation.DigestText
+            or Pkcs11LabOperation.FindObjects;
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteModuleInfoLab(Pkcs11Module module)
+    {
+        Pkcs11ModuleInfo info = module.GetInfo();
+        StringBuilder output = new();
+        output.AppendLine($"Cryptoki version: {info.CryptokiVersion}");
+        output.AppendLine($"Function list version: {module.FunctionListVersion}");
+        output.AppendLine($"Manufacturer: {info.ManufacturerId}");
+        output.AppendLine($"Library description: {info.LibraryDescription}");
+        output.AppendLine($"Library version: {info.LibraryVersion}");
+        output.AppendLine($"Flags: 0x{info.Flags:x}");
+        output.AppendLine($"Interface discovery exported: {module.SupportsInterfaceDiscovery}");
+
+        List<string> notes = [];
+        if (!module.SupportsInterfaceDiscovery)
+        {
+            notes.Add("Many PKCS#11 modules still expose only the classic function list; this is normal when interface discovery is false.");
+        }
+
+        return ("Read module-level PKCS#11 metadata.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteInterfaceDiscoveryLab(Pkcs11Module module)
+    {
+        StringBuilder output = new();
+        List<string> notes = [];
+
+        if (!module.SupportsInterfaceDiscovery)
+        {
+            output.AppendLine("Interface discovery is not exported by this module.");
+            notes.Add("`C_GetInterface*` support is optional and many deployed modules still omit it.");
+            return ("Module does not expose PKCS#11 interface discovery.", output.ToString(), notes);
+        }
+
+        int interfaceCount = module.GetInterfaceCount();
+        output.AppendLine($"Interface count: {interfaceCount}");
+        if (interfaceCount == 0)
+        {
+            return ("Module exported interface discovery but returned no interfaces.", output.ToString(), notes);
+        }
+
+        Pkcs11Interface[] interfaces = new Pkcs11Interface[interfaceCount];
+        if (!module.TryGetInterfaces(interfaces, out int written))
+        {
+            throw new InvalidOperationException("Failed to read PKCS#11 interface list.");
+        }
+
+        for (int i = 0; i < written; i++)
+        {
+            Pkcs11Interface current = interfaces[i];
+            output.AppendLine($"- {current.Name} | Version={current.Version} | Flags={current.Flags}");
+        }
+
+        return ($"Read {written} PKCS#11 interface declaration(s).", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteSlotSnapshotLab(Pkcs11Module module)
+    {
+        int slotCount = module.GetSlotCount();
+        StringBuilder output = new();
+        output.AppendLine($"Slot count: {slotCount}");
+
+        if (slotCount == 0)
+        {
+            return ("Module reported zero slots.", output.ToString(), []);
+        }
+
+        Pkcs11SlotId[] slots = new Pkcs11SlotId[slotCount];
+        if (!module.TryGetSlots(slots, out int written))
+        {
+            throw new InvalidOperationException("Failed to enumerate slot identifiers.");
+        }
+
+        for (int i = 0; i < written; i++)
+        {
+            Pkcs11SlotId slotId = slots[i];
+            Pkcs11SlotInfo slotInfo = module.GetSlotInfo(slotId);
+            output.AppendLine($"[{slotId.Value}] {slotInfo.SlotDescription}");
+            output.AppendLine($"  Manufacturer: {slotInfo.ManufacturerId}");
+            output.AppendLine($"  Flags: {slotInfo.Flags}");
+            output.AppendLine($"  HW/FW: {slotInfo.HardwareVersion} / {slotInfo.FirmwareVersion}");
+            if (module.TryGetTokenInfo(slotId, out Pkcs11TokenInfo tokenInfo))
+            {
+                output.AppendLine($"  Token: {tokenInfo.Label} | {tokenInfo.Model} | Serial={tokenInfo.SerialNumber}");
+                output.AppendLine($"  TokenFlags: {tokenInfo.Flags}");
+                output.AppendLine($"  Sessions: {tokenInfo.SessionCount}/{tokenInfo.MaxSessionCount} | RW={tokenInfo.RwSessionCount}/{tokenInfo.MaxRwSessionCount}");
+                output.AppendLine($"  Memory public/private free: {tokenInfo.FreePublicMemory}/{tokenInfo.FreePrivateMemory}");
+            }
+            else
+            {
+                output.AppendLine("  Token: not present");
+            }
+        }
+
+        return ($"Read snapshot information for {written} slot(s).", output.ToString(), []);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteMechanismListLab(Pkcs11Module module, nuint slotIdValue)
+    {
+        Pkcs11SlotId slotId = new(slotIdValue);
+        int mechanismCount = module.GetMechanismCount(slotId);
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {slotIdValue}");
+        output.AppendLine($"Mechanism count: {mechanismCount}");
+
+        if (mechanismCount == 0)
+        {
+            return ($"Slot {slotIdValue} reported zero mechanisms.", output.ToString(), []);
+        }
+
+        Pkcs11MechanismType[] mechanisms = new Pkcs11MechanismType[mechanismCount];
+        if (!module.TryGetMechanisms(slotId, mechanisms, out int written))
+        {
+            throw new InvalidOperationException($"Failed to enumerate mechanisms for slot {slotIdValue}.");
+        }
+
+        for (int i = 0; i < written; i++)
+        {
+            Pkcs11MechanismType mechanism = mechanisms[i];
+            Pkcs11MechanismInfo info = module.GetMechanismInfo(slotId, mechanism);
+            output.AppendLine($"- {DescribeMechanismType(mechanism)} | MinKey={info.MinKeySize} | MaxKey={info.MaxKeySize} | Flags={info.Flags}");
+        }
+
+        return ($"Enumerated {written} mechanism(s) for slot {slotIdValue}.", output.ToString(), []);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteMechanismInfoLab(Pkcs11Module module, nuint slotIdValue, string mechanismTypeText)
+    {
+        Pkcs11MechanismType mechanismType = ParseMechanismTypeText(mechanismTypeText);
+        Pkcs11MechanismInfo info = module.GetMechanismInfo(new Pkcs11SlotId(slotIdValue), mechanismType);
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {slotIdValue}");
+        output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
+        output.AppendLine($"Minimum key size: {info.MinKeySize}");
+        output.AppendLine($"Maximum key size: {info.MaxKeySize}");
+        output.AppendLine($"Flags: {info.Flags}");
+        return ($"Read mechanism details for {DescribeMechanismType(mechanismType)}.", output.ToString(), []);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteSessionInfoLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11SessionInfo info = session.GetInfo();
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {info.SlotId.Value}");
+        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"State: {info.State}");
+        output.AppendLine($"Flags: {info.Flags}");
+        output.AppendLine($"Device error: {info.DeviceError}");
+        return ($"Opened a transient {(request.OpenReadWriteSession ? "RW" : "RO")} session and read `C_GetSessionInfo`.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteGenerateRandomLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        byte[] random = new byte[request.RandomLength];
+        session.GenerateRandom(random);
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Random length: {request.RandomLength}");
+        output.AppendLine($"Random hex: {Convert.ToHexString(random)}");
+        return ($"Generated {request.RandomLength} random byte(s) from the token RNG.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteDigestTextLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11MechanismType mechanismType = ResolveDigestMechanism(request.DigestAlgorithm);
+        byte[] data = Encoding.UTF8.GetBytes(request.TextInput ?? string.Empty);
+        int digestLength = session.GetDigestOutputLength(new Pkcs11Mechanism(mechanismType), data);
+        byte[] digest = new byte[Math.Max(digestLength, 64)];
+        if (!session.TryDigest(new Pkcs11Mechanism(mechanismType), data, digest, out int written))
+        {
+            throw new InvalidOperationException("The module did not produce a digest output buffer.");
+        }
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
+        output.AppendLine($"Input bytes: {data.Length}");
+        output.AppendLine($"Input text: {request.TextInput}");
+        output.AppendLine($"Digest hex: {Convert.ToHexString(digest, 0, written)}");
+        return ($"Computed {DescribeMechanismType(mechanismType)} digest for {data.Length} byte(s) of UTF-8 input.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteFindObjectsLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        byte[] label = string.IsNullOrWhiteSpace(request.LabelFilter) ? [] : Encoding.UTF8.GetBytes(request.LabelFilter.Trim());
+        byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+        Pkcs11ObjectClass? objectClass = ResolveLabObjectClass(request.ObjectClassFilter);
+        Pkcs11ObjectSearchParameters search = new(label, id, objectClass);
+        List<Pkcs11ObjectHandle> handles = EnumerateObjectHandles(session, search, request.MaxObjects, out bool truncated);
+
+        if (label.Length == 0 && id.Length == 0 && objectClass is null)
+        {
+            notes.Add("No search filters were supplied; the lab is showing the first matching objects up to the max-object limit.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.UserPin))
+        {
+            notes.Add("Without CKU_USER login, private objects may be omitted by token policy.");
+        }
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Max objects: {request.MaxObjects}");
+        output.AppendLine($"Label filter: {(string.IsNullOrWhiteSpace(request.LabelFilter) ? "<none>" : request.LabelFilter.Trim())}");
+        output.AppendLine($"ID filter: {(string.IsNullOrWhiteSpace(request.IdHex) ? "<none>" : request.IdHex.Trim())}");
+        output.AppendLine($"Object class filter: {request.ObjectClassFilter}");
+        output.AppendLine($"Returned objects: {handles.Count}{(truncated ? "+" : string.Empty)}");
+
+        foreach (Pkcs11ObjectHandle handle in handles)
+        {
+            HsmKeyObjectSummary summary = ReadObjectSummary(deviceId, request.SlotId.Value, session, handle);
+            output.AppendLine($"- Handle={summary.Handle} | Label={summary.Label ?? "<null>"} | Id={summary.IdHex ?? "<null>"} | Class={summary.ObjectClass} | KeyType={summary.KeyType} | Caps={DescribeCapabilities(summary)}");
+        }
+
+        string summaryText = truncated
+            ? $"Found at least {handles.Count} object(s); output truncated at the configured limit."
+            : $"Found {handles.Count} object(s) matching the current search filters.";
+        return (summaryText, output.ToString(), notes);
+    }
+
+    private static string LoginLabSessionIfRequested(Pkcs11Session session, Pkcs11LabRequest request, List<string> notes)
+    {
+        if (string.IsNullOrWhiteSpace(request.UserPin))
+        {
+            return "public";
+        }
+
+        if (!request.LoginUserIfPinProvided)
+        {
+            notes.Add("A PIN was supplied but login was disabled for this run, so the operation stayed in public session state.");
+            return "public";
+        }
+
+        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(request.UserPin));
+        notes.Add("Authenticated the transient lab session as CKU_USER using the supplied PIN.");
+        return "user";
+    }
+
+    private static Pkcs11MechanismType ResolveDigestMechanism(Pkcs11LabDigestAlgorithm algorithm)
+        => algorithm switch
+        {
+            Pkcs11LabDigestAlgorithm.Sha1 => Pkcs11MechanismTypes.Sha1,
+            Pkcs11LabDigestAlgorithm.Sha256 => Pkcs11MechanismTypes.Sha256,
+            Pkcs11LabDigestAlgorithm.Sha384 => Pkcs11MechanismTypes.Sha384,
+            Pkcs11LabDigestAlgorithm.Sha512 => Pkcs11MechanismTypes.Sha512,
+            _ => throw new ArgumentOutOfRangeException(nameof(algorithm), algorithm, "Unsupported digest algorithm.")
+        };
+
+    private static Pkcs11ObjectClass? ResolveLabObjectClass(Pkcs11LabObjectClassFilter filter)
+        => filter switch
+        {
+            Pkcs11LabObjectClassFilter.Any => null,
+            Pkcs11LabObjectClassFilter.Data => Pkcs11ObjectClasses.Data,
+            Pkcs11LabObjectClassFilter.Certificate => Pkcs11ObjectClasses.Certificate,
+            Pkcs11LabObjectClassFilter.PublicKey => Pkcs11ObjectClasses.PublicKey,
+            Pkcs11LabObjectClassFilter.PrivateKey => Pkcs11ObjectClasses.PrivateKey,
+            Pkcs11LabObjectClassFilter.SecretKey => Pkcs11ObjectClasses.SecretKey,
+            _ => throw new ArgumentOutOfRangeException(nameof(filter), filter, "Unsupported object-class filter.")
+        };
+
+    private static Pkcs11MechanismType ParseMechanismTypeText(string value)
+    {
+        string trimmed = value.Trim();
+        NumberStyles styles = NumberStyles.Integer;
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[2..];
+            styles = NumberStyles.AllowHexSpecifier;
+        }
+
+        if (!nuint.TryParse(trimmed, styles, CultureInfo.InvariantCulture, out nuint parsed))
+        {
+            throw new ArgumentException($"Mechanism type '{value}' is not a valid hex/decimal number.", nameof(value));
+        }
+
+        return new Pkcs11MechanismType(parsed);
+    }
+
+    private static string DescribeMechanismType(Pkcs11MechanismType type)
+        => type.Value switch
+        {
+            0x00000000u => "CKM_RSA_PKCS_KEY_PAIR_GEN (0x0)",
+            0x00000001u => "CKM_RSA_PKCS (0x1)",
+            0x00000009u => "CKM_RSA_PKCS_OAEP (0x9)",
+            0x00000220u => "CKM_SHA_1 (0x220)",
+            0x00000250u => "CKM_SHA256 (0x250)",
+            0x00000260u => "CKM_SHA384 (0x260)",
+            0x00000270u => "CKM_SHA512 (0x270)",
+            0x00001080u => "CKM_AES_KEY_GEN (0x1080)",
+            0x00001082u => "CKM_AES_ECB (0x1082)",
+            0x00001085u => "CKM_AES_CBC (0x1085)",
+            0x00001086u => "CKM_AES_MAC (0x1086)",
+            0x0000108au => "CKM_AES_CTR (0x108a)",
+            0x0000108du => "CKM_AES_GCM (0x108d)",
+            0x00002109u => "CKM_AES_KEY_WRAP_PAD (0x2109)",
+            _ => $"0x{type.Value:x}"
+        };
+
+    private static string DescribeCapabilities(HsmKeyObjectSummary summary)
+    {
+        List<string> capabilities = [];
+        if (summary.CanEncrypt == true) capabilities.Add("Encrypt");
+        if (summary.CanDecrypt == true) capabilities.Add("Decrypt");
+        if (summary.CanSign == true) capabilities.Add("Sign");
+        if (summary.CanVerify == true) capabilities.Add("Verify");
+        if (summary.CanWrap == true) capabilities.Add("Wrap");
+        if (summary.CanUnwrap == true) capabilities.Add("Unwrap");
+        return capabilities.Count == 0 ? "<none>" : string.Join(", ", capabilities);
+    }
 
     private static void ValidateConfigurationBundle(AdminConfigurationExportBundle bundle)
     {
@@ -859,6 +1278,31 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             for (int i = 0; i < written; i++)
             {
                 results.Add(buffer[i]);
+            }
+        }
+        while (hasMore);
+
+        return results;
+    }
+
+    private static List<Pkcs11ObjectHandle> EnumerateObjectHandles(Pkcs11Session session, Pkcs11ObjectSearchParameters search, int maxCount, out bool truncated)
+    {
+        List<Pkcs11ObjectHandle> results = [];
+        Pkcs11ObjectHandle[] buffer = new Pkcs11ObjectHandle[Math.Min(Math.Max(maxCount, 1), 64)];
+        bool hasMore;
+        truncated = false;
+
+        do
+        {
+            session.TryFindObjects(search, buffer, out int written, out hasMore);
+            for (int i = 0; i < written; i++)
+            {
+                results.Add(buffer[i]);
+                if (results.Count >= maxCount)
+                {
+                    truncated = hasMore || i + 1 < written;
+                    return results;
+                }
             }
         }
         while (hasMore);
