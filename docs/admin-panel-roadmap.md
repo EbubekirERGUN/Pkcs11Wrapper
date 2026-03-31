@@ -110,3 +110,4 @@ Goals:
 - object edit affordances are now more object-aware: obvious unsupported toggles are disabled based on object class + `CKA_MODIFIABLE` visibility
 - object copy workflow delivered via `C_CopyObject`, including label/ID/capability override template fields and admin-layer validation
 - operator-facing PKCS#11 Lab page delivered: controlled transient-session diagnostic operations for module info, interface discovery, slot snapshot, mechanism list/info, session info, RNG, digest, and object search; plus request validation, audit logging, and protected-PIN reuse
+- PKCS#11 Lab second wave delivered: sign/verify and encrypt/decrypt experiments with handle + mechanism input, payload mode selection (UTF-8 vs hex), result inspection, parameterized-mechanism warnings, and validation rules for common operator mistakes

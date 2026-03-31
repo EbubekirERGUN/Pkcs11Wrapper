@@ -44,6 +44,93 @@ public sealed class Pkcs11LabValidationTests
         Assert.Contains("Mechanism type", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ValidateLabRequestRequiresKeyHandleForSign()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.SignData,
+            MechanismTypeText = "0x1",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "hello"
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Key handle", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRequiresPayloadForEncrypt()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.EncryptData,
+            MechanismTypeText = "0x1082",
+            KeyHandleText = "42",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Hex,
+            DataHex = "   "
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Hex payload", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRequiresSignatureForVerify()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.VerifySignature,
+            MechanismTypeText = "0x40",
+            KeyHandleText = "77",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "hello"
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Signature hex", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRequiresCiphertextForDecrypt()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.DecryptData,
+            MechanismTypeText = "0x1",
+            KeyHandleText = "42"
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Ciphertext hex", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestAcceptsVerifySignatureWithHexPayload()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.VerifySignature,
+            MechanismTypeText = "0x1",
+            KeyHandleText = "42",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Hex,
+            DataHex = "DEADBEEF",
+            SignatureHex = "AABBCC"
+        };
+
+        HsmAdminService.ValidateLabRequest(request);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(4097)]

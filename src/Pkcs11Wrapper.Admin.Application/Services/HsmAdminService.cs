@@ -224,6 +224,10 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 Pkcs11LabOperation.GenerateRandom => ExecuteGenerateRandomLab(module, request),
                 Pkcs11LabOperation.DigestText => ExecuteDigestTextLab(module, request),
                 Pkcs11LabOperation.FindObjects => ExecuteFindObjectsLab(device.Id, module, request),
+                Pkcs11LabOperation.SignData => ExecuteSignDataLab(module, request),
+                Pkcs11LabOperation.VerifySignature => ExecuteVerifySignatureLab(module, request),
+                Pkcs11LabOperation.EncryptData => ExecuteEncryptDataLab(module, request),
+                Pkcs11LabOperation.DecryptData => ExecuteDecryptDataLab(module, request),
                 _ => throw new ArgumentOutOfRangeException(nameof(request.Operation), request.Operation, "Unsupported PKCS#11 lab operation.")
             };
 
@@ -643,6 +647,16 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             throw new ArgumentException("Mechanism type is required for mechanism-info queries.", nameof(request));
         }
 
+        if (request.Operation is Pkcs11LabOperation.SignData or Pkcs11LabOperation.VerifySignature or Pkcs11LabOperation.EncryptData or Pkcs11LabOperation.DecryptData)
+        {
+            if (string.IsNullOrWhiteSpace(request.MechanismTypeText))
+            {
+                throw new ArgumentException("Mechanism type is required for cryptographic lab operations.", nameof(request));
+            }
+
+            _ = ParseLabObjectHandleText(request.KeyHandleText);
+        }
+
         if (request.Operation == Pkcs11LabOperation.GenerateRandom && (request.RandomLength < 1 || request.RandomLength > 4096))
         {
             throw new ArgumentOutOfRangeException(nameof(request), "Random length must be between 1 and 4096 bytes.");
@@ -658,9 +672,54 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             throw new ArgumentOutOfRangeException(nameof(request), "Maximum object count must be between 1 and 256.");
         }
 
+        if (request.Operation is Pkcs11LabOperation.SignData or Pkcs11LabOperation.VerifySignature or Pkcs11LabOperation.EncryptData)
+        {
+            ValidateLabPayload(request, requireSignature: request.Operation == Pkcs11LabOperation.VerifySignature);
+        }
+
+        if (request.Operation == Pkcs11LabOperation.DecryptData)
+        {
+            if (string.IsNullOrWhiteSpace(request.DataHex))
+            {
+                throw new ArgumentException("Ciphertext hex is required for decrypt operations.", nameof(request));
+            }
+
+            _ = ParseRequiredHex(request.DataHex, nameof(request.DataHex));
+        }
+
         if (!string.IsNullOrWhiteSpace(request.IdHex))
         {
             _ = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+        }
+    }
+
+    private static void ValidateLabPayload(Pkcs11LabRequest request, bool requireSignature)
+    {
+        if (request.PayloadEncoding == Pkcs11LabPayloadEncoding.Utf8Text)
+        {
+            if (string.IsNullOrWhiteSpace(request.TextInput))
+            {
+                throw new ArgumentException("Text input is required for UTF-8 payload mode.", nameof(request));
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(request.DataHex))
+            {
+                throw new ArgumentException("Hex payload is required for hex payload mode.", nameof(request));
+            }
+
+            _ = ParseRequiredHex(request.DataHex, nameof(request.DataHex));
+        }
+
+        if (requireSignature)
+        {
+            if (string.IsNullOrWhiteSpace(request.SignatureHex))
+            {
+                throw new ArgumentException("Signature hex is required for verify operations.", nameof(request));
+            }
+
+            _ = ParseRequiredHex(request.SignatureHex, nameof(request.SignatureHex));
         }
     }
 
@@ -799,7 +858,11 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             or Pkcs11LabOperation.SessionInfo
             or Pkcs11LabOperation.GenerateRandom
             or Pkcs11LabOperation.DigestText
-            or Pkcs11LabOperation.FindObjects;
+            or Pkcs11LabOperation.FindObjects
+            or Pkcs11LabOperation.SignData
+            or Pkcs11LabOperation.VerifySignature
+            or Pkcs11LabOperation.EncryptData
+            or Pkcs11LabOperation.DecryptData;
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteModuleInfoLab(Pkcs11Module module)
     {
@@ -996,6 +1059,131 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return ($"Computed {DescribeMechanismType(mechanismType)} digest for {data.Length} byte(s) of UTF-8 input.", output.ToString(), notes);
     }
 
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteSignDataLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
+        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] data = ResolveLabPayload(request, forDecryptInput: false);
+        Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        int signatureLength = session.GetSignOutputLength(keyHandle, new Pkcs11Mechanism(mechanismType), data);
+        byte[] signature = new byte[Math.Max(signatureLength, 4096)];
+        if (!session.TrySign(keyHandle, new Pkcs11Mechanism(mechanismType), data, signature, out int written))
+        {
+            throw new InvalidOperationException("The module did not return a signature buffer.");
+        }
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
+        output.AppendLine($"Key handle: {keyHandle.Value}");
+        output.AppendLine($"Input bytes: {data.Length}");
+        if (request.PayloadEncoding == Pkcs11LabPayloadEncoding.Utf8Text)
+        {
+            output.AppendLine($"Input text: {request.TextInput}");
+        }
+        output.AppendLine($"Input hex: {Convert.ToHexString(data)}");
+        output.AppendLine($"Signature hex: {Convert.ToHexString(signature, 0, written)}");
+        notes.Add("Signing often requires a private key and CKU_USER login; token policy may still reject the operation even with a PIN.");
+        return ($"Signed {data.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteVerifySignatureLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
+        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] data = ResolveLabPayload(request, forDecryptInput: false);
+        byte[] signature = ParseRequiredHex(request.SignatureHex, nameof(request.SignatureHex));
+        Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        bool verified = session.Verify(keyHandle, new Pkcs11Mechanism(mechanismType), data, signature);
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
+        output.AppendLine($"Key handle: {keyHandle.Value}");
+        output.AppendLine($"Input bytes: {data.Length}");
+        if (request.PayloadEncoding == Pkcs11LabPayloadEncoding.Utf8Text)
+        {
+            output.AppendLine($"Input text: {request.TextInput}");
+        }
+        output.AppendLine($"Input hex: {Convert.ToHexString(data)}");
+        output.AppendLine($"Signature hex: {Convert.ToHexString(signature)}");
+        output.AppendLine($"Verify result: {verified}");
+        return ($"Verification {(verified ? "passed" : "failed")} for handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteEncryptDataLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
+        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] plaintext = ResolveLabPayload(request, forDecryptInput: false);
+        Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        int cipherLength = session.GetEncryptOutputLength(keyHandle, new Pkcs11Mechanism(mechanismType), plaintext);
+        byte[] ciphertext = new byte[Math.Max(cipherLength, plaintext.Length + 1024)];
+        if (!session.TryEncrypt(keyHandle, new Pkcs11Mechanism(mechanismType), plaintext, ciphertext, out int written))
+        {
+            throw new InvalidOperationException("The module did not return a ciphertext buffer.");
+        }
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
+        output.AppendLine($"Key handle: {keyHandle.Value}");
+        output.AppendLine($"Plaintext bytes: {plaintext.Length}");
+        if (request.PayloadEncoding == Pkcs11LabPayloadEncoding.Utf8Text)
+        {
+            output.AppendLine($"Plaintext text: {request.TextInput}");
+        }
+        output.AppendLine($"Plaintext hex: {Convert.ToHexString(plaintext)}");
+        output.AppendLine($"Ciphertext hex: {Convert.ToHexString(ciphertext, 0, written)}");
+        return ($"Encrypted {plaintext.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteDecryptDataLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
+        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] ciphertext = ResolveLabPayload(request, forDecryptInput: true);
+        Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        int plainLength = session.GetDecryptOutputLength(keyHandle, new Pkcs11Mechanism(mechanismType), ciphertext);
+        byte[] plaintext = new byte[Math.Max(plainLength, ciphertext.Length)];
+        if (!session.TryDecrypt(keyHandle, new Pkcs11Mechanism(mechanismType), ciphertext, plaintext, out int written))
+        {
+            throw new InvalidOperationException("The module did not return a plaintext buffer.");
+        }
+
+        ReadOnlySpan<byte> plaintextSpan = plaintext.AsSpan(0, written);
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
+        output.AppendLine($"Key handle: {keyHandle.Value}");
+        output.AppendLine($"Ciphertext bytes: {ciphertext.Length}");
+        output.AppendLine($"Ciphertext hex: {Convert.ToHexString(ciphertext)}");
+        output.AppendLine($"Plaintext hex: {Convert.ToHexString(plaintextSpan)}");
+        output.AppendLine($"Plaintext UTF-8: {TryDecodeUtf8(plaintextSpan)}");
+        notes.Add("Decrypt typically targets private or secret keys; missing user login or token policy restrictions may cause token-side errors.");
+        return ($"Decrypted {ciphertext.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+    }
+
     private static (string Summary, string OutputText, List<string> Notes) ExecuteFindObjectsLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
@@ -1094,6 +1282,67 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
 
         return new Pkcs11MechanismType(parsed);
+    }
+
+    private static Pkcs11ObjectHandle ParseLabObjectHandleText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("Key handle is required for this lab operation.", nameof(value));
+        }
+
+        if (!nuint.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out nuint parsed) || parsed == 0)
+        {
+            throw new ArgumentException($"Key handle '{value}' is not a valid non-zero decimal object handle.", nameof(value));
+        }
+
+        return new Pkcs11ObjectHandle(parsed);
+    }
+
+    private static byte[] ResolveLabPayload(Pkcs11LabRequest request, bool forDecryptInput)
+    {
+        if (forDecryptInput)
+        {
+            return ParseRequiredHex(request.DataHex, nameof(request.DataHex));
+        }
+
+        return request.PayloadEncoding == Pkcs11LabPayloadEncoding.Utf8Text
+            ? Encoding.UTF8.GetBytes(request.TextInput ?? string.Empty)
+            : ParseRequiredHex(request.DataHex, nameof(request.DataHex));
+    }
+
+    private static void AddMechanismParameterWarning(Pkcs11MechanismType mechanismType, List<string> notes)
+    {
+        if (!MechanismLikelyRequiresParameters(mechanismType))
+        {
+            return;
+        }
+
+        notes.Add("This lab currently sends empty mechanism parameters. Parameterized mechanisms such as OAEP/PSS/AES-CBC/CTR/GCM will fail until parameter inputs are added.");
+    }
+
+    private static bool MechanismLikelyRequiresParameters(Pkcs11MechanismType mechanismType)
+        => mechanismType.Value is 0x00000009u // CKM_RSA_PKCS_OAEP
+            or 0x0000000du // CKM_RSA_PKCS_PSS
+            or 0x0000000eu // CKM_SHA1_RSA_PKCS_PSS
+            or 0x00000043u // CKM_SHA256_RSA_PKCS_PSS
+            or 0x00000044u // CKM_SHA384_RSA_PKCS_PSS
+            or 0x00000045u // CKM_SHA512_RSA_PKCS_PSS
+            or 0x00001085u // CKM_AES_CBC
+            or 0x00001086u // CKM_AES_MAC (parameterized in some flows)
+            or 0x0000108au // CKM_AES_CTR
+            or 0x0000108du; // CKM_AES_GCM
+
+    private static string TryDecodeUtf8(ReadOnlySpan<byte> data)
+    {
+        try
+        {
+            return Encoding.UTF8.GetString(data);
+        }
+        catch
+        {
+            return "<not valid UTF-8>";
+        }
     }
 
     private static string DescribeMechanismType(Pkcs11MechanismType type)

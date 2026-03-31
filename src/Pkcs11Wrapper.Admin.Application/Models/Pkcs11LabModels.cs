@@ -10,7 +10,11 @@ public enum Pkcs11LabOperation
     SessionInfo = 5,
     GenerateRandom = 6,
     DigestText = 7,
-    FindObjects = 8
+    FindObjects = 8,
+    SignData = 9,
+    VerifySignature = 10,
+    EncryptData = 11,
+    DecryptData = 12
 }
 
 public enum Pkcs11LabDigestAlgorithm
@@ -31,6 +35,12 @@ public enum Pkcs11LabObjectClassFilter
     SecretKey = 5
 }
 
+public enum Pkcs11LabPayloadEncoding
+{
+    Utf8Text = 0,
+    Hex = 1
+}
+
 public sealed class Pkcs11LabRequest
 {
     public Guid DeviceId { get; set; }
@@ -47,9 +57,17 @@ public sealed class Pkcs11LabRequest
 
     public string? MechanismTypeText { get; set; }
 
+    public string? KeyHandleText { get; set; }
+
     public Pkcs11LabDigestAlgorithm DigestAlgorithm { get; set; } = Pkcs11LabDigestAlgorithm.Sha256;
 
+    public Pkcs11LabPayloadEncoding PayloadEncoding { get; set; } = Pkcs11LabPayloadEncoding.Utf8Text;
+
     public string? TextInput { get; set; }
+
+    public string? DataHex { get; set; }
+
+    public string? SignatureHex { get; set; }
 
     public string? LabelFilter { get; set; }
 

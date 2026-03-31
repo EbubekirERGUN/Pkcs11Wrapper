@@ -27,14 +27,15 @@
 - Admin panel Phase D güvenlik hardening'i başlatıldı ve ilk üç öncelik teslim edildi: local cookie auth + viewer/operator/admin rol modeli, servis katmanında yetki doğrulaması, PIN'ler için Data Protection-backed protected local storage ve hash-chained/metadata-rich audit log bütünlük doğrulaması eklendi.
 - Admin panel Phase D için config transfer dilimi teslim edildi: admin-only Configuration sayfası, JSON config export endpoint'i, merge / replace-all import modları, audit kayıtları ve device-profile-only güvenli bundle kapsamı eklendi.
 - Admin panel için operator-facing PKCS#11 Lab sayfası eklendi: module info, interface discovery, slot snapshot, mechanism list/info, transient session info, RNG, digest ve object search operasyonları kontrollü biçimde denenebiliyor; request validation, audit logging ve protected PIN reuse desteği var.
+- PKCS#11 Lab ikinci dalgası teslim edildi: sign/verify ve encrypt/decrypt denemeleri eklendi; handle + mechanism girişi, UTF-8/hex payload seçimi, signature/ciphertext alanları, parameterized mechanism uyarıları ve operator hata senaryolarını yakalayan validation kuralları eklendi.
 - Admin panel uygulama katmanı için yeni doğrulama testleri eklendi; çözüm testleri ve hedefli admin web build doğrulaması temiz geçti.
 
 ## Şu an üzerinde çalışılan
-- Admin panelde PKCS#11 Lab slice'ı tamamlandı; güvenlik/ops tarafında kalan iş bootstrap credential rotation UX'i, local user-management/maintenance akışı ve auth/ops dokümantasyonunun biraz daha ürünleştirilmesi.
+- PKCS#11 Lab ikinci dalga da tamamlandı; güvenlik/ops tarafında kalan iş bootstrap credential rotation UX'i, local user-management/maintenance akışı ve auth/ops dokümantasyonunun biraz daha ürünleştirilmesi.
 
 ## Sıradaki işler
 - Bootstrap admin credential rotation / local user management UX'ini panel içine almak veya en azından kontrollü bir CLI/maintenance akışı tanımlamak.
-- PKCS#11 Lab sayfasına ikinci dalgada daha ileri operasyonlar eklemek (ör. sign/verify, encrypt/decrypt, wrap/unwrap, attribute read denemeleri) ama bunu güvenli ve capability-aware tutmak.
+- PKCS#11 Lab sayfasına üçüncü dalgada daha ileri operasyonlar eklemek (ör. wrap/unwrap, attribute read denemeleri, belki selected-object assisted flows) ama bunu güvenli ve capability-aware tutmak.
 - Phase D auth/ops dokümantasyonunu, config transfer kapsamı ve güvenlik sınırlarıyla birlikte biraz daha ürünleştirmek.
 - Object copy akışına vendor-specific failure rehberi veya optional preset/template library katmanı düşünmek.
 - PKCS#11 v3 message API'lerini gerçekten expose eden bir vendor/modül ile runtime regression eklemek.
@@ -46,4 +47,4 @@
 
 ## Commit / push durumu
 - `v0.1.0` release GitHub'da yayınlandı.
-- Admin panel PKCS#11 Lab slice'ı yerelde değişiklik olarak duruyor; henüz commit/push yapılmadı.
+- Admin panel PKCS#11 Lab ikinci dalga slice'ı yerelde değişiklik olarak duruyor; henüz commit/push yapılmadı.

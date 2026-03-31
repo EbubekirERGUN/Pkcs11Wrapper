@@ -76,7 +76,11 @@
                     <div class="small text-muted">@GetOperationDescription(_request.Operation)</div>
                 </div>
 
-                @if (_request.Operation == Pkcs11LabOperation.SessionInfo)
+                @if (_request.Operation is Pkcs11LabOperation.SessionInfo
+                    or Pkcs11LabOperation.SignData
+                    or Pkcs11LabOperation.VerifySignature
+                    or Pkcs11LabOperation.EncryptData
+                    or Pkcs11LabOperation.DecryptData)
                 {
                     <div class="col-12">
                         <div class="form-check">
@@ -86,12 +90,28 @@
                     </div>
                 }
 
-                @if (_request.Operation == Pkcs11LabOperation.MechanismInfo)
+                @if (_request.Operation is Pkcs11LabOperation.MechanismInfo
+                    or Pkcs11LabOperation.SignData
+                    or Pkcs11LabOperation.VerifySignature
+                    or Pkcs11LabOperation.EncryptData
+                    or Pkcs11LabOperation.DecryptData)
                 {
                     <div class="col-12">
                         <label class="form-label">Mechanism Type (hex or decimal)</label>
                         <input class="form-control font-monospace" @bind="_request.MechanismTypeText" placeholder="0x250" />
-                        <div class="form-text">Örnek: <code>0x250</code> (CKM_SHA256), <code>0x1080</code> (CKM_AES_KEY_GEN)</div>
+                        <div class="form-text">Örnek: <code>0x250</code> (CKM_SHA256), <code>0x1</code> (CKM_RSA_PKCS), <code>0x1082</code> (CKM_AES_ECB). Not: OAEP/PSS/AES-CBC/CTR/GCM gibi parameter isteyen mekanizmalar bu turda desteklenmiyor.</div>
+                    </div>
+                }
+
+                @if (_request.Operation is Pkcs11LabOperation.SignData
+                    or Pkcs11LabOperation.VerifySignature
+                    or Pkcs11LabOperation.EncryptData
+                    or Pkcs11LabOperation.DecryptData)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label">Key Handle</label>
+                        <input class="form-control font-monospace" @bind="_request.KeyHandleText" placeholder="123" />
+                        <div class="form-text">Handle değerini Keys ekranından alabilirsin.</div>
                     </div>
                 }
 
@@ -119,6 +139,55 @@
                         <label class="form-label">Text Input</label>
                         <textarea class="form-control" rows="6" @bind="_request.TextInput"></textarea>
                         <div class="form-text">Metin UTF-8 olarak digest edilir.</div>
+                    </div>
+                }
+
+                @if (_request.Operation is Pkcs11LabOperation.SignData
+                    or Pkcs11LabOperation.VerifySignature
+                    or Pkcs11LabOperation.EncryptData)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label">Payload Encoding</label>
+                        <InputSelect class="form-select" @bind-Value="_request.PayloadEncoding">
+                            @foreach (Pkcs11LabPayloadEncoding encoding in Enum.GetValues<Pkcs11LabPayloadEncoding>())
+                            {
+                                <option value="@encoding">@encoding</option>
+                            }
+                        </InputSelect>
+                    </div>
+
+                    @if (_request.PayloadEncoding == Pkcs11LabPayloadEncoding.Utf8Text)
+                    {
+                        <div class="col-12">
+                            <label class="form-label">Input Text</label>
+                            <textarea class="form-control" rows="6" @bind="_request.TextInput"></textarea>
+                            <div class="form-text">Metin UTF-8 byte dizisine çevrilip sign/verify/encrypt işlemine verilir.</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="col-12">
+                            <label class="form-label">Input Hex</label>
+                            <textarea class="form-control font-monospace" rows="6" @bind="_request.DataHex"></textarea>
+                            <div class="form-text">Hex payload boşluksuz veya çift karakterli biçimde girilmeli.</div>
+                        </div>
+                    }
+                }
+
+                @if (_request.Operation == Pkcs11LabOperation.VerifySignature)
+                {
+                    <div class="col-12">
+                        <label class="form-label">Signature Hex</label>
+                        <textarea class="form-control font-monospace" rows="4" @bind="_request.SignatureHex"></textarea>
+                    </div>
+                }
+
+                @if (_request.Operation == Pkcs11LabOperation.DecryptData)
+                {
+                    <div class="col-12">
+                        <label class="form-label">Ciphertext Hex</label>
+                        <textarea class="form-control font-monospace" rows="6" @bind="_request.DataHex"></textarea>
+                        <div class="form-text">Decrypt çıktısında hem hex hem de UTF-8 yorumu gösterilir.</div>
                     </div>
                 }
 
@@ -213,7 +282,11 @@
         or Pkcs11LabOperation.SessionInfo
         or Pkcs11LabOperation.GenerateRandom
         or Pkcs11LabOperation.DigestText
-        or Pkcs11LabOperation.FindObjects;
+        or Pkcs11LabOperation.FindObjects
+        or Pkcs11LabOperation.SignData
+        or Pkcs11LabOperation.VerifySignature
+        or Pkcs11LabOperation.EncryptData
+        or Pkcs11LabOperation.DecryptData;
 
     private bool CanRun => Guid.TryParse(_selectedDeviceId, out _) && (!RequiresSlot || ulong.TryParse(_selectedSlotId, out _));
 
@@ -308,8 +381,12 @@
             LoginUserIfPinProvided = _request.LoginUserIfPinProvided,
             UserPin = _request.UserPin,
             MechanismTypeText = _request.MechanismTypeText,
+            KeyHandleText = _request.KeyHandleText,
             DigestAlgorithm = _request.DigestAlgorithm,
+            PayloadEncoding = _request.PayloadEncoding,
             TextInput = _request.TextInput,
+            DataHex = _request.DataHex,
+            SignatureHex = _request.SignatureHex,
             LabelFilter = _request.LabelFilter,
             IdHex = _request.IdHex,
             ObjectClassFilter = _request.ObjectClassFilter,
@@ -352,6 +429,7 @@
         {
             Operation = Pkcs11LabOperation.ModuleInfo,
             DigestAlgorithm = Pkcs11LabDigestAlgorithm.Sha256,
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
             LoginUserIfPinProvided = true,
             RandomLength = 32,
             MaxObjects = 20
@@ -369,6 +447,10 @@
             Pkcs11LabOperation.GenerateRandom => "Generate Random",
             Pkcs11LabOperation.DigestText => "Digest Text",
             Pkcs11LabOperation.FindObjects => "Find Objects",
+            Pkcs11LabOperation.SignData => "Sign Data",
+            Pkcs11LabOperation.VerifySignature => "Verify Signature",
+            Pkcs11LabOperation.EncryptData => "Encrypt Data",
+            Pkcs11LabOperation.DecryptData => "Decrypt Data",
             _ => operation.ToString()
         };
 
@@ -384,6 +466,10 @@
             Pkcs11LabOperation.GenerateRandom => "Token RNG üzerinden `C_GenerateRandom` çalıştır.",
             Pkcs11LabOperation.DigestText => "Metni UTF-8 olarak digest edip sonucu hex göster.",
             Pkcs11LabOperation.FindObjects => "`C_FindObjects*` ile obje arayıp özetleri göster.",
+            Pkcs11LabOperation.SignData => "Seçilen handle ile `C_Sign` çalıştırıp imzayı hex olarak üret.",
+            Pkcs11LabOperation.VerifySignature => "Seçilen handle ile `C_Verify` çalıştırıp sonucu doğrula.",
+            Pkcs11LabOperation.EncryptData => "Seçilen handle ile `C_Encrypt` çalıştırıp ciphertext hex üret.",
+            Pkcs11LabOperation.DecryptData => "Seçilen handle ile `C_Decrypt` çalıştırıp plaintext hex/UTF-8 çıktısı göster.",
             _ => operation.ToString()
         };
 }
