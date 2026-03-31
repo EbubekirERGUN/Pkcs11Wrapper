@@ -120,10 +120,25 @@
                                 <option value="@profile">@profile</option>
                             }
                         </InputSelect>
-                        <div class="form-text">Bu turda parameter editor AES-CBC / AES-CTR / AES-GCM için aktif. OAEP/PSS gibi RSA parametreleri daha sonra eklenebilir.</div>
+                        <div class="form-text">Parameter editor bu aşamada AES-CBC / AES-CTR / AES-GCM ile RSA OAEP / RSA PSS için aktif. Daha ileri preset wizard ve multi-step senaryolar sonraki dilimde genişletilebilir.</div>
                     </div>
 
-                    @if (_request.MechanismParameterProfile != Pkcs11LabMechanismParameterProfile.None)
+                    @if (_request.MechanismParameterProfile is Pkcs11LabMechanismParameterProfile.RsaOaep or Pkcs11LabMechanismParameterProfile.RsaPss)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">RSA Hash Profile</label>
+                            <InputSelect class="form-select" @bind-Value="_request.RsaHashProfile">
+                                @foreach (Pkcs11LabRsaHashProfile hashProfile in Enum.GetValues<Pkcs11LabRsaHashProfile>())
+                                {
+                                    <option value="@hashProfile">@hashProfile</option>
+                                }
+                            </InputSelect>
+                        </div>
+                    }
+
+                    @if (_request.MechanismParameterProfile is Pkcs11LabMechanismParameterProfile.AesCbcIv
+                        or Pkcs11LabMechanismParameterProfile.AesCtr
+                        or Pkcs11LabMechanismParameterProfile.AesGcm)
                     {
                         <div class="col-md-6">
                             <label class="form-label">IV / Counter Block Hex</label>
@@ -148,6 +163,42 @@
                         <div class="col-md-6">
                             <label class="form-label">Tag Bits</label>
                             <InputNumber class="form-control" @bind-Value="_request.MechanismTagBits" />
+                        </div>
+                    }
+
+                    @if (_request.MechanismParameterProfile == Pkcs11LabMechanismParameterProfile.RsaOaep)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">OAEP Source Encoding</label>
+                            <InputSelect class="form-select" @bind-Value="_request.RsaOaepSourceEncoding">
+                                @foreach (Pkcs11LabPayloadEncoding encoding in Enum.GetValues<Pkcs11LabPayloadEncoding>())
+                                {
+                                    <option value="@encoding">@encoding</option>
+                                }
+                            </InputSelect>
+                        </div>
+
+                        @if (_request.RsaOaepSourceEncoding == Pkcs11LabPayloadEncoding.Utf8Text)
+                        {
+                            <div class="col-12">
+                                <label class="form-label">OAEP Source Text (optional)</label>
+                                <textarea class="form-control" rows="3" @bind="_request.RsaOaepSourceText"></textarea>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="col-12">
+                                <label class="form-label">OAEP Source Hex (optional)</label>
+                                <textarea class="form-control font-monospace" rows="3" @bind="_request.RsaOaepSourceHex"></textarea>
+                            </div>
+                        }
+                    }
+
+                    @if (_request.MechanismParameterProfile == Pkcs11LabMechanismParameterProfile.RsaPss)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">PSS Salt Length</label>
+                            <InputNumber class="form-control" @bind-Value="_request.PssSaltLength" />
                         </div>
                     }
                 }
@@ -428,6 +479,15 @@
     [SupplyParameterFromQuery(Name = "attr")]
     public string? QueryAttributeType { get; set; }
 
+    [SupplyParameterFromQuery(Name = "profile")]
+    public string? QueryMechanismParameterProfile { get; set; }
+
+    [SupplyParameterFromQuery(Name = "rsaHash")]
+    public string? QueryRsaHashProfile { get; set; }
+
+    [SupplyParameterFromQuery(Name = "pssSalt")]
+    public int? QueryPssSaltLength { get; set; }
+
     private IReadOnlyList<HsmDeviceProfile> _devices = [];
     private IReadOnlyList<HsmSlotSummary> _slots = [];
     private string? _selectedDeviceId;
@@ -471,7 +531,7 @@
             return;
         }
 
-        string signature = $"{QueryDevice}|{QuerySlot}|{QueryOperation}|{QueryHandle}|{QuerySecondaryHandle}|{QueryMechanism}|{QueryAttributeType}";
+        string signature = $"{QueryDevice}|{QuerySlot}|{QueryOperation}|{QueryHandle}|{QuerySecondaryHandle}|{QueryMechanism}|{QueryAttributeType}|{QueryMechanismParameterProfile}|{QueryRsaHashProfile}|{QueryPssSaltLength}";
         if (signature == _lastAppliedQuerySignature)
         {
             return;
@@ -509,6 +569,21 @@
         if (!string.IsNullOrWhiteSpace(QueryMechanism))
         {
             _request.MechanismTypeText = QueryMechanism;
+        }
+
+        if (Enum.TryParse<Pkcs11LabMechanismParameterProfile>(QueryMechanismParameterProfile, ignoreCase: true, out Pkcs11LabMechanismParameterProfile parameterProfile))
+        {
+            _request.MechanismParameterProfile = parameterProfile;
+        }
+
+        if (Enum.TryParse<Pkcs11LabRsaHashProfile>(QueryRsaHashProfile, ignoreCase: true, out Pkcs11LabRsaHashProfile rsaHashProfile))
+        {
+            _request.RsaHashProfile = rsaHashProfile;
+        }
+
+        if (QueryPssSaltLength is int pssSaltLength)
+        {
+            _request.PssSaltLength = pssSaltLength;
         }
 
         if (!string.IsNullOrWhiteSpace(QueryAttributeType))
@@ -607,6 +682,11 @@
             MechanismAdditionalDataHex = _request.MechanismAdditionalDataHex,
             MechanismCounterBits = _request.MechanismCounterBits,
             MechanismTagBits = _request.MechanismTagBits,
+            RsaHashProfile = _request.RsaHashProfile,
+            RsaOaepSourceEncoding = _request.RsaOaepSourceEncoding,
+            RsaOaepSourceText = _request.RsaOaepSourceText,
+            RsaOaepSourceHex = _request.RsaOaepSourceHex,
+            PssSaltLength = _request.PssSaltLength,
             KeyHandleText = _request.KeyHandleText,
             SecondaryKeyHandleText = _request.SecondaryKeyHandleText,
             DigestAlgorithm = _request.DigestAlgorithm,
@@ -668,6 +748,9 @@
             MechanismParameterProfile = Pkcs11LabMechanismParameterProfile.None,
             MechanismCounterBits = 128,
             MechanismTagBits = 128,
+            RsaHashProfile = Pkcs11LabRsaHashProfile.Sha256,
+            RsaOaepSourceEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            PssSaltLength = 32,
             LoginUserIfPinProvided = true,
             RandomLength = 32,
             MaxObjects = 20

@@ -1660,10 +1660,61 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 notes?.Add($"Using AES-GCM parameter editor with IV={gcmIv.Length} bytes, AAD={aad.Length} bytes, tagBits={request.MechanismTagBits}.");
                 return Pkcs11MechanismParameters.AesGcm(gcmIv, aad, (nuint)request.MechanismTagBits);
 
+            case Pkcs11LabMechanismParameterProfile.RsaOaep:
+                EnsureMechanismCompatible(mechanismType, request.MechanismParameterProfile, Pkcs11MechanismTypes.RsaPkcsOaep);
+                byte[] oaepSource = ResolveRsaOaepSourceData(request);
+                notes?.Add($"Using RSA OAEP parameters with hash={request.RsaHashProfile}, sourceData={oaepSource.Length} byte(s).");
+                return Pkcs11MechanismParameters.RsaOaep(MapRsaHashToMechanism(request.RsaHashProfile), MapRsaHashToMgf(request.RsaHashProfile), oaepSource);
+
+            case Pkcs11LabMechanismParameterProfile.RsaPss:
+                EnsureMechanismCompatible(
+                    mechanismType,
+                    request.MechanismParameterProfile,
+                    Pkcs11MechanismTypes.RsaPkcsPss,
+                    Pkcs11MechanismTypes.Sha1RsaPkcsPss,
+                    Pkcs11MechanismTypes.Sha224RsaPkcsPss,
+                    Pkcs11MechanismTypes.Sha256RsaPkcsPss,
+                    Pkcs11MechanismTypes.Sha384RsaPkcsPss,
+                    Pkcs11MechanismTypes.Sha512RsaPkcsPss);
+                if (request.PssSaltLength < 0 || request.PssSaltLength > 1024)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(request), "PSS salt length must be between 0 and 1024 bytes.");
+                }
+
+                notes?.Add($"Using RSA PSS parameters with hash={request.RsaHashProfile} and saltLength={request.PssSaltLength}.");
+                return Pkcs11MechanismParameters.RsaPss(MapRsaHashToMechanism(request.RsaHashProfile), MapRsaHashToMgf(request.RsaHashProfile), (nuint)request.PssSaltLength);
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(request.MechanismParameterProfile), request.MechanismParameterProfile, "Unsupported mechanism parameter profile.");
         }
     }
+
+    private static byte[] ResolveRsaOaepSourceData(Pkcs11LabRequest request)
+        => request.RsaOaepSourceEncoding == Pkcs11LabPayloadEncoding.Utf8Text
+            ? Encoding.UTF8.GetBytes(request.RsaOaepSourceText ?? string.Empty)
+            : ParseOptionalHex(request.RsaOaepSourceHex, nameof(request.RsaOaepSourceHex));
+
+    private static Pkcs11MechanismType MapRsaHashToMechanism(Pkcs11LabRsaHashProfile hashProfile)
+        => hashProfile switch
+        {
+            Pkcs11LabRsaHashProfile.Sha1 => Pkcs11MechanismTypes.Sha1,
+            Pkcs11LabRsaHashProfile.Sha224 => Pkcs11MechanismTypes.Sha224,
+            Pkcs11LabRsaHashProfile.Sha256 => Pkcs11MechanismTypes.Sha256,
+            Pkcs11LabRsaHashProfile.Sha384 => Pkcs11MechanismTypes.Sha384,
+            Pkcs11LabRsaHashProfile.Sha512 => Pkcs11MechanismTypes.Sha512,
+            _ => throw new ArgumentOutOfRangeException(nameof(hashProfile), hashProfile, "Unsupported RSA hash profile.")
+        };
+
+    private static Pkcs11RsaMgfType MapRsaHashToMgf(Pkcs11LabRsaHashProfile hashProfile)
+        => hashProfile switch
+        {
+            Pkcs11LabRsaHashProfile.Sha1 => Pkcs11RsaMgfTypes.Mgf1Sha1,
+            Pkcs11LabRsaHashProfile.Sha224 => Pkcs11RsaMgfTypes.Mgf1Sha224,
+            Pkcs11LabRsaHashProfile.Sha256 => Pkcs11RsaMgfTypes.Mgf1Sha256,
+            Pkcs11LabRsaHashProfile.Sha384 => Pkcs11RsaMgfTypes.Mgf1Sha384,
+            Pkcs11LabRsaHashProfile.Sha512 => Pkcs11RsaMgfTypes.Mgf1Sha512,
+            _ => throw new ArgumentOutOfRangeException(nameof(hashProfile), hashProfile, "Unsupported RSA hash profile.")
+        };
 
     private static void EnsureMechanismCompatible(Pkcs11MechanismType actual, Pkcs11LabMechanismParameterProfile profile, params Pkcs11MechanismType[] allowed)
     {
@@ -1805,8 +1856,15 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             0x00000000u => "CKM_RSA_PKCS_KEY_PAIR_GEN (0x0)",
             0x00000001u => "CKM_RSA_PKCS (0x1)",
             0x00000009u => "CKM_RSA_PKCS_OAEP (0x9)",
+            0x0000000du => "CKM_RSA_PKCS_PSS (0xd)",
+            0x0000000eu => "CKM_SHA1_RSA_PKCS_PSS (0xe)",
+            0x00000043u => "CKM_SHA256_RSA_PKCS_PSS (0x43)",
+            0x00000044u => "CKM_SHA384_RSA_PKCS_PSS (0x44)",
+            0x00000045u => "CKM_SHA512_RSA_PKCS_PSS (0x45)",
+            0x00000047u => "CKM_SHA224_RSA_PKCS_PSS (0x47)",
             0x00000220u => "CKM_SHA_1 (0x220)",
             0x00000250u => "CKM_SHA256 (0x250)",
+            0x00000255u => "CKM_SHA224 (0x255)",
             0x00000260u => "CKM_SHA384 (0x260)",
             0x00000270u => "CKM_SHA512 (0x270)",
             0x00001080u => "CKM_AES_KEY_GEN (0x1080)",

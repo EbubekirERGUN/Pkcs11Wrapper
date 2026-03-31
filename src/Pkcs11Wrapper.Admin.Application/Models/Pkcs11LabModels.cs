@@ -50,7 +50,18 @@ public enum Pkcs11LabMechanismParameterProfile
     None = 0,
     AesCbcIv = 1,
     AesCtr = 2,
-    AesGcm = 3
+    AesGcm = 3,
+    RsaOaep = 4,
+    RsaPss = 5
+}
+
+public enum Pkcs11LabRsaHashProfile
+{
+    Sha1 = 0,
+    Sha224 = 1,
+    Sha256 = 2,
+    Sha384 = 3,
+    Sha512 = 4
 }
 
 public sealed class Pkcs11LabRequest
@@ -80,6 +91,16 @@ public sealed class Pkcs11LabRequest
     public int MechanismCounterBits { get; set; } = 128;
 
     public int MechanismTagBits { get; set; } = 128;
+
+    public Pkcs11LabRsaHashProfile RsaHashProfile { get; set; } = Pkcs11LabRsaHashProfile.Sha256;
+
+    public Pkcs11LabPayloadEncoding RsaOaepSourceEncoding { get; set; } = Pkcs11LabPayloadEncoding.Utf8Text;
+
+    public string? RsaOaepSourceText { get; set; }
+
+    public string? RsaOaepSourceHex { get; set; }
+
+    public int PssSaltLength { get; set; } = 32;
 
     public string? KeyHandleText { get; set; }
 

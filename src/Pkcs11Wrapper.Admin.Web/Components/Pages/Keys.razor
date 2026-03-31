@@ -336,9 +336,25 @@
                                 {
                                     <button class="btn btn-sm btn-outline-success" @onclick="() => OpenLabCryptoPreset(_selectedDetail, Pkcs11LabOperation.EncryptData, encryptMechanism!)">Encrypt preset</button>
                                 }
+                                @if (TryGetEncryptOaepPreset(_selectedDetail, out string? encryptOaepMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => OpenLabRsaPreset(_selectedDetail, Pkcs11LabOperation.EncryptData, encryptOaepMechanism!, Pkcs11LabMechanismParameterProfile.RsaOaep, Pkcs11LabRsaHashProfile.Sha256)">Encrypt OAEP</button>
+                                }
                                 @if (TryGetDecryptPreset(_selectedDetail, out string? decryptMechanism))
                                 {
                                     <button class="btn btn-sm btn-outline-success" @onclick="() => OpenLabCryptoPreset(_selectedDetail, Pkcs11LabOperation.DecryptData, decryptMechanism!)">Decrypt preset</button>
+                                }
+                                @if (TryGetDecryptOaepPreset(_selectedDetail, out string? decryptOaepMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => OpenLabRsaPreset(_selectedDetail, Pkcs11LabOperation.DecryptData, decryptOaepMechanism!, Pkcs11LabMechanismParameterProfile.RsaOaep, Pkcs11LabRsaHashProfile.Sha256)">Decrypt OAEP</button>
+                                }
+                                @if (TryGetSignPssPreset(_selectedDetail, out string? signPssMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenLabRsaPreset(_selectedDetail, Pkcs11LabOperation.SignData, signPssMechanism!, Pkcs11LabMechanismParameterProfile.RsaPss, Pkcs11LabRsaHashProfile.Sha256, pssSaltLength: 32)">Sign PSS</button>
+                                }
+                                @if (TryGetVerifyPssPreset(_selectedDetail, out string? verifyPssMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenLabRsaPreset(_selectedDetail, Pkcs11LabOperation.VerifySignature, verifyPssMechanism!, Pkcs11LabMechanismParameterProfile.RsaPss, Pkcs11LabRsaHashProfile.Sha256, pssSaltLength: 32)">Verify PSS</button>
                                 }
                                 @if (TryGetWrapPreset(_selectedDetail, out string? wrapMechanism))
                                 {
@@ -657,6 +673,18 @@
 
     private void OpenLabCryptoPreset(HsmObjectDetail detail, Pkcs11LabOperation operation, string mechanism)
         => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, operation, primaryHandle: detail.Handle, mechanism: mechanism));
+
+    private void OpenLabRsaPreset(HsmObjectDetail detail, Pkcs11LabOperation operation, string mechanism, Pkcs11LabMechanismParameterProfile parameterProfile, Pkcs11LabRsaHashProfile rsaHashProfile, int? pssSaltLength = null)
+        => Navigation.NavigateTo(
+            BuildLabUri(
+                detail.DeviceId,
+                detail.SlotId,
+                operation,
+                primaryHandle: detail.Handle,
+                mechanism: mechanism,
+                parameterProfile: parameterProfile,
+                rsaHashProfile: rsaHashProfile,
+                pssSaltLength: pssSaltLength));
 
     private void OpenLabWrapPreset(HsmObjectDetail detail, string mechanism)
         => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.WrapKey, secondaryHandle: detail.Handle, mechanism: mechanism));
@@ -1024,6 +1052,14 @@
         return mechanism is not null;
     }
 
+    private static bool TryGetEncryptOaepPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanEncrypt == true && string.Equals(detail.KeyType, "RSA", StringComparison.OrdinalIgnoreCase)
+            ? "0x9"
+            : null;
+        return mechanism is not null;
+    }
+
     private static bool TryGetDecryptPreset(HsmObjectDetail detail, out string? mechanism)
     {
         mechanism = detail.CanDecrypt == true
@@ -1033,6 +1069,30 @@
                 "AES" => "0x1081",
                 _ => null
             }
+            : null;
+        return mechanism is not null;
+    }
+
+    private static bool TryGetDecryptOaepPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanDecrypt == true && string.Equals(detail.KeyType, "RSA", StringComparison.OrdinalIgnoreCase)
+            ? "0x9"
+            : null;
+        return mechanism is not null;
+    }
+
+    private static bool TryGetSignPssPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanSign == true && string.Equals(detail.KeyType, "RSA", StringComparison.OrdinalIgnoreCase)
+            ? "0x43"
+            : null;
+        return mechanism is not null;
+    }
+
+    private static bool TryGetVerifyPssPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanVerify == true && string.Equals(detail.KeyType, "RSA", StringComparison.OrdinalIgnoreCase)
+            ? "0x43"
             : null;
         return mechanism is not null;
     }
@@ -1053,7 +1113,7 @@
         return mechanism is not null;
     }
 
-    private static string BuildLabUri(Guid deviceId, nuint slotId, Pkcs11LabOperation operation, nuint? primaryHandle = null, string? mechanism = null, nuint? secondaryHandle = null, string? attributeType = null)
+    private static string BuildLabUri(Guid deviceId, nuint slotId, Pkcs11LabOperation operation, nuint? primaryHandle = null, string? mechanism = null, nuint? secondaryHandle = null, string? attributeType = null, Pkcs11LabMechanismParameterProfile? parameterProfile = null, Pkcs11LabRsaHashProfile? rsaHashProfile = null, int? pssSaltLength = null)
     {
         List<string> query =
         [
@@ -1080,6 +1140,21 @@
         if (!string.IsNullOrWhiteSpace(attributeType))
         {
             query.Add($"attr={Uri.EscapeDataString(attributeType)}");
+        }
+
+        if (parameterProfile is not null)
+        {
+            query.Add($"profile={Uri.EscapeDataString(parameterProfile.Value.ToString())}");
+        }
+
+        if (rsaHashProfile is not null)
+        {
+            query.Add($"rsaHash={Uri.EscapeDataString(rsaHashProfile.Value.ToString())}");
+        }
+
+        if (pssSaltLength is not null)
+        {
+            query.Add($"pssSalt={pssSaltLength.Value}");
         }
 
         return $"/lab?{string.Join("&", query)}";

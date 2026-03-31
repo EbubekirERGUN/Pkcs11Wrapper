@@ -299,6 +299,66 @@ public sealed class Pkcs11LabValidationTests
         Assert.Contains("not compatible", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ValidateLabRequestAcceptsRsaOaepProfile()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.EncryptData,
+            MechanismTypeText = "0x9",
+            MechanismParameterProfile = Pkcs11LabMechanismParameterProfile.RsaOaep,
+            RsaHashProfile = Pkcs11LabRsaHashProfile.Sha256,
+            RsaOaepSourceEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            RsaOaepSourceText = "label",
+            KeyHandleText = "42",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "hello"
+        };
+
+        HsmAdminService.ValidateLabRequest(request);
+    }
+
+    [Fact]
+    public void ValidateLabRequestAcceptsRsaPssProfile()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.SignData,
+            MechanismTypeText = "0x43",
+            MechanismParameterProfile = Pkcs11LabMechanismParameterProfile.RsaPss,
+            RsaHashProfile = Pkcs11LabRsaHashProfile.Sha256,
+            PssSaltLength = 32,
+            KeyHandleText = "42",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "hello"
+        };
+
+        HsmAdminService.ValidateLabRequest(request);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRejectsRsaOaepProfileOnWrongMechanism()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.EncryptData,
+            MechanismTypeText = "0x1",
+            MechanismParameterProfile = Pkcs11LabMechanismParameterProfile.RsaOaep,
+            KeyHandleText = "42",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "hello"
+        };
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("not compatible", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(4097)]
