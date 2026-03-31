@@ -139,6 +139,7 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor uyumluluk profili ve env sözleşmesi
 - [docs/smoke.md](docs/smoke.md) - smoke sample davranışı ve troubleshooting
 - [docs/release.md](docs/release.md) - release checklist ve packaging disiplini
+- [docs/versioning.md](docs/versioning.md) - merkezi versioning modeli ve tag stratejisi
 - [docs/admin-panel-roadmap.md](docs/admin-panel-roadmap.md) - admin panel yol haritası
 - [docs/github-showcase.md](docs/github-showcase.md) - önerilen GitHub description/topics/social preview metinleri
 

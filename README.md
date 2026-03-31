@@ -139,6 +139,7 @@ Current capabilities include:
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract
 - [docs/smoke.md](docs/smoke.md) - smoke sample behavior and troubleshooting
 - [docs/release.md](docs/release.md) - release checklist and packaging discipline
+- [docs/versioning.md](docs/versioning.md) - centralized versioning model and tag strategy
 - [docs/admin-panel-roadmap.md](docs/admin-panel-roadmap.md) - admin panel roadmap
 - [docs/github-showcase.md](docs/github-showcase.md) - suggested GitHub repo description/topics/social preview copy
 

@@ -14,6 +14,7 @@
 - Faz 3.1 tamamlandı: `docs/compatibility-matrix.md` ile destek/limitasyon matrisi yazıldı.
 - Faz 3.2 tamamlandı: geliştirme dokümanı v3 capability-gated davranış ve yeni dokümanlarla güncellendi.
 - Faz 3.3 tamamlandı: package metadata ve `eng/verify-release.sh` release doğrulama akışı eklendi.
+- Merkezi `0.1.0` versioning kuruldu: `Directory.Build.props` artık repository/package sürümünün tek kaynağı, `docs/versioning.md` ve `docs/release-notes/v0.1.0.md` eklendi, `eng/verify-release.sh` repo sürümüyle hizalı paket üretimi yapacak şekilde güncellendi ve `Pkcs11Wrapper.0.1.0.nupkg` ile `Pkcs11Wrapper.Native.0.1.0.nupkg` başarıyla doğrulandı.
 - Post-roadmap enhancement olarak Windows desteği güçlendirildi: platforma göre bilinen SoftHSM modül adı helper'ı eklendi, smoke sample bu helper'ı kullanacak şekilde güncellendi, Windows CI build/API/layout lane'i eklendi ve dokümantasyon Windows build/runtime beklentileriyle senkronlandı.
 - Windows desteği ikinci adımda daha da ileri taşındı: gerçek SoftHSM-for-Windows fixture bootstrap script'i (`eng/setup-softhsm-fixture.ps1`), Windows regression/smoke script'leri (`eng/run-regression-tests.ps1`, `eng/run-smoke.ps1`), Windows CI runtime regression lane'i, `docs/windows-local-setup.md` ve `docs/release-notes/windows-compatibility.md` eklendi.
 - `PROJECT_ROADMAP.md` güncellendi.
@@ -41,4 +42,4 @@
 - Admin panel auth/secret yaklaşımı bu aşamada bilinçli olarak yerel dosya + Data Protection tabanlı tutuldu; harici IdP/KMS entegrasyonu yok. Bu, tek hostlu gömülü yönetim paneli için pratik ama tam production IAM/secret-vault çözümü değil.
 
 ## Commit / push durumu
-- Phase D hardening slice'ı yerelde commitlenecek; push yapılmadı.
+- `0.1.0` versioning çalışması yerelde commitlenecek; push yapılmadı.
