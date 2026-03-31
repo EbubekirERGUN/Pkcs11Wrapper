@@ -228,6 +228,9 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 Pkcs11LabOperation.VerifySignature => ExecuteVerifySignatureLab(module, request),
                 Pkcs11LabOperation.EncryptData => ExecuteEncryptDataLab(module, request),
                 Pkcs11LabOperation.DecryptData => ExecuteDecryptDataLab(module, request),
+                Pkcs11LabOperation.InspectObject => ExecuteInspectObjectLab(device.Id, module, request),
+                Pkcs11LabOperation.WrapKey => ExecuteWrapKeyLab(module, request),
+                Pkcs11LabOperation.UnwrapAesKey => ExecuteUnwrapAesKeyLab(device.Id, module, request),
                 _ => throw new ArgumentOutOfRangeException(nameof(request.Operation), request.Operation, "Unsupported PKCS#11 lab operation.")
             };
 
@@ -647,7 +650,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             throw new ArgumentException("Mechanism type is required for mechanism-info queries.", nameof(request));
         }
 
-        if (request.Operation is Pkcs11LabOperation.SignData or Pkcs11LabOperation.VerifySignature or Pkcs11LabOperation.EncryptData or Pkcs11LabOperation.DecryptData)
+        if (request.Operation is Pkcs11LabOperation.SignData or Pkcs11LabOperation.VerifySignature or Pkcs11LabOperation.EncryptData or Pkcs11LabOperation.DecryptData or Pkcs11LabOperation.WrapKey or Pkcs11LabOperation.UnwrapAesKey)
         {
             if (string.IsNullOrWhiteSpace(request.MechanismTypeText))
             {
@@ -655,6 +658,27 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             }
 
             _ = ParseLabObjectHandleText(request.KeyHandleText);
+        }
+
+        if (request.Operation == Pkcs11LabOperation.InspectObject)
+        {
+            _ = ParseLabObjectHandleText(request.KeyHandleText);
+        }
+
+        if (request.Operation == Pkcs11LabOperation.WrapKey)
+        {
+            _ = ParseLabObjectHandleText(request.SecondaryKeyHandleText, "Wrapping key handle");
+        }
+
+        if (request.Operation == Pkcs11LabOperation.UnwrapAesKey)
+        {
+            if (string.IsNullOrWhiteSpace(request.DataHex))
+            {
+                throw new ArgumentException("Wrapped key hex is required for unwrap operations.", nameof(request));
+            }
+
+            _ = ParseRequiredHex(request.DataHex, nameof(request.DataHex));
+            _ = ParseOptionalHex(request.UnwrapTargetIdHex, nameof(request.UnwrapTargetIdHex));
         }
 
         if (request.Operation == Pkcs11LabOperation.GenerateRandom && (request.RandomLength < 1 || request.RandomLength > 4096))
@@ -862,7 +886,10 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             or Pkcs11LabOperation.SignData
             or Pkcs11LabOperation.VerifySignature
             or Pkcs11LabOperation.EncryptData
-            or Pkcs11LabOperation.DecryptData;
+            or Pkcs11LabOperation.DecryptData
+            or Pkcs11LabOperation.InspectObject
+            or Pkcs11LabOperation.WrapKey
+            or Pkcs11LabOperation.UnwrapAesKey;
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteModuleInfoLab(Pkcs11Module module)
     {
@@ -1184,6 +1211,122 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return ($"Decrypted {ciphertext.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
     }
 
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteInspectObjectLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11ObjectHandle handle = ParseLabObjectHandleText(request.KeyHandleText);
+        HsmObjectDetail detail = ReadObjectDetail(deviceId, request.SlotId.Value, session, handle);
+
+        if (string.IsNullOrWhiteSpace(request.UserPin))
+        {
+            notes.Add("Without CKU_USER login, private or sensitive attributes may be omitted by token policy.");
+        }
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Handle: {detail.Handle}");
+        output.Append(FormatObjectDetail(detail));
+        return ($"Read common attribute snapshot for handle {detail.Handle}.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteWrapKeyLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
+        AddMechanismParameterWarning(mechanismType, notes);
+        Pkcs11ObjectHandle targetKeyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11ObjectHandle wrappingKeyHandle = ParseLabObjectHandleText(request.SecondaryKeyHandleText, "Wrapping key handle");
+        int wrappedLength = session.GetWrapOutputLength(wrappingKeyHandle, new Pkcs11Mechanism(mechanismType), targetKeyHandle);
+        byte[] wrapped = new byte[Math.Max(wrappedLength, 4096)];
+        if (!session.TryWrapKey(wrappingKeyHandle, new Pkcs11Mechanism(mechanismType), targetKeyHandle, wrapped, out int written))
+        {
+            throw new InvalidOperationException("The module did not return a wrapped-key buffer.");
+        }
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
+        output.AppendLine($"Wrapping key handle: {wrappingKeyHandle.Value}");
+        output.AppendLine($"Wrapped target handle: {targetKeyHandle.Value}");
+        output.AppendLine($"Wrapped blob length: {written}");
+        output.AppendLine($"Wrapped blob hex: {Convert.ToHexString(wrapped, 0, written)}");
+        notes.Add("Wrapping requires a key with CKA_WRAP and a target key permitted by token policy; many tokens also require authenticated user state.");
+        return ($"Wrapped handle {targetKeyHandle.Value} with wrapping key {wrappingKeyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+    }
+
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteUnwrapAesKeyLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: true);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
+        AddMechanismParameterWarning(mechanismType, notes);
+        Pkcs11ObjectHandle unwrappingKeyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        byte[] wrappedKey = ParseRequiredHex(request.DataHex, nameof(request.DataHex));
+        string label = string.IsNullOrWhiteSpace(request.UnwrapTargetLabel)
+            ? ($"lab-unwrapped-{Guid.NewGuid():N}")[..22]
+            : request.UnwrapTargetLabel.Trim();
+        byte[] labelBytes = Encoding.UTF8.GetBytes(label);
+        byte[] id = ParseOptionalHex(request.UnwrapTargetIdHex, nameof(request.UnwrapTargetIdHex));
+        if (id.Length == 0)
+        {
+            id = Guid.NewGuid().ToByteArray();
+            notes.Add("No target ID was provided, so a generated CKA_ID value was used.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.UnwrapTargetLabel))
+        {
+            notes.Add($"No target label was provided, so generated label '{label}' was used.");
+        }
+
+        Pkcs11ObjectHandle unwrappedHandle = session.UnwrapKey(
+            unwrappingKeyHandle,
+            new Pkcs11Mechanism(mechanismType),
+            wrappedKey,
+            Pkcs11ProvisioningTemplates.CreateAesUnwrapTargetSecretKey(
+                labelBytes,
+                id,
+                token: request.UnwrapTokenObject,
+                @private: request.UnwrapPrivateObject,
+                sensitive: request.UnwrapSensitive,
+                extractable: request.UnwrapExtractable,
+                encrypt: request.UnwrapAllowEncrypt,
+                decrypt: request.UnwrapAllowDecrypt));
+
+        HsmObjectDetail detail = ReadObjectDetail(deviceId, request.SlotId.Value, session, unwrappedHandle);
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine("Mode: Read-write (forced for object creation)");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
+        output.AppendLine($"Unwrapping key handle: {unwrappingKeyHandle.Value}");
+        output.AppendLine($"Wrapped blob bytes: {wrappedKey.Length}");
+        output.AppendLine($"Target label: {label}");
+        output.AppendLine($"Target id: {Convert.ToHexString(id)}");
+        output.AppendLine($"Persist as token object: {request.UnwrapTokenObject}");
+        output.Append(FormatObjectDetail(detail));
+
+        if (!request.UnwrapTokenObject)
+        {
+            notes.Add("The unwrapped object was created as a session object and will disappear when this transient lab session closes.");
+        }
+        else
+        {
+            notes.Add("The unwrapped object was created as a token object and should remain visible in the Keys view until destroyed.");
+        }
+
+        notes.Add("This lab currently limits unwrap target templates to AES secret keys so the result stays inspectable and constrained.");
+        return ($"Unwrapped an AES secret key into handle {unwrappedHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+    }
+
     private static (string Summary, string OutputText, List<string> Notes) ExecuteFindObjectsLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
@@ -1285,18 +1428,63 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     }
 
     private static Pkcs11ObjectHandle ParseLabObjectHandleText(string? value)
+        => ParseLabObjectHandleText(value, "Key handle");
+
+    private static Pkcs11ObjectHandle ParseLabObjectHandleText(string? value, string fieldName)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException("Key handle is required for this lab operation.", nameof(value));
+            throw new ArgumentException($"{fieldName} is required for this lab operation.", nameof(value));
         }
 
         if (!nuint.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out nuint parsed) || parsed == 0)
         {
-            throw new ArgumentException($"Key handle '{value}' is not a valid non-zero decimal object handle.", nameof(value));
+            throw new ArgumentException($"{fieldName} '{value}' is not a valid non-zero decimal object handle.", nameof(value));
         }
 
         return new Pkcs11ObjectHandle(parsed);
+    }
+
+    private static string FormatObjectDetail(HsmObjectDetail detail)
+    {
+        StringBuilder output = new();
+        output.AppendLine($"Label: {detail.Label ?? "<null>"}");
+        output.AppendLine($"ID: {detail.IdHex ?? "<null>"}");
+        output.AppendLine($"Object class: {detail.ObjectClass}");
+        output.AppendLine($"Key type: {detail.KeyType}");
+        output.AppendLine($"Token: {detail.Token?.ToString() ?? "n/a"}");
+        output.AppendLine($"Private: {detail.Private?.ToString() ?? "n/a"}");
+        output.AppendLine($"Modifiable: {detail.Modifiable?.ToString() ?? "n/a"}");
+        output.AppendLine($"Sensitive: {detail.Sensitive?.ToString() ?? "n/a"}");
+        output.AppendLine($"Extractable: {detail.Extractable?.ToString() ?? "n/a"}");
+        output.AppendLine($"Encrypt/Decrypt: {detail.CanEncrypt?.ToString() ?? "n/a"} / {detail.CanDecrypt?.ToString() ?? "n/a"}");
+        output.AppendLine($"Sign/Verify: {detail.CanSign?.ToString() ?? "n/a"} / {detail.CanVerify?.ToString() ?? "n/a"}");
+        output.AppendLine($"Wrap/Unwrap: {detail.CanWrap?.ToString() ?? "n/a"} / {detail.CanUnwrap?.ToString() ?? "n/a"}");
+        output.AppendLine($"Derive: {detail.CanDerive?.ToString() ?? "n/a"}");
+        output.AppendLine($"Object size: {detail.SizeBytes?.ToString(CultureInfo.InvariantCulture) ?? "n/a"}");
+        output.AppendLine($"Value length: {detail.ValueLength?.ToString(CultureInfo.InvariantCulture) ?? "n/a"}");
+        output.AppendLine($"Modulus bits: {detail.ModulusBits?.ToString(CultureInfo.InvariantCulture) ?? "n/a"}");
+        output.AppendLine($"Public exponent: {detail.PublicExponentHex ?? "<null>"}");
+        output.AppendLine($"EC params: {detail.EcParametersHex ?? "<null>"}");
+        if (detail.EditCapabilities.Warnings.Count > 0)
+        {
+            output.AppendLine("Edit warnings:");
+            foreach (string warning in detail.EditCapabilities.Warnings)
+            {
+                output.AppendLine($"- {warning}");
+            }
+        }
+
+        if (detail.Attributes.Count > 0)
+        {
+            output.AppendLine("Attributes:");
+            foreach (HsmObjectAttributeView attribute in detail.Attributes)
+            {
+                output.AppendLine($"- {attribute.Name}: {attribute.Value}{(attribute.IsSensitive ? " [sensitive]" : string.Empty)}");
+            }
+        }
+
+        return output.ToString();
     }
 
     private static byte[] ResolveLabPayload(Pkcs11LabRequest request, bool forDecryptInput)

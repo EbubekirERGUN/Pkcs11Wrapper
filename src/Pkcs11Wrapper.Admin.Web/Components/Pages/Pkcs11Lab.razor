@@ -80,7 +80,8 @@
                     or Pkcs11LabOperation.SignData
                     or Pkcs11LabOperation.VerifySignature
                     or Pkcs11LabOperation.EncryptData
-                    or Pkcs11LabOperation.DecryptData)
+                    or Pkcs11LabOperation.DecryptData
+                    or Pkcs11LabOperation.WrapKey)
                 {
                     <div class="col-12">
                         <div class="form-check">
@@ -90,28 +91,48 @@
                     </div>
                 }
 
+                @if (_request.Operation == Pkcs11LabOperation.UnwrapAesKey)
+                {
+                    <div class="col-12">
+                        <div class="alert alert-warning small mb-0">Unwrap operation always uses a read-write transient session because it creates a PKCS#11 object.</div>
+                    </div>
+                }
+
                 @if (_request.Operation is Pkcs11LabOperation.MechanismInfo
                     or Pkcs11LabOperation.SignData
                     or Pkcs11LabOperation.VerifySignature
                     or Pkcs11LabOperation.EncryptData
-                    or Pkcs11LabOperation.DecryptData)
+                    or Pkcs11LabOperation.DecryptData
+                    or Pkcs11LabOperation.WrapKey
+                    or Pkcs11LabOperation.UnwrapAesKey)
                 {
                     <div class="col-12">
                         <label class="form-label">Mechanism Type (hex or decimal)</label>
                         <input class="form-control font-monospace" @bind="_request.MechanismTypeText" placeholder="0x250" />
-                        <div class="form-text">Örnek: <code>0x250</code> (CKM_SHA256), <code>0x1</code> (CKM_RSA_PKCS), <code>0x1082</code> (CKM_AES_ECB). Not: OAEP/PSS/AES-CBC/CTR/GCM gibi parameter isteyen mekanizmalar bu turda desteklenmiyor.</div>
+                        <div class="form-text">Örnek: <code>0x250</code> (CKM_SHA256), <code>0x1</code> (CKM_RSA_PKCS), <code>0x1082</code> (CKM_AES_ECB), <code>0x2109</code> (CKM_AES_KEY_WRAP_PAD). Not: OAEP/PSS/AES-CBC/CTR/GCM gibi parameter isteyen mekanizmalar bu turda desteklenmiyor.</div>
                     </div>
                 }
 
                 @if (_request.Operation is Pkcs11LabOperation.SignData
                     or Pkcs11LabOperation.VerifySignature
                     or Pkcs11LabOperation.EncryptData
-                    or Pkcs11LabOperation.DecryptData)
+                    or Pkcs11LabOperation.DecryptData
+                    or Pkcs11LabOperation.InspectObject
+                    or Pkcs11LabOperation.WrapKey
+                    or Pkcs11LabOperation.UnwrapAesKey)
                 {
                     <div class="col-md-6">
-                        <label class="form-label">Key Handle</label>
+                        <label class="form-label">@GetPrimaryHandleLabel(_request.Operation)</label>
                         <input class="form-control font-monospace" @bind="_request.KeyHandleText" placeholder="123" />
-                        <div class="form-text">Handle değerini Keys ekranından alabilirsin.</div>
+                        <div class="form-text">Handle değerini Keys ekranından veya Find Objects çıktısından alabilirsin.</div>
+                    </div>
+                }
+
+                @if (_request.Operation == Pkcs11LabOperation.WrapKey)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label">Wrapping Key Handle</label>
+                        <input class="form-control font-monospace" @bind="_request.SecondaryKeyHandleText" placeholder="456" />
                     </div>
                 }
 
@@ -188,6 +209,66 @@
                         <label class="form-label">Ciphertext Hex</label>
                         <textarea class="form-control font-monospace" rows="6" @bind="_request.DataHex"></textarea>
                         <div class="form-text">Decrypt çıktısında hem hex hem de UTF-8 yorumu gösterilir.</div>
+                    </div>
+                }
+
+                @if (_request.Operation == Pkcs11LabOperation.UnwrapAesKey)
+                {
+                    <div class="col-12">
+                        <label class="form-label">Wrapped Key Hex</label>
+                        <textarea class="form-control font-monospace" rows="6" @bind="_request.DataHex"></textarea>
+                        <div class="form-text">Bu dilim unwrap hedefini kontrollü tutmak için sadece AES secret-key template üretir.</div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">Target Label (optional)</label>
+                        <input class="form-control" @bind="_request.UnwrapTargetLabel" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Target ID Hex (optional)</label>
+                        <input class="form-control font-monospace" @bind="_request.UnwrapTargetIdHex" />
+                    </div>
+
+                    <div class="col-12">
+                        <div class="small text-muted mb-2">Unwrapped AES target template</div>
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <InputCheckbox class="form-check-input" @bind-Value="_request.UnwrapTokenObject" />
+                                    <label class="form-check-label">Persist as token object</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <InputCheckbox class="form-check-input" @bind-Value="_request.UnwrapPrivateObject" />
+                                    <label class="form-check-label">Private</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <InputCheckbox class="form-check-input" @bind-Value="_request.UnwrapSensitive" />
+                                    <label class="form-check-label">Sensitive</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <InputCheckbox class="form-check-input" @bind-Value="_request.UnwrapExtractable" />
+                                    <label class="form-check-label">Extractable</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <InputCheckbox class="form-check-input" @bind-Value="_request.UnwrapAllowEncrypt" />
+                                    <label class="form-check-label">Allow Encrypt</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <InputCheckbox class="form-check-input" @bind-Value="_request.UnwrapAllowDecrypt" />
+                                    <label class="form-check-label">Allow Decrypt</label>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 }
 
@@ -286,7 +367,10 @@
         or Pkcs11LabOperation.SignData
         or Pkcs11LabOperation.VerifySignature
         or Pkcs11LabOperation.EncryptData
-        or Pkcs11LabOperation.DecryptData;
+        or Pkcs11LabOperation.DecryptData
+        or Pkcs11LabOperation.InspectObject
+        or Pkcs11LabOperation.WrapKey
+        or Pkcs11LabOperation.UnwrapAesKey;
 
     private bool CanRun => Guid.TryParse(_selectedDeviceId, out _) && (!RequiresSlot || ulong.TryParse(_selectedSlotId, out _));
 
@@ -382,11 +466,20 @@
             UserPin = _request.UserPin,
             MechanismTypeText = _request.MechanismTypeText,
             KeyHandleText = _request.KeyHandleText,
+            SecondaryKeyHandleText = _request.SecondaryKeyHandleText,
             DigestAlgorithm = _request.DigestAlgorithm,
             PayloadEncoding = _request.PayloadEncoding,
             TextInput = _request.TextInput,
             DataHex = _request.DataHex,
             SignatureHex = _request.SignatureHex,
+            UnwrapTargetLabel = _request.UnwrapTargetLabel,
+            UnwrapTargetIdHex = _request.UnwrapTargetIdHex,
+            UnwrapTokenObject = _request.UnwrapTokenObject,
+            UnwrapPrivateObject = _request.UnwrapPrivateObject,
+            UnwrapSensitive = _request.UnwrapSensitive,
+            UnwrapExtractable = _request.UnwrapExtractable,
+            UnwrapAllowEncrypt = _request.UnwrapAllowEncrypt,
+            UnwrapAllowDecrypt = _request.UnwrapAllowDecrypt,
             LabelFilter = _request.LabelFilter,
             IdHex = _request.IdHex,
             ObjectClassFilter = _request.ObjectClassFilter,
@@ -451,6 +544,9 @@
             Pkcs11LabOperation.VerifySignature => "Verify Signature",
             Pkcs11LabOperation.EncryptData => "Encrypt Data",
             Pkcs11LabOperation.DecryptData => "Decrypt Data",
+            Pkcs11LabOperation.InspectObject => "Inspect Object",
+            Pkcs11LabOperation.WrapKey => "Wrap Key",
+            Pkcs11LabOperation.UnwrapAesKey => "Unwrap AES Key",
             _ => operation.ToString()
         };
 
@@ -470,6 +566,17 @@
             Pkcs11LabOperation.VerifySignature => "Seçilen handle ile `C_Verify` çalıştırıp sonucu doğrula.",
             Pkcs11LabOperation.EncryptData => "Seçilen handle ile `C_Encrypt` çalıştırıp ciphertext hex üret.",
             Pkcs11LabOperation.DecryptData => "Seçilen handle ile `C_Decrypt` çalıştırıp plaintext hex/UTF-8 çıktısı göster.",
+            Pkcs11LabOperation.InspectObject => "Seçilen handle için common attribute snapshot ve capability görünümünü göster.",
+            Pkcs11LabOperation.WrapKey => "Bir wrapping key handle ile başka bir key handle’ı `C_WrapKey` üzerinden sarıp blob üret.",
+            Pkcs11LabOperation.UnwrapAesKey => "Wrapped blob’u kontrollü AES secret-key template ile `C_UnwrapKey` üzerinden aç.",
             _ => operation.ToString()
+        };
+
+    private static string GetPrimaryHandleLabel(Pkcs11LabOperation operation)
+        => operation switch
+        {
+            Pkcs11LabOperation.WrapKey => "Wrapped Target Handle",
+            Pkcs11LabOperation.UnwrapAesKey => "Unwrapping Key Handle",
+            _ => "Key/Object Handle"
         };
 }

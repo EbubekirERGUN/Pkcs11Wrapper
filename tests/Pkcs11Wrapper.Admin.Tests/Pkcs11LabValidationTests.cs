@@ -131,6 +131,68 @@ public sealed class Pkcs11LabValidationTests
         HsmAdminService.ValidateLabRequest(request);
     }
 
+    [Fact]
+    public void ValidateLabRequestRequiresHandleForInspectObject()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.InspectObject
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Key handle", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRequiresWrappingHandleForWrapKey()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.WrapKey,
+            MechanismTypeText = "0x2109",
+            KeyHandleText = "42"
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Wrapping key handle", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRequiresWrappedBlobForUnwrapKey()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.UnwrapAesKey,
+            MechanismTypeText = "0x2109",
+            KeyHandleText = "7"
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Wrapped key hex", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestAcceptsUnwrapKeyWithoutExplicitTargetLabel()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.UnwrapAesKey,
+            MechanismTypeText = "0x2109",
+            KeyHandleText = "7",
+            DataHex = "AABBCCDD"
+        };
+
+        HsmAdminService.ValidateLabRequest(request);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(4097)]

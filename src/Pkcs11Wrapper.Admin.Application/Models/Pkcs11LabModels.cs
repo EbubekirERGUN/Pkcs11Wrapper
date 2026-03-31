@@ -14,7 +14,10 @@ public enum Pkcs11LabOperation
     SignData = 9,
     VerifySignature = 10,
     EncryptData = 11,
-    DecryptData = 12
+    DecryptData = 12,
+    InspectObject = 13,
+    WrapKey = 14,
+    UnwrapAesKey = 15
 }
 
 public enum Pkcs11LabDigestAlgorithm
@@ -59,6 +62,8 @@ public sealed class Pkcs11LabRequest
 
     public string? KeyHandleText { get; set; }
 
+    public string? SecondaryKeyHandleText { get; set; }
+
     public Pkcs11LabDigestAlgorithm DigestAlgorithm { get; set; } = Pkcs11LabDigestAlgorithm.Sha256;
 
     public Pkcs11LabPayloadEncoding PayloadEncoding { get; set; } = Pkcs11LabPayloadEncoding.Utf8Text;
@@ -68,6 +73,22 @@ public sealed class Pkcs11LabRequest
     public string? DataHex { get; set; }
 
     public string? SignatureHex { get; set; }
+
+    public string? UnwrapTargetLabel { get; set; }
+
+    public string? UnwrapTargetIdHex { get; set; }
+
+    public bool UnwrapTokenObject { get; set; }
+
+    public bool UnwrapPrivateObject { get; set; } = true;
+
+    public bool UnwrapSensitive { get; set; } = true;
+
+    public bool UnwrapExtractable { get; set; }
+
+    public bool UnwrapAllowEncrypt { get; set; } = true;
+
+    public bool UnwrapAllowDecrypt { get; set; } = true;
 
     public string? LabelFilter { get; set; }
 
