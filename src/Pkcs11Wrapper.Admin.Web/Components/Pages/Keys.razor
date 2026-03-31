@@ -4,7 +4,7 @@
 <PageTitle>Keys</PageTitle>
 
 <h1>Keys / Objects</h1>
-<p class="text-muted">Slot içindeki key/object kayıtlarını görüntüle. İstersen label filtresi uygula ve gerekli PIN ile seçilen objeyi sil.</p>
+<p class="text-muted">Slot içindeki objeleri listele, ayrıntılarını incele, yaygın AES/RSA üretim akışlarını çalıştır ve destroy işlemlerinde typed confirmation kullan.</p>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -48,55 +48,212 @@
     </div>
 </div>
 
+<div class="row g-4 mb-4">
+    <div class="col-xl-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Generate AES key</div>
+            <div class="card-body row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Label</label>
+                    <input class="form-control" @bind="_aesRequest.Label" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">ID (hex, optional)</label>
+                    <input class="form-control" @bind="_aesRequest.IdHex" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Size</label>
+                    <select class="form-select" @bind="_aesRequest.SizeBytes">
+                        <option value="16">128-bit</option>
+                        <option value="24">192-bit</option>
+                        <option value="32">256-bit</option>
+                        <option value="48">384-bit</option>
+                        <option value="64">512-bit</option>
+                    </select>
+                </div>
+                <div class="col-md-8 d-flex flex-wrap gap-3 align-items-center">
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.AllowEncrypt" /><label class="form-check-label">Encrypt</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.AllowDecrypt" /><label class="form-check-label">Decrypt</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.AllowWrap" /><label class="form-check-label">Wrap</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.AllowUnwrap" /><label class="form-check-label">Unwrap</label></div>
+                </div>
+                <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.Token" /><label class="form-check-label">Token object</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.Private" /><label class="form-check-label">Private</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.Sensitive" /><label class="form-check-label">Sensitive</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.Extractable" /><label class="form-check-label">Extractable</label></div>
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-success" @onclick="GenerateAesAsync" disabled="@(!CanManageKeys)">Generate AES Key</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Generate RSA key pair</div>
+            <div class="card-body row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Label</label>
+                    <input class="form-control" @bind="_rsaRequest.Label" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">ID (hex, optional)</label>
+                    <input class="form-control" @bind="_rsaRequest.IdHex" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Modulus bits</label>
+                    <select class="form-select" @bind="_rsaRequest.ModulusBits">
+                        <option value="1024">1024</option>
+                        <option value="2048">2048</option>
+                        <option value="3072">3072</option>
+                        <option value="4096">4096</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Public exponent (hex)</label>
+                    <input class="form-control" @bind="_rsaRequest.PublicExponentHex" />
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.Token" /><label class="form-check-label">Token objects</label></div>
+                </div>
+                <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.AllowSign" /><label class="form-check-label">Sign</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.AllowVerify" /><label class="form-check-label">Verify</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.AllowEncrypt" /><label class="form-check-label">Encrypt</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.AllowDecrypt" /><label class="form-check-label">Decrypt</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.Sensitive" /><label class="form-check-label">Sensitive private key</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.Extractable" /><label class="form-check-label">Extractable private key</label></div>
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-success" @onclick="GenerateRsaAsync" disabled="@(!CanManageKeys)">Generate RSA Key Pair</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 @if (_keys.Count != 0)
 {
-    <div class="table-responsive">
-        <table class="table table-striped table-hover align-middle">
-            <thead>
-                <tr>
-                    <th>Handle</th>
-                    <th>Label</th>
-                    <th>ID</th>
-                    <th>Class</th>
-                    <th>Key Type</th>
-                    <th>Capabilities</th>
-                    <th class="text-end">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (HsmKeyObjectSummary key in _keys)
-                {
-                    <tr>
-                        <td>@key.Handle</td>
-                        <td>@key.Label</td>
-                        <td><code>@key.IdHex</code></td>
-                        <td>@key.ObjectClass</td>
-                        <td>@key.KeyType</td>
-                        <td class="small">
-                            @(CapabilityText(key.CanEncrypt, "enc"))
-                            @(CapabilityText(key.CanDecrypt, "dec"))
-                            @(CapabilityText(key.CanSign, "sign"))
-                            @(CapabilityText(key.CanVerify, "verify"))
-                            @(CapabilityText(key.CanWrap, "wrap"))
-                            @(CapabilityText(key.CanUnwrap, "unwrap"))
-                        </td>
-                        <td class="text-end">
-                            @if (_pendingDestroyHandle == key.Handle)
+    <div class="row g-4">
+        <div class="col-xl-7">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Handle</th>
+                            <th>Label</th>
+                            <th>ID</th>
+                            <th>Class</th>
+                            <th>Key Type</th>
+                            <th>Capabilities</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (HsmKeyObjectSummary key in _keys)
+                        {
+                            <tr class="@(_selectedDetailHandle == key.Handle ? "table-active" : null)">
+                                <td>@key.Handle</td>
+                                <td>@key.Label</td>
+                                <td><code>@key.IdHex</code></td>
+                                <td>@key.ObjectClass</td>
+                                <td>@key.KeyType</td>
+                                <td class="small">
+                                    @(CapabilityText(key.CanEncrypt, "enc"))
+                                    @(CapabilityText(key.CanDecrypt, "dec"))
+                                    @(CapabilityText(key.CanSign, "sign"))
+                                    @(CapabilityText(key.CanVerify, "verify"))
+                                    @(CapabilityText(key.CanWrap, "wrap"))
+                                    @(CapabilityText(key.CanUnwrap, "unwrap"))
+                                </td>
+                                <td class="text-end">
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-primary" @onclick="() => ShowDetailAsync(key)">Details</button>
+                                        <button class="btn btn-outline-danger" @onclick="() => BeginDestroy(key)">Destroy</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="col-xl-5">
+            @if (_selectedDetail is null && _destroyTarget is null)
+            {
+                <div class="card shadow-sm">
+                    <div class="card-body text-muted">Bir obje seçip detaylarını veya destroy confirmation panelini aç.</div>
+                </div>
+            }
+
+            @if (_selectedDetail is not null)
+            {
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Object detail</span>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="ClearDetail">Close</button>
+                    </div>
+                    <div class="card-body">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-4">Handle</dt><dd class="col-sm-8">@_selectedDetail.Handle</dd>
+                            <dt class="col-sm-4">Label</dt><dd class="col-sm-8">@_selectedDetail.Label</dd>
+                            <dt class="col-sm-4">ID</dt><dd class="col-sm-8"><code>@_selectedDetail.IdHex</code></dd>
+                            <dt class="col-sm-4">Class</dt><dd class="col-sm-8">@_selectedDetail.ObjectClass</dd>
+                            <dt class="col-sm-4">Key Type</dt><dd class="col-sm-8">@_selectedDetail.KeyType</dd>
+                            <dt class="col-sm-4">Object Size</dt><dd class="col-sm-8">@FormatNullable(_selectedDetail.SizeBytes)</dd>
+                            <dt class="col-sm-4">Value Length</dt><dd class="col-sm-8">@FormatNullable(_selectedDetail.ValueLength)</dd>
+                            <dt class="col-sm-4">Modulus Bits</dt><dd class="col-sm-8">@FormatNullable(_selectedDetail.ModulusBits)</dd>
+                            <dt class="col-sm-4">Flags</dt>
+                            <dd class="col-sm-8">@string.Join(", ", GetFlags(_selectedDetail))</dd>
+                        </dl>
+
+                        <hr />
+                        <h2 class="h6">Readable attributes</h2>
+                        <ul class="list-group list-group-flush">
+                            @foreach (HsmObjectAttributeView detailAttribute in _selectedDetail.Attributes)
                             {
-                                <div class="btn-group btn-group-sm">
-                                    <button class="btn btn-danger" @onclick="() => DestroyAsync(key.Handle)">Confirm Destroy</button>
-                                    <button class="btn btn-outline-secondary" @onclick="CancelDestroy">Cancel</button>
-                                </div>
+                                <li class="list-group-item d-flex justify-content-between gap-3 px-0">
+                                    <span class="fw-semibold">@detailAttribute.Name</span>
+                                    <span class="text-break @(detailAttribute.IsSensitive ? "text-warning" : null)">@detailAttribute.Value</span>
+                                </li>
                             }
-                            else
-                            {
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => BeginDestroy(key.Handle)">Destroy</button>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+                        </ul>
+                    </div>
+                </div>
+            }
+
+            @if (_destroyTarget is not null)
+            {
+                <div class="card border-danger shadow-sm">
+                    <div class="card-header bg-danger-subtle text-danger-emphasis">Destroy object</div>
+                    <div class="card-body">
+                        <p class="mb-2">This permanently removes the selected object from the token.</p>
+                        <ul>
+                            <li><strong>Handle:</strong> @_destroyTarget.Handle</li>
+                            <li><strong>Label:</strong> @_destroyTarget.Label</li>
+                            <li><strong>Class:</strong> @_destroyTarget.ObjectClass</li>
+                            <li><strong>Key Type:</strong> @_destroyTarget.KeyType</li>
+                        </ul>
+                        <div class="mb-3">
+                            <label class="form-label">Type exact confirmation text</label>
+                            <input class="form-control" @bind="_destroyRequest.ConfirmationText" />
+                            <div class="form-text"><code>@DestroyConfirmationText</code></div>
+                        </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" @bind="_destroyRequest.AcknowledgePermanentDeletion" />
+                            <label class="form-check-label">I understand this deletion is permanent.</label>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-danger" @onclick="DestroyAsync">Destroy Now</button>
+                            <button class="btn btn-outline-secondary" @onclick="CancelDestroy">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
     </div>
 }
 
@@ -108,11 +265,18 @@
     private string? _selectedSlotId;
     private string? _labelFilter;
     private string? _userPin;
-    private nuint? _pendingDestroyHandle;
+    private HsmObjectDetail? _selectedDetail;
+    private nuint? _selectedDetailHandle;
+    private HsmKeyObjectSummary? _destroyTarget;
+    private DestroyObjectRequest _destroyRequest = new();
+    private GenerateAesKeyRequest _aesRequest = new() { Label = "aes-admin-" + Guid.NewGuid().ToString("N")[..10] };
+    private GenerateRsaKeyPairRequest _rsaRequest = new() { Label = "rsa-admin-" + Guid.NewGuid().ToString("N")[..10] };
     private string? _statusMessage;
     private bool _statusIsError;
 
     private bool CanLoadKeys => Guid.TryParse(_selectedDeviceId, out _) && nuint.TryParse(_selectedSlotId, out _);
+    private bool CanManageKeys => CanLoadKeys && !string.IsNullOrWhiteSpace(_userPin);
+    private string DestroyConfirmationText => _destroyTarget is null ? string.Empty : HsmAdminService.BuildDestroyConfirmationText(_destroyTarget.Handle, _destroyTarget.Label);
 
     protected override async Task OnInitializedAsync()
     {
@@ -121,13 +285,15 @@
         await ReloadSlotsAsync();
     }
 
-    private async Task OnSelectedDeviceChangedAsync()
-        => await ReloadSlotsAsync();
+    private async Task OnSelectedDeviceChangedAsync() => await ReloadSlotsAsync();
 
     private async Task ReloadSlotsAsync()
     {
         _keys = [];
-        _pendingDestroyHandle = null;
+        _selectedDetail = null;
+        _selectedDetailHandle = null;
+        _destroyTarget = null;
+        _destroyRequest = new();
         if (!Guid.TryParse(_selectedDeviceId, out Guid deviceId))
         {
             _slots = [];
@@ -142,49 +308,161 @@
     {
         try
         {
-            if (!Guid.TryParse(_selectedDeviceId, out Guid deviceId) || !nuint.TryParse(_selectedSlotId, out nuint slotId))
+            if (!TryGetSelection(out Guid deviceId, out nuint slotId))
             {
                 return;
             }
 
             _keys = await Admin.GetKeysAsync(deviceId, slotId, _userPin, _labelFilter);
-            _pendingDestroyHandle = null;
-            _statusMessage = $"Loaded {_keys.Count} object(s).";
-            _statusIsError = false;
+            _destroyTarget = null;
+            _destroyRequest = new();
+            _selectedDetail = null;
+            _selectedDetailHandle = null;
+            SetStatus($"Loaded {_keys.Count} object(s).", false);
         }
         catch (Exception ex)
         {
-            _statusMessage = ex.Message;
-            _statusIsError = true;
+            SetStatus(ex.Message, true);
         }
     }
 
-    private void BeginDestroy(nuint handle) => _pendingDestroyHandle = handle;
-
-    private void CancelDestroy() => _pendingDestroyHandle = null;
-
-    private async Task DestroyAsync(nuint handle)
+    private async Task ShowDetailAsync(HsmKeyObjectSummary key)
     {
         try
         {
-            if (!Guid.TryParse(_selectedDeviceId, out Guid deviceId) || !nuint.TryParse(_selectedSlotId, out nuint slotId))
+            if (!TryGetSelection(out Guid deviceId, out nuint slotId))
             {
                 return;
             }
 
-            await Admin.DestroyObjectAsync(deviceId, slotId, handle, _userPin ?? string.Empty);
-            _statusMessage = $"Destroyed object handle {handle}.";
-            _statusIsError = false;
-            _pendingDestroyHandle = null;
+            _selectedDetail = await Admin.GetObjectDetailAsync(deviceId, slotId, key.Handle, _userPin);
+            _selectedDetailHandle = key.Handle;
+            _destroyTarget = null;
+            _destroyRequest = new();
+            SetStatus($"Loaded detail for handle {key.Handle}.", false);
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, true);
+        }
+    }
+
+    private void ClearDetail()
+    {
+        _selectedDetail = null;
+        _selectedDetailHandle = null;
+    }
+
+    private void BeginDestroy(HsmKeyObjectSummary key)
+    {
+        _destroyTarget = key;
+        _selectedDetail = null;
+        _selectedDetailHandle = null;
+        _destroyRequest = new DestroyObjectRequest { Handle = key.Handle, Label = key.Label, UserPin = _userPin ?? string.Empty };
+    }
+
+    private void CancelDestroy()
+    {
+        _destroyTarget = null;
+        _destroyRequest = new();
+    }
+
+    private async Task DestroyAsync()
+    {
+        try
+        {
+            if (_destroyTarget is null || !TryGetSelection(out Guid deviceId, out nuint slotId))
+            {
+                return;
+            }
+
+            _destroyRequest.Handle = _destroyTarget.Handle;
+            _destroyRequest.Label = _destroyTarget.Label;
+            _destroyRequest.UserPin = _userPin ?? string.Empty;
+            await Admin.DestroyObjectAsync(deviceId, slotId, _destroyRequest);
+            SetStatus($"Destroyed object handle {_destroyTarget.Handle}.", false);
+            _destroyTarget = null;
+            _destroyRequest = new();
             await LoadKeysAsync();
         }
         catch (Exception ex)
         {
-            _statusMessage = ex.Message;
-            _statusIsError = true;
+            SetStatus(ex.Message, true);
         }
     }
 
-    private static string CapabilityText(bool? value, string name)
-        => value == true ? $"{name} " : string.Empty;
+    private async Task GenerateAesAsync()
+    {
+        try
+        {
+            if (!TryGetSelection(out Guid deviceId, out nuint slotId))
+            {
+                return;
+            }
+
+            KeyManagementResult result = await Admin.GenerateAesKeyAsync(deviceId, slotId, _aesRequest, _userPin ?? string.Empty);
+            SetStatus(result.Summary, false);
+            _labelFilter = result.Label;
+            _aesRequest = new GenerateAesKeyRequest { Label = "aes-admin-" + Guid.NewGuid().ToString("N")[..10], SizeBytes = _aesRequest.SizeBytes };
+            await LoadKeysAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, true);
+        }
+    }
+
+    private async Task GenerateRsaAsync()
+    {
+        try
+        {
+            if (!TryGetSelection(out Guid deviceId, out nuint slotId))
+            {
+                return;
+            }
+
+            KeyManagementResult result = await Admin.GenerateRsaKeyPairAsync(deviceId, slotId, _rsaRequest, _userPin ?? string.Empty);
+            SetStatus(result.Summary, false);
+            _labelFilter = result.Label;
+            _rsaRequest = new GenerateRsaKeyPairRequest { Label = "rsa-admin-" + Guid.NewGuid().ToString("N")[..10], ModulusBits = _rsaRequest.ModulusBits, PublicExponentHex = _rsaRequest.PublicExponentHex };
+            await LoadKeysAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, true);
+        }
+    }
+
+    private bool TryGetSelection(out Guid deviceId, out nuint slotId)
+    {
+        bool hasDevice = Guid.TryParse(_selectedDeviceId, out deviceId);
+        bool hasSlot = nuint.TryParse(_selectedSlotId, out slotId);
+        return hasDevice && hasSlot;
+    }
+
+    private void SetStatus(string message, bool isError)
+    {
+        _statusMessage = message;
+        _statusIsError = isError;
+    }
+
+    private static IEnumerable<string> GetFlags(HsmObjectDetail detail)
+    {
+        if (detail.Token == true) yield return "token";
+        if (detail.Private == true) yield return "private";
+        if (detail.Modifiable == true) yield return "modifiable";
+        if (detail.Sensitive == true) yield return "sensitive";
+        if (detail.Extractable == true) yield return "extractable";
+        if (detail.CanEncrypt == true) yield return "encrypt";
+        if (detail.CanDecrypt == true) yield return "decrypt";
+        if (detail.CanSign == true) yield return "sign";
+        if (detail.CanVerify == true) yield return "verify";
+        if (detail.CanWrap == true) yield return "wrap";
+        if (detail.CanUnwrap == true) yield return "unwrap";
+        if (detail.CanDerive == true) yield return "derive";
+    }
+
+    private static string FormatNullable(nuint? value) => value?.ToString() ?? "n/a";
+
+    private static string CapabilityText(bool? value, string name) => value == true ? $"{name} " : string.Empty;
 }

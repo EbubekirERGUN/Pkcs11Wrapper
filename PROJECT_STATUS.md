@@ -17,12 +17,14 @@
 - Yeni bir Blazor Server admin panel girişimi başlatıldı: `Pkcs11Wrapper.Admin.Application`, `Pkcs11Wrapper.Admin.Infrastructure`, `Pkcs11Wrapper.Admin.Web` ve `Pkcs11Wrapper.Admin.Tests` projeleri çözüme eklendi.
 - Admin panelin ilk iskeleti kuruldu: device profile CRUD, connection test, slot listeleme, key/object listeleme + explicit destroy akışı, uygulama-owned session registry, audit log görünümü ve dashboard ekranı eklendi.
 - Admin panel için başlangıç yol haritası `docs/admin-panel-roadmap.md` içinde oluşturuldu.
+- Admin panel Phase B için ilk anlamlı genişleme tamamlandı: key/object detail paneli, AES key generate akışı, RSA keypair generate akışı ve typed confirmation + kalıcı silme onayı isteyen daha güvenli destroy UX'i eklendi.
+- Admin panel uygulama katmanı için yeni doğrulama testleri eklendi; çözüm testleri ve hedefli admin web build doğrulaması temiz geçti.
 
 ## Şu an üzerinde çalışılan
-- Blazor Server admin panelinin ilk iskeleti tamamlandı; build/test/self-review doğrulaması alındı.
+- Blazor Server admin panelinde Phase B kısmi olarak ilerletildi; kalan başlıklar attribute editing ve olası explicit key create/import akışları.
 
 ## Sıradaki işler
-- Admin panel Phase B: key/object detail, generate/create akışları ve daha güvenli destructive işlemler.
+- Admin panel Phase B'yi tamamlamak için supported token'larda attribute editing ve güvenli bir AES create/import akışı değerlendirmek.
 - Admin panel Phase C: daha zengin session operasyonları ve login/logout görünürlüğü.
 - PKCS#11 v3 message API'lerini gerçekten expose eden bir vendor/modül ile runtime regression eklemek.
 - Gerekirse Windows runtime lane'ini GitHub üzerinde ilk gerçek koşusunda gözleyip paket/araç yolu ince ayarı yapmak.
@@ -31,4 +33,4 @@
 - Mevcut SoftHSM build'leri `C_GetInterface*` export etmediği için yeni v3 yüzeyin runtime pozitif doğrulaması henüz SoftHSM ile yapılamıyor; şimdilik ABI/layout + capability-gated davranış testleri var.
 
 ## Commit / push durumu
-- Yerel değişiklikler var; admin panel scaffold'ı ve ilgili proje/doküman değişiklikleri için henüz push yok.
+- Yerel değişiklikler mevcut; bu admin panel Phase B slice'ı commitlenecek, push yapılmadı.

@@ -33,13 +33,24 @@ Acceptance criteria:
 
 ## Phase B - Key management expansion
 
-Status: planned
+Status: in progress
+
+Delivered in current slice:
+- richer object detail panel with readable attribute inspection, object size, and common capability/flag summaries
+- practical key-management flows for token operators: AES key generation and RSA key-pair generation
+- stronger destructive flow with typed confirmation text + explicit permanent-deletion acknowledgement
+- admin-layer validation tests covering key-generation request validation and destroy confirmation rules
 
 Goals:
 - key/object detail drawer
 - generate/create flows for common AES/RSA scenarios
 - attribute editing where supported
 - safer destructive flows and richer confirmations
+
+Remaining for Phase B:
+- add at least one explicit key create/import flow (for example AES raw-value create) if the UX/security tradeoff is acceptable
+- optional attribute editing/update surface where tokens allow it
+- deeper mechanism-aware affordances (for example conditional wrap/unwrap presets per slot capabilities)
 
 ## Phase C - Session operations
 
