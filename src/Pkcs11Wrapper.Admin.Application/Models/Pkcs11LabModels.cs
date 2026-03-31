@@ -64,6 +64,17 @@ public enum Pkcs11LabRsaHashProfile
     Sha512 = 4
 }
 
+public enum Pkcs11LabArtifactKind
+{
+    None = 0,
+    Signature = 1,
+    Ciphertext = 2,
+    WrappedKey = 3,
+    Plaintext = 4,
+    Digest = 5,
+    Random = 6
+}
+
 public sealed class Pkcs11LabRequest
 {
     public Guid DeviceId { get; set; }
@@ -149,4 +160,7 @@ public sealed record Pkcs11LabExecutionResult(
     string Summary,
     string OutputText,
     IReadOnlyList<string> Notes,
-    long DurationMilliseconds);
+    long DurationMilliseconds,
+    Pkcs11LabArtifactKind ArtifactKind,
+    string? ArtifactHex,
+    string? CreatedHandleText);

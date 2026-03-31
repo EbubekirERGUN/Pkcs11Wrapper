@@ -221,6 +221,20 @@
 
                 @if (_request.Operation == Pkcs11LabOperation.ReadAttribute)
                 {
+                    <div class="col-md-6">
+                        <label class="form-label">Attribute preset library</label>
+                        <InputSelect class="form-select" @bind-Value="_selectedAttributePresetKey">
+                            @foreach (KeyValuePair<string, string> preset in AttributePresetLibrary)
+                            {
+                                <option value="@preset.Key">@preset.Key</option>
+                            }
+                        </InputSelect>
+                        <div class="d-flex gap-2 mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="ApplySelectedAttributePreset">Replace with preset</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="AppendSelectedAttributePreset">Append preset</button>
+                        </div>
+                    </div>
+
                     <div class="col-12">
                         <label class="form-label">Attribute Type(s) (hex or decimal)</label>
                         <textarea class="form-control font-monospace" rows="4" @bind="_request.AttributeTypeText" placeholder="0x3, 0x102, 0x100"></textarea>
@@ -450,7 +464,59 @@
                         </div>
                     }
 
+                    @if (!string.IsNullOrWhiteSpace(_lastResult.CreatedHandleText))
+                    {
+                        <div class="alert alert-success small">
+                            Created handle: <code>@_lastResult.CreatedHandleText</code>
+                            <button type="button" class="btn btn-sm btn-outline-success ms-2" @onclick="OpenInspectForCreatedHandleAsync">Inspect</button>
+                        </div>
+                    }
+
                     <pre class="bg-body-tertiary border rounded p-3 small mb-0" style="max-height: 36rem; overflow: auto; white-space: pre-wrap;">@_lastResult.OutputText</pre>
+                }
+
+                @if (_history.Count > 0)
+                {
+                    <hr />
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-semibold">Scenario history</div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearHistory">Clear</button>
+                    </div>
+
+                    <div class="d-flex flex-column gap-2">
+                        @foreach (LabHistoryItem item in _history)
+                        {
+                            <div class="border rounded p-2 small">
+                                <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                                    <div>
+                                        <div class="fw-semibold">@item.Result.Operation</div>
+                                        <div class="text-muted">@item.RecordedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") · @item.Result.Summary</div>
+                                    </div>
+                                    <span class="badge @GetHistoryBadgeClass(item.Result)">@GetHistoryBadgeText(item.Result)</span>
+                                </div>
+
+                                <div class="d-flex flex-wrap gap-2 mt-2">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ApplyHistoryRequestAsync(item)">Reuse request</button>
+                                    @if (CanPrepareVerify(item))
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => PrepareVerifyFromHistoryAsync(item)">Prepare verify</button>
+                                    }
+                                    @if (CanPrepareDecrypt(item))
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-success" @onclick="() => PrepareDecryptFromHistoryAsync(item)">Prepare decrypt</button>
+                                    }
+                                    @if (CanPrepareUnwrap(item))
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-warning" @onclick="() => PrepareUnwrapFromHistoryAsync(item)">Prepare unwrap</button>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.Result.CreatedHandleText))
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-dark" @onclick="() => PrepareInspectCreatedHandleAsync(item)">Inspect created</button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
                 }
             </div>
         </div>
@@ -494,11 +560,32 @@
     private string? _selectedSlotId;
     private Pkcs11LabRequest _request = CreateDefaultRequest();
     private Pkcs11LabExecutionResult? _lastResult;
+    private readonly List<LabHistoryItem> _history = [];
     private string? _statusMessage;
     private bool _statusIsError;
     private bool _rememberPin;
     private bool _isRunning;
     private string? _lastAppliedQuerySignature;
+    private string _selectedAttributePresetKey = AttributePresetIdentity;
+
+    private const string AttributePresetIdentity = "Identity";
+    private const string AttributePresetCapabilities = "Capabilities";
+    private const string AttributePresetRsaPublic = "RsaPublic";
+    private const string AttributePresetRsaPrivate = "RsaPrivate";
+    private const string AttributePresetSecretKey = "SecretKey";
+    private const string AttributePresetEcKey = "EcKey";
+
+    private static readonly IReadOnlyDictionary<string, string> AttributePresetLibrary = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [AttributePresetIdentity] = "0x0, 0x3, 0x102, 0x100",
+        [AttributePresetCapabilities] = "0x103, 0x104, 0x105, 0x106, 0x107, 0x108, 0x10a, 0x10c, 0x162, 0x170",
+        [AttributePresetRsaPublic] = "0x0, 0x3, 0x102, 0x100, 0x121, 0x122, 0x104, 0x10a, 0x106",
+        [AttributePresetRsaPrivate] = "0x0, 0x3, 0x102, 0x100, 0x103, 0x107, 0x108, 0x162, 0x170",
+        [AttributePresetSecretKey] = "0x0, 0x3, 0x102, 0x100, 0x161, 0x103, 0x104, 0x105, 0x106, 0x107, 0x162",
+        [AttributePresetEcKey] = "0x0, 0x3, 0x102, 0x100, 0x180, 0x181, 0x108, 0x10a"
+    };
+
+    private sealed record LabHistoryItem(DateTimeOffset RecordedAt, Pkcs11LabRequest Request, Pkcs11LabExecutionResult Result);
 
     private bool RequiresSlot => _request.Operation is Pkcs11LabOperation.MechanismList
         or Pkcs11LabOperation.MechanismInfo
@@ -634,6 +721,11 @@
             _isRunning = true;
             Pkcs11LabRequest request = BuildRequest();
             _lastResult = await Admin.ExecuteLabAsync(request);
+            if (_lastResult.Success)
+            {
+                RecordHistory(request, _lastResult);
+            }
+
             await PersistPinAsync(request);
             _statusMessage = _lastResult.Summary;
             _statusIsError = !_lastResult.Success;
@@ -818,4 +910,181 @@
 
     private void ClearAttributePresets()
         => _request.AttributeTypeText = null;
+
+    private void ApplySelectedAttributePreset()
+        => _request.AttributeTypeText = AttributePresetLibrary[_selectedAttributePresetKey];
+
+    private void AppendSelectedAttributePreset()
+        => _request.AttributeTypeText = string.IsNullOrWhiteSpace(_request.AttributeTypeText)
+            ? AttributePresetLibrary[_selectedAttributePresetKey]
+            : $"{_request.AttributeTypeText}, {AttributePresetLibrary[_selectedAttributePresetKey]}";
+
+    private void RecordHistory(Pkcs11LabRequest request, Pkcs11LabExecutionResult result)
+    {
+        _history.Insert(0, new LabHistoryItem(DateTimeOffset.UtcNow, CopyRequest(request), result));
+        if (_history.Count > 8)
+        {
+            _history.RemoveRange(8, _history.Count - 8);
+        }
+    }
+
+    private void ClearHistory()
+        => _history.Clear();
+
+    private async Task ApplyHistoryRequestAsync(LabHistoryItem item)
+    {
+        await ApplyRequestAsync(item.Request);
+        _statusMessage = "Scenario request restored into the editor.";
+        _statusIsError = false;
+    }
+
+    private async Task PrepareVerifyFromHistoryAsync(LabHistoryItem item)
+    {
+        Pkcs11LabRequest request = CopyRequest(item.Request);
+        request.Operation = Pkcs11LabOperation.VerifySignature;
+        request.SignatureHex = item.Result.ArtifactHex;
+        request.KeyHandleText = null;
+        await ApplyRequestAsync(request);
+        _statusMessage = "Signature and original payload were moved into Verify. Choose the verify/public key handle before running.";
+        _statusIsError = false;
+    }
+
+    private async Task PrepareDecryptFromHistoryAsync(LabHistoryItem item)
+    {
+        Pkcs11LabRequest request = CopyRequest(item.Request);
+        request.Operation = Pkcs11LabOperation.DecryptData;
+        request.DataHex = item.Result.ArtifactHex;
+        await ApplyRequestAsync(request);
+        _statusMessage = "Ciphertext was moved into Decrypt. If this was an RSA public-key encrypt flow, switch to the matching decrypt/private key handle before running.";
+        _statusIsError = false;
+    }
+
+    private async Task PrepareUnwrapFromHistoryAsync(LabHistoryItem item)
+    {
+        Pkcs11LabRequest request = CreateDefaultRequest();
+        request.DeviceId = item.Request.DeviceId;
+        request.SlotId = item.Request.SlotId;
+        request.Operation = Pkcs11LabOperation.UnwrapAesKey;
+        request.MechanismTypeText = item.Request.MechanismTypeText;
+        request.MechanismParameterProfile = item.Request.MechanismParameterProfile;
+        request.MechanismIvHex = item.Request.MechanismIvHex;
+        request.MechanismAdditionalDataHex = item.Request.MechanismAdditionalDataHex;
+        request.MechanismCounterBits = item.Request.MechanismCounterBits;
+        request.MechanismTagBits = item.Request.MechanismTagBits;
+        request.RsaHashProfile = item.Request.RsaHashProfile;
+        request.RsaOaepSourceEncoding = item.Request.RsaOaepSourceEncoding;
+        request.RsaOaepSourceText = item.Request.RsaOaepSourceText;
+        request.RsaOaepSourceHex = item.Request.RsaOaepSourceHex;
+        request.PssSaltLength = item.Request.PssSaltLength;
+        request.KeyHandleText = item.Request.SecondaryKeyHandleText;
+        request.DataHex = item.Result.ArtifactHex;
+        await ApplyRequestAsync(request);
+        _statusMessage = "Wrapped blob was moved into Unwrap AES Key and the previous wrapping key handle was reused as the unwrapping key handle.";
+        _statusIsError = false;
+    }
+
+    private async Task PrepareInspectCreatedHandleAsync(LabHistoryItem item)
+    {
+        if (string.IsNullOrWhiteSpace(item.Result.CreatedHandleText))
+        {
+            return;
+        }
+
+        Pkcs11LabRequest request = CreateDefaultRequest();
+        request.DeviceId = item.Request.DeviceId;
+        request.SlotId = item.Request.SlotId;
+        request.Operation = Pkcs11LabOperation.InspectObject;
+        request.KeyHandleText = item.Result.CreatedHandleText;
+        await ApplyRequestAsync(request);
+        _statusMessage = $"Prepared Inspect Object for created handle {item.Result.CreatedHandleText}.";
+        _statusIsError = false;
+    }
+
+    private async Task OpenInspectForCreatedHandleAsync()
+    {
+        if (_lastResult is null || string.IsNullOrWhiteSpace(_lastResult.CreatedHandleText))
+        {
+            return;
+        }
+
+        Pkcs11LabRequest request = CopyRequest(_request);
+        request.Operation = Pkcs11LabOperation.InspectObject;
+        request.KeyHandleText = _lastResult.CreatedHandleText;
+        await ApplyRequestAsync(request);
+        _statusMessage = $"Prepared Inspect Object for created handle {_lastResult.CreatedHandleText}.";
+        _statusIsError = false;
+    }
+
+    private async Task ApplyRequestAsync(Pkcs11LabRequest request)
+    {
+        _selectedDeviceId = request.DeviceId == Guid.Empty ? null : request.DeviceId.ToString();
+        await LoadSlotsForSelectedDeviceAsync();
+
+        if (request.SlotId is nuint slotId)
+        {
+            _selectedSlotId = slotId.ToString();
+            await LoadProtectedPinAsync();
+        }
+
+        _request = CopyRequest(request);
+        _lastResult = null;
+    }
+
+    private static Pkcs11LabRequest CopyRequest(Pkcs11LabRequest request)
+        => new()
+        {
+            DeviceId = request.DeviceId,
+            SlotId = request.SlotId,
+            Operation = request.Operation,
+            OpenReadWriteSession = request.OpenReadWriteSession,
+            LoginUserIfPinProvided = request.LoginUserIfPinProvided,
+            UserPin = request.UserPin,
+            MechanismTypeText = request.MechanismTypeText,
+            AttributeTypeText = request.AttributeTypeText,
+            MechanismParameterProfile = request.MechanismParameterProfile,
+            MechanismIvHex = request.MechanismIvHex,
+            MechanismAdditionalDataHex = request.MechanismAdditionalDataHex,
+            MechanismCounterBits = request.MechanismCounterBits,
+            MechanismTagBits = request.MechanismTagBits,
+            RsaHashProfile = request.RsaHashProfile,
+            RsaOaepSourceEncoding = request.RsaOaepSourceEncoding,
+            RsaOaepSourceText = request.RsaOaepSourceText,
+            RsaOaepSourceHex = request.RsaOaepSourceHex,
+            PssSaltLength = request.PssSaltLength,
+            KeyHandleText = request.KeyHandleText,
+            SecondaryKeyHandleText = request.SecondaryKeyHandleText,
+            DigestAlgorithm = request.DigestAlgorithm,
+            PayloadEncoding = request.PayloadEncoding,
+            TextInput = request.TextInput,
+            DataHex = request.DataHex,
+            SignatureHex = request.SignatureHex,
+            UnwrapTargetLabel = request.UnwrapTargetLabel,
+            UnwrapTargetIdHex = request.UnwrapTargetIdHex,
+            UnwrapTokenObject = request.UnwrapTokenObject,
+            UnwrapPrivateObject = request.UnwrapPrivateObject,
+            UnwrapSensitive = request.UnwrapSensitive,
+            UnwrapExtractable = request.UnwrapExtractable,
+            UnwrapAllowEncrypt = request.UnwrapAllowEncrypt,
+            UnwrapAllowDecrypt = request.UnwrapAllowDecrypt,
+            LabelFilter = request.LabelFilter,
+            IdHex = request.IdHex,
+            ObjectClassFilter = request.ObjectClassFilter,
+            RandomLength = request.RandomLength,
+            MaxObjects = request.MaxObjects
+        };
+
+    private static bool CanPrepareVerify(LabHistoryItem item)
+        => item.Result.Success && item.Result.ArtifactKind == Pkcs11LabArtifactKind.Signature && !string.IsNullOrWhiteSpace(item.Result.ArtifactHex);
+
+    private static bool CanPrepareDecrypt(LabHistoryItem item)
+        => item.Result.Success && item.Result.ArtifactKind == Pkcs11LabArtifactKind.Ciphertext && !string.IsNullOrWhiteSpace(item.Result.ArtifactHex);
+
+    private static bool CanPrepareUnwrap(LabHistoryItem item)
+        => item.Result.Success && item.Result.ArtifactKind == Pkcs11LabArtifactKind.WrappedKey && !string.IsNullOrWhiteSpace(item.Result.ArtifactHex);
+
+    private static string GetHistoryBadgeClass(Pkcs11LabExecutionResult result)
+        => result.Success ? "text-bg-success" : "text-bg-danger";
+
+    private static string GetHistoryBadgeText(Pkcs11LabExecutionResult result)
+        => $"{result.DurationMilliseconds} ms";
 }

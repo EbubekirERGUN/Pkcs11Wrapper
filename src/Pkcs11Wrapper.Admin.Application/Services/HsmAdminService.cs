@@ -62,6 +62,18 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         new("EC Point", Pkcs11AttributeTypes.EcPoint, AttributeValueKind.Hex)
     ];
 
+    private sealed record LabExecutionPayload(
+        string Summary,
+        string OutputText,
+        List<string> Notes,
+        Pkcs11LabArtifactKind ArtifactKind = Pkcs11LabArtifactKind.None,
+        string? ArtifactHex = null,
+        string? CreatedHandleText = null)
+    {
+        public static implicit operator LabExecutionPayload((string Summary, string OutputText, List<string> Notes) value)
+            => new(value.Summary, value.OutputText, value.Notes);
+    }
+
     public Task<IReadOnlyList<HsmDeviceProfile>> GetDevicesAsync(CancellationToken cancellationToken = default)
     {
         authorization.DemandViewer();
@@ -213,7 +225,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         try
         {
             using Pkcs11Module module = CreateInitializedModule(device);
-            (string Summary, string OutputText, List<string> Notes) execution = request.Operation switch
+            LabExecutionPayload execution = request.Operation switch
             {
                 Pkcs11LabOperation.ModuleInfo => ExecuteModuleInfoLab(module),
                 Pkcs11LabOperation.InterfaceDiscovery => ExecuteInterfaceDiscoveryLab(module),
@@ -237,7 +249,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
             stopwatch.Stop();
             await auditLog.WriteAsync("Lab", request.Operation.ToString(), target, "Success", execution.Summary, cancellationToken: cancellationToken);
-            return new(request.Operation.ToString(), true, execution.Summary, execution.OutputText, execution.Notes, stopwatch.ElapsedMilliseconds);
+            return new(request.Operation.ToString(), true, execution.Summary, execution.OutputText, execution.Notes, stopwatch.ElapsedMilliseconds, execution.ArtifactKind, execution.ArtifactHex, execution.CreatedHandleText);
         }
         catch (Exception ex)
         {
@@ -245,7 +257,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             string summary = $"{request.Operation} failed: {ex.Message}";
             string output = $"{ex.GetType().Name}: {ex.Message}";
             await auditLog.WriteAsync("Lab", request.Operation.ToString(), target, "Failure", ex.Message, cancellationToken: cancellationToken);
-            return new(request.Operation.ToString(), false, summary, output, [], stopwatch.ElapsedMilliseconds);
+            return new(request.Operation.ToString(), false, summary, output, [], stopwatch.ElapsedMilliseconds, Pkcs11LabArtifactKind.None, null, null);
         }
     }
 
@@ -1061,7 +1073,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return ($"Opened a transient {(request.OpenReadWriteSession ? "RW" : "RO")} session and read `C_GetSessionInfo`.", output.ToString(), notes);
     }
 
-    private static (string Summary, string OutputText, List<string> Notes) ExecuteGenerateRandomLab(Pkcs11Module module, Pkcs11LabRequest request)
+    private static LabExecutionPayload ExecuteGenerateRandomLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
@@ -1074,10 +1086,10 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Random length: {request.RandomLength}");
         output.AppendLine($"Random hex: {Convert.ToHexString(random)}");
-        return ($"Generated {request.RandomLength} random byte(s) from the token RNG.", output.ToString(), notes);
+        return new($"Generated {request.RandomLength} random byte(s) from the token RNG.", output.ToString(), notes, Pkcs11LabArtifactKind.Random, Convert.ToHexString(random));
     }
 
-    private static (string Summary, string OutputText, List<string> Notes) ExecuteDigestTextLab(Pkcs11Module module, Pkcs11LabRequest request)
+    private static LabExecutionPayload ExecuteDigestTextLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
@@ -1098,10 +1110,10 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         output.AppendLine($"Input bytes: {data.Length}");
         output.AppendLine($"Input text: {request.TextInput}");
         output.AppendLine($"Digest hex: {Convert.ToHexString(digest, 0, written)}");
-        return ($"Computed {DescribeMechanismType(mechanismType)} digest for {data.Length} byte(s) of UTF-8 input.", output.ToString(), notes);
+        return new($"Computed {DescribeMechanismType(mechanismType)} digest for {data.Length} byte(s) of UTF-8 input.", output.ToString(), notes, Pkcs11LabArtifactKind.Digest, Convert.ToHexString(digest, 0, written));
     }
 
-    private static (string Summary, string OutputText, List<string> Notes) ExecuteSignDataLab(Pkcs11Module module, Pkcs11LabRequest request)
+    private static LabExecutionPayload ExecuteSignDataLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
@@ -1132,7 +1144,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         output.AppendLine($"Input hex: {Convert.ToHexString(data)}");
         output.AppendLine($"Signature hex: {Convert.ToHexString(signature, 0, written)}");
         notes.Add("Signing often requires a private key and CKU_USER login; token policy may still reject the operation even with a PIN.");
-        return ($"Signed {data.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+        return new($"Signed {data.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes, Pkcs11LabArtifactKind.Signature, Convert.ToHexString(signature, 0, written));
     }
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteVerifySignatureLab(Pkcs11Module module, Pkcs11LabRequest request)
@@ -1165,7 +1177,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return ($"Verification {(verified ? "passed" : "failed")} for handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
     }
 
-    private static (string Summary, string OutputText, List<string> Notes) ExecuteEncryptDataLab(Pkcs11Module module, Pkcs11LabRequest request)
+    private static LabExecutionPayload ExecuteEncryptDataLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
@@ -1195,10 +1207,10 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
         output.AppendLine($"Plaintext hex: {Convert.ToHexString(plaintext)}");
         output.AppendLine($"Ciphertext hex: {Convert.ToHexString(ciphertext, 0, written)}");
-        return ($"Encrypted {plaintext.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+        return new($"Encrypted {plaintext.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes, Pkcs11LabArtifactKind.Ciphertext, Convert.ToHexString(ciphertext, 0, written));
     }
 
-    private static (string Summary, string OutputText, List<string> Notes) ExecuteDecryptDataLab(Pkcs11Module module, Pkcs11LabRequest request)
+    private static LabExecutionPayload ExecuteDecryptDataLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
@@ -1227,7 +1239,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         output.AppendLine($"Plaintext hex: {Convert.ToHexString(plaintextSpan)}");
         output.AppendLine($"Plaintext UTF-8: {TryDecodeUtf8(plaintextSpan)}");
         notes.Add("Decrypt typically targets private or secret keys; missing user login or token policy restrictions may cause token-side errors.");
-        return ($"Decrypted {ciphertext.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+        return new($"Decrypted {ciphertext.Length} byte(s) with handle {keyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes, Pkcs11LabArtifactKind.Plaintext, Convert.ToHexString(plaintextSpan));
     }
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteInspectObjectLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
@@ -1251,7 +1263,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return ($"Read common attribute snapshot for handle {detail.Handle}.", output.ToString(), notes);
     }
 
-    private static (string Summary, string OutputText, List<string> Notes) ExecuteWrapKeyLab(Pkcs11Module module, Pkcs11LabRequest request)
+    private static LabExecutionPayload ExecuteWrapKeyLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
@@ -1278,10 +1290,10 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         output.AppendLine($"Wrapped blob length: {written}");
         output.AppendLine($"Wrapped blob hex: {Convert.ToHexString(wrapped, 0, written)}");
         notes.Add("Wrapping requires a key with CKA_WRAP and a target key permitted by token policy; many tokens also require authenticated user state.");
-        return ($"Wrapped handle {targetKeyHandle.Value} with wrapping key {wrappingKeyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+        return new($"Wrapped handle {targetKeyHandle.Value} with wrapping key {wrappingKeyHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes, Pkcs11LabArtifactKind.WrappedKey, Convert.ToHexString(wrapped, 0, written));
     }
 
-    private static (string Summary, string OutputText, List<string> Notes) ExecuteUnwrapAesKeyLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
+    private static LabExecutionPayload ExecuteUnwrapAesKeyLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: true);
@@ -1345,7 +1357,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
 
         notes.Add("This lab currently limits unwrap target templates to AES secret keys so the result stays inspectable and constrained.");
-        return ($"Unwrapped an AES secret key into handle {unwrappedHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
+        return new($"Unwrapped an AES secret key into handle {unwrappedHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes, Pkcs11LabArtifactKind.None, null, unwrappedHandle.Value.ToString(CultureInfo.InvariantCulture));
     }
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteReadAttributeLab(Pkcs11Module module, Pkcs11LabRequest request)
