@@ -136,6 +136,9 @@ Depoda artık performans işlerini tahminle değil ölçümle takip etmek için 
 
 Güncel commitlenmiş Linux + SoftHSM baseline (`docs/benchmarks/latest-linux-softhsm.md`):
 
+- Yayınlanan benchmark tarihi (UTC): **2026-03-31 10:57**
+- Benchmark ortamı: **Arch Linux + SoftHSM + .NET SDK 10.0.201 / Runtime 10.0.5**
+
 | Benchmark | Baseline |
 | --- | ---: |
 | `LoadInitializeGetInfoFinalizeDispose` | `1.904 μs` |

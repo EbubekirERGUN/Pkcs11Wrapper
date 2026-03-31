@@ -51,15 +51,15 @@ Windows PowerShell:
 - latest generated JSON: `artifacts/benchmarks/latest/summary.json`
 - latest committed Linux baseline: `docs/benchmarks/latest-linux-softhsm.md`
 
-## Periodic tracking strategy
+## Periodic publishing strategy
 
-The repository also includes a dedicated GitHub Actions benchmark workflow so we can rerun the same benchmark suite at regular intervals and compare artifacts between runs.
+The repository also includes a dedicated GitHub Actions benchmark workflow so we can rerun the same benchmark suite at regular intervals and keep the **latest published baseline** visible on GitHub.
 
 Recommended discipline:
 
 1. rerun after performance-sensitive wrapper changes
 2. rerun before releases
-3. compare the new artifact with the previous committed baseline
-4. only refresh README/docs baselines when the new run is trustworthy and representative
+3. refresh the committed Linux baseline file when the new run is trustworthy and representative
+4. keep the README benchmark block aligned with the latest published baseline date
 
-This keeps performance claims tied to actual measurement instead of guesswork.
+We do not need a full benchmark history system inside the repository right now; showing the latest trustworthy result with its date is enough.

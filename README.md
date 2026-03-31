@@ -136,6 +136,9 @@ Current benchmark coverage includes:
 
 Latest committed Linux + SoftHSM baseline (`docs/benchmarks/latest-linux-softhsm.md`):
 
+- Published benchmark date (UTC): **2026-03-31 10:57**
+- Benchmark environment: **Arch Linux + SoftHSM + .NET SDK 10.0.201 / Runtime 10.0.5**
+
 | Benchmark | Baseline |
 | --- | ---: |
 | `LoadInitializeGetInfoFinalizeDispose` | `1.904 μs` |
