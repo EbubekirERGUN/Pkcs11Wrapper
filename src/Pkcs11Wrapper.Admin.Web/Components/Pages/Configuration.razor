@@ -12,6 +12,44 @@
     <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
 }
 
+<div class="row g-3 mb-4">
+    <div class="col-xl-3 col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Configured devices</div>
+                <div class="display-6">@_deviceCount</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Bundle includes</div>
+                <div class="display-6">1</div>
+                <div class="small text-muted">Device profile collection only</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Bundle excludes</div>
+                <div class="display-6">5</div>
+                <div class="small text-muted">Users, bootstrap creds, audit, PIN cache, DP keys</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Latest import</div>
+                <div class="display-6">@(_lastImportResult is null ? "—" : _lastImportResult.ImportedDeviceProfileCount.ToString())</div>
+                <div class="small text-muted">@(_lastImportResult is null ? "No import run in this session" : _lastImportResult.Summary)</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-4">
     <div class="col-lg-5">
         <div class="card shadow-sm h-100">
@@ -42,6 +80,10 @@
 
                 <div class="mt-auto">
                     <a class="btn btn-primary" href="/configuration/export">Download configuration JSON</a>
+                </div>
+
+                <div class="border-top pt-3 mt-2 small text-muted">
+                    Recommended flow: export before risky device changes, before host migration, and before large import/replace operations.
                 </div>
             </div>
         </div>
@@ -112,6 +154,16 @@
                         }
                     </div>
                 }
+
+                <div class="border-top mt-4 pt-3">
+                    <div class="fw-semibold mb-2">Import safety checklist</div>
+                    <ol class="small ps-3 mb-0 d-flex flex-column gap-1">
+                        <li>Export the current bundle first.</li>
+                        <li>Use <strong>Merge</strong> when you want the safest default for ongoing environments.</li>
+                        <li>Use <strong>Replace All</strong> only when rebuilding or migrating the device-profile set intentionally.</li>
+                        <li>Remember that local users, audit history, protected PIN cache, and Data Protection keys stay on the current host.</li>
+                    </ol>
+                </div>
             </div>
         </div>
     </div>

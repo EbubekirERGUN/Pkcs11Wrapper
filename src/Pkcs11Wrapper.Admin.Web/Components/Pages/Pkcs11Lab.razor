@@ -28,7 +28,7 @@
 
         <div class="col-xl-3 col-lg-4">
             <label class="form-label">Operation</label>
-            <InputSelect class="form-select" @bind-Value="_request.Operation">
+            <InputSelect class="form-select" @bind-Value="_request.Operation" @bind-Value:after="OnOperationChangedAsync">
                 @foreach (Pkcs11LabOperation operation in Enum.GetValues<Pkcs11LabOperation>())
                 {
                     <option value="@operation">@GetOperationLabel(operation)</option>
@@ -64,6 +64,65 @@
                 </div>
             </div>
         </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-xl-3 col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Configured devices</div>
+                <div class="display-6">@_devices.Count</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Loaded slots</div>
+                <div class="display-6">@_slots.Count</div>
+                <div class="small text-muted">For the selected device</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Scenario history</div>
+                <div class="display-6">@_history.Count</div>
+                <div class="small text-muted">Success: @_history.Count(item => item.Result.Success) / Failure: @_history.Count(item => !item.Result.Success)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Current operation group</div>
+                <div class="display-6">@GetCategoryLabel(_operationPaletteCategory)</div>
+                <div class="small text-muted">@GetOperationLabel(_request.Operation)</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header">Quick operation palette</div>
+    <div class="card-body d-flex flex-column gap-3">
+        <div class="d-flex flex-wrap gap-2">
+            @foreach (Pkcs11LabOperationCategory category in Enum.GetValues<Pkcs11LabOperationCategory>())
+            {
+                <button type="button" class="btn @(category == _operationPaletteCategory ? "btn-primary" : "btn-outline-primary")" @onclick="() => SelectOperationCategory(category)">@GetCategoryLabel(category)</button>
+            }
+        </div>
+
+        <div class="d-flex flex-wrap gap-2">
+            @foreach (Pkcs11LabOperation operation in PaletteOperations)
+            {
+                <button type="button" class="btn @(operation == _request.Operation ? "btn-dark" : "btn-outline-dark")" @onclick="() => SelectOperation(operation)">@GetOperationLabel(operation)</button>
+            }
+        </div>
+
+        <div class="small text-muted">Use the palette for fast switching between diagnostic, crypto, object, and raw-attribute workflows without manually hunting through the full operation dropdown every time.</div>
     </div>
 </div>
 
@@ -483,40 +542,76 @@
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearHistory">Clear</button>
                     </div>
 
-                    <div class="d-flex flex-column gap-2">
-                        @foreach (LabHistoryItem item in _history)
-                        {
-                            <div class="border rounded p-2 small">
-                                <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                                    <div>
-                                        <div class="fw-semibold">@item.Result.Operation</div>
-                                        <div class="text-muted">@item.RecordedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") · @item.Result.Summary</div>
-                                    </div>
-                                    <span class="badge @GetHistoryBadgeClass(item.Result)">@GetHistoryBadgeText(item.Result)</span>
-                                </div>
-
-                                <div class="d-flex flex-wrap gap-2 mt-2">
-                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ApplyHistoryRequestAsync(item)">Reuse request</button>
-                                    @if (CanPrepareVerify(item))
-                                    {
-                                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => PrepareVerifyFromHistoryAsync(item)">Prepare verify</button>
-                                    }
-                                    @if (CanPrepareDecrypt(item))
-                                    {
-                                        <button type="button" class="btn btn-sm btn-outline-success" @onclick="() => PrepareDecryptFromHistoryAsync(item)">Prepare decrypt</button>
-                                    }
-                                    @if (CanPrepareUnwrap(item))
-                                    {
-                                        <button type="button" class="btn btn-sm btn-outline-warning" @onclick="() => PrepareUnwrapFromHistoryAsync(item)">Prepare unwrap</button>
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(item.Result.CreatedHandleText))
-                                    {
-                                        <button type="button" class="btn btn-sm btn-outline-dark" @onclick="() => PrepareInspectCreatedHandleAsync(item)">Inspect created</button>
-                                    }
-                                </div>
-                            </div>
-                        }
+                    <div class="row g-3 mb-3">
+                        <div class="col-lg-5">
+                            <label class="form-label small">Search history</label>
+                            <input class="form-control form-control-sm" @bind="_historySearchText" @bind:event="oninput" placeholder="operation, summary, handle, artifact..." />
+                        </div>
+                        <div class="col-lg-3 col-md-6">
+                            <label class="form-label small">Result</label>
+                            <select class="form-select form-select-sm" @bind="_historyStatusFilter">
+                                <option value="all">All</option>
+                                <option value="success">Success only</option>
+                                <option value="failure">Failure only</option>
+                            </select>
+                        </div>
+                        <div class="col-lg-4 col-md-6">
+                            <label class="form-label small">Category</label>
+                            <select class="form-select form-select-sm" @bind="_historyCategoryFilter">
+                                <option value="all">All categories</option>
+                                <option value="diagnostics">Diagnostics</option>
+                                <option value="crypto">Crypto</option>
+                                <option value="objects">Objects</option>
+                                <option value="attributes">Attributes</option>
+                            </select>
+                        </div>
+                        <div class="col-12 small text-muted">Showing @FilteredHistory.Count of @_history.Count recorded scenario(s).</div>
                     </div>
+
+                    @if (FilteredHistory.Count == 0)
+                    {
+                        <div class="text-muted small">No scenario history item matched the current filters.</div>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2">
+                            @foreach (LabHistoryItem item in FilteredHistory)
+                            {
+                                <div class="border rounded p-2 small">
+                                    <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                                        <div>
+                                            <div class="fw-semibold">@item.Result.Operation</div>
+                                            <div class="text-muted">@item.RecordedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") · @item.Result.Summary</div>
+                                        </div>
+                                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                                            <span class="badge text-bg-secondary">@GetCategoryLabel(Pkcs11LabView.GetCategory(item.Request.Operation))</span>
+                                            <span class="badge @GetHistoryBadgeClass(item.Result)">@GetHistoryBadgeText(item.Result)</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex flex-wrap gap-2 mt-2">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ApplyHistoryRequestAsync(item)">Reuse request</button>
+                                        @if (CanPrepareVerify(item))
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => PrepareVerifyFromHistoryAsync(item)">Prepare verify</button>
+                                        }
+                                        @if (CanPrepareDecrypt(item))
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-success" @onclick="() => PrepareDecryptFromHistoryAsync(item)">Prepare decrypt</button>
+                                        }
+                                        @if (CanPrepareUnwrap(item))
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-warning" @onclick="() => PrepareUnwrapFromHistoryAsync(item)">Prepare unwrap</button>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(item.Result.CreatedHandleText))
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-dark" @onclick="() => PrepareInspectCreatedHandleAsync(item)">Inspect created</button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
                 }
             </div>
         </div>
@@ -567,6 +662,10 @@
     private bool _isRunning;
     private string? _lastAppliedQuerySignature;
     private string _selectedAttributePresetKey = AttributePresetIdentity;
+    private Pkcs11LabOperationCategory _operationPaletteCategory = Pkcs11LabOperationCategory.Diagnostics;
+    private string _historySearchText = string.Empty;
+    private string _historyStatusFilter = "all";
+    private string _historyCategoryFilter = "all";
 
     private const string AttributePresetIdentity = "Identity";
     private const string AttributePresetCapabilities = "Capabilities";
@@ -603,11 +702,40 @@
         or Pkcs11LabOperation.ReadAttribute;
 
     private bool CanRun => Guid.TryParse(_selectedDeviceId, out _) && (!RequiresSlot || ulong.TryParse(_selectedSlotId, out _));
+    private IReadOnlyList<Pkcs11LabOperation> PaletteOperations => Enum.GetValues<Pkcs11LabOperation>()
+        .Where(operation => Pkcs11LabView.GetCategory(operation) == _operationPaletteCategory)
+        .ToArray();
+    private IReadOnlyList<LabHistoryItem> FilteredHistory
+    {
+        get
+        {
+            LabHistoryViewRow[] rows = _history
+                .Select(item => new LabHistoryViewRow(
+                    item,
+                    new Pkcs11LabHistoryListItem(
+                        item.RecordedAt,
+                        item.Request.Operation,
+                        item.Result.Summary,
+                        item.Result.Success,
+                        item.Result.DurationMilliseconds,
+                        item.Result.ArtifactKind,
+                        item.Result.CreatedHandleText,
+                        item.Result.ArtifactHex)))
+                .ToArray();
+
+            HashSet<Pkcs11LabHistoryListItem> allowed = Pkcs11LabView
+                .ApplyHistoryFilters(rows.Select(row => row.View).ToArray(), _historySearchText, _historyStatusFilter, _historyCategoryFilter)
+                .ToHashSet();
+
+            return rows.Where(row => allowed.Contains(row.View)).Select(row => row.Item).ToArray();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
         _devices = await Admin.GetDevicesAsync();
         _selectedDeviceId = _devices.FirstOrDefault()?.Id.ToString();
+        _operationPaletteCategory = Pkcs11LabView.GetCategory(_request.Operation);
         await LoadSlotsForSelectedDeviceAsync();
     }
 
@@ -641,6 +769,7 @@
         if (Enum.TryParse<Pkcs11LabOperation>(QueryOperation, ignoreCase: true, out Pkcs11LabOperation operation))
         {
             _request.Operation = operation;
+            _operationPaletteCategory = Pkcs11LabView.GetCategory(operation);
         }
 
         if (!string.IsNullOrWhiteSpace(QueryHandle))
@@ -826,9 +955,26 @@
         fresh.UserPin = _request.UserPin;
         fresh.LoginUserIfPinProvided = _request.LoginUserIfPinProvided;
         _request = fresh;
+        _operationPaletteCategory = Pkcs11LabView.GetCategory(_request.Operation);
         _lastResult = null;
         _statusMessage = null;
         _statusIsError = false;
+    }
+
+    private Task OnOperationChangedAsync()
+    {
+        _operationPaletteCategory = Pkcs11LabView.GetCategory(_request.Operation);
+        return Task.CompletedTask;
+    }
+
+    private void SelectOperationCategory(Pkcs11LabOperationCategory category)
+        => _operationPaletteCategory = category;
+
+    private Task SelectOperation(Pkcs11LabOperation operation)
+    {
+        _request.Operation = operation;
+        _operationPaletteCategory = Pkcs11LabView.GetCategory(operation);
+        return Task.CompletedTask;
     }
 
     private static Pkcs11LabRequest CreateDefaultRequest()
@@ -1027,6 +1173,7 @@
         }
 
         _request = CopyRequest(request);
+        _operationPaletteCategory = Pkcs11LabView.GetCategory(_request.Operation);
         _lastResult = null;
     }
 
@@ -1087,4 +1234,16 @@
 
     private static string GetHistoryBadgeText(Pkcs11LabExecutionResult result)
         => $"{result.DurationMilliseconds} ms";
+
+    private static string GetCategoryLabel(Pkcs11LabOperationCategory category)
+        => category switch
+        {
+            Pkcs11LabOperationCategory.Diagnostics => "Diagnostics",
+            Pkcs11LabOperationCategory.Crypto => "Crypto",
+            Pkcs11LabOperationCategory.Objects => "Objects",
+            Pkcs11LabOperationCategory.Attributes => "Attributes",
+            _ => category.ToString()
+        };
+
+    private sealed record LabHistoryViewRow(LabHistoryItem Item, Pkcs11LabHistoryListItem View);
 }
