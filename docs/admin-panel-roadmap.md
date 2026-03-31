@@ -34,7 +34,7 @@ Acceptance criteria:
 
 ## Phase B - Key management expansion
 
-Status: in progress
+Status: delivered, with optional follow-on polish
 
 Delivered in current slice:
 - richer object detail panel with readable attribute inspection, object size, and common capability/flag summaries
@@ -57,7 +57,7 @@ Remaining for Phase B:
 
 ## Phase C - Session operations
 
-Status: in progress
+Status: delivered, with optional follow-on polish
 
 Delivered in current slice:
 - richer tracked-session detail panel with state, flags, device error, auth-state summary, and notes
@@ -72,7 +72,7 @@ Remaining for Phase C:
 
 ## Phase D - Security and ops hardening
 
-Status: in progress
+Status: delivered for the current local-host scope
 
 Goals:
 - protected secret storage for optional cached credentials ✅

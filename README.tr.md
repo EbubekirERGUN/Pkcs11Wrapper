@@ -46,11 +46,13 @@ PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanım
 ### Admin panel
 
 - Blazor Server tabanlı admin arayüzü
-- HSM cihaz profili yönetimi
+- `viewer` / `operator` / `admin` rolleriyle yerel kimlik doğrulama
+- HSM cihaz profili yönetimi + yapılandırma export/import
 - slot/token inceleme
-- key/object listeleme ve yönetimi
-- session görünürlüğü ve kontrolü
-- append-only chained audit log integrity
+- key/object listeleme, detay, düzenleme, kopyalama, generate, import ve destroy akışları
+- tracked session görünürlüğü ve kontrolü (`login` / `logout` / `cancel` / `close-all` + invalidation görünürlüğü)
+- PKCS#11 Lab teşhis ekranı, kripto denemeleri, obje akışları ve scenario replay yardımcıları
+- protected PIN cache + append-only chained audit log integrity
 
 ## Platform / doğrulama durumu
 
@@ -60,7 +62,7 @@ PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanım
 | Windows | ✅ | SoftHSM-for-Windows + OpenSC ile runtime regression |
 | PKCS#11 v3 interface discovery | ✅ | modül export etmiyorsa capability-gated davranış |
 | PKCS#11 v3 message API'leri | ✅ | managed/API desteği var; runtime modül desteğine bağlı |
-| Admin panel | ✅ gelişiyor | işlevsel Blazor Server yönetim yüzeyi, hardening devam ediyor |
+| Admin panel | ✅ | auth, local users, config transfer, audit integrity ve PKCS#11 Lab içeren işlevsel Blazor Server yönetim yüzeyi |
 | Vendor regression lane | ✅ | opsiyonel non-SoftHSM doğrulama yolu |
 
 ## Depo mimarisi
@@ -160,11 +162,16 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 Şu anki yetenekler:
 
 - device profile CRUD
+- `viewer` / `operator` / `admin` rolleriyle local cookie auth
+- local user management, password rotation ve bootstrap credential lifecycle kontrolleri
 - PKCS#11 module connection test
 - slot ve token görüntüleme
 - key/object listeleme, detay, düzenleme, kopyalama, generate, import, destroy akışları
-- tracked session login/logout/cancel kontrolleri
+- tracked session login/logout/cancel kontrolleri + slot-level close-all
 - session health/invalidation görünürlüğü
+- tekrar eden işlemler için protected PIN cache
+- device-profile configuration export/import
+- teşhis, kripto operasyonları, object inspection, wrap/unwrap, raw attribute read ve scenario replay için PKCS#11 Lab
 - integrity verification içeren chained audit entries
 
 ## Doküman haritası
@@ -185,8 +192,9 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 
 - Tam PKCS#11 davranışı hedef token / HSM / vendor policy’ye bağlıdır.
 - Import/edit/copy override gibi bazı gelişmiş operasyonlar, wrapper desteklese bile token policy yüzünden reddedilebilir.
+- Mevcut admin auth/security modeli bilinçli olarak tek-host/lokal kullanım odaklıdır; external IdP/IAM, MFA ve merkezi secret governance henüz uygulamanın parçası değildir.
 - En derin NativeAOT doğrulama hâlâ Linux tarafındadır.
-- Admin panel şimdiden kullanışlı, ancak daha güçlü credential rotation, role management ve operasyon UX iyileştirmeleri devam etmektedir.
+- PKCS#11 v3 runtime davranışı, hedef modülün ilgili v3 interface yüzeyini gerçekten export etmesine bağlıdır.
 
 ## Katkı vermek isteyenler için
 
@@ -200,8 +208,9 @@ Wrapper, validation matrix, Windows/Linux desteği veya admin panel UX tarafınd
 
 Yakın dönem odak alanları:
 
-- admin panel Phase D kapanış işleri (credential rotation / config export-import / local user management)
+- admin panel UX/product polish ve ops/recovery dokümantasyonu
 - PKCS#11 v3-capable modüller için daha güçlü vendor-backed runtime doğrulama
+- periyodik benchmark tekrarları ve en güncel yayınlanan baseline'ın tazelenmesi
 - daha iyi GitHub vitrin materyalleri (ekran görüntüsü / demo media / release notes)
 
 ## Projenin konumu

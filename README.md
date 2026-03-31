@@ -46,11 +46,13 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 ### Admin panel
 
 - Blazor Server admin UI
-- HSM device profile management
+- local auth with `viewer` / `operator` / `admin` roles
+- HSM device profile management + configuration export/import
 - slot/token inspection
-- key/object browsing and management
-- tracked session visibility and control
-- append-only chained audit log integrity
+- key/object browsing, detail, edit, copy, generate, import, and destroy flows
+- tracked session visibility and control (`login` / `logout` / `cancel` / `close-all` + invalidation visibility)
+- PKCS#11 Lab diagnostics, crypto experiments, object workflows, and scenario replay helpers
+- protected PIN cache + append-only chained audit log integrity
 
 ## Platform & validation status
 
@@ -60,7 +62,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 | Windows | ✅ | runtime regression path through SoftHSM-for-Windows + OpenSC |
 | PKCS#11 v3 interface discovery | ✅ | capability-gated when not exported by the module |
 | PKCS#11 v3 message APIs | ✅ | managed/API support implemented; runtime depends on module support |
-| Admin panel | ✅ in progress | functional Blazor Server management surface with ongoing hardening |
+| Admin panel | ✅ | functional Blazor Server management surface with auth, local users, config transfer, audit integrity, and PKCS#11 Lab |
 | Vendor regression lane | ✅ | optional non-SoftHSM validation path |
 
 ## Repository architecture
@@ -160,11 +162,16 @@ The admin panel is designed as an operational layer **on top of** the library in
 Current capabilities include:
 
 - device profile CRUD
+- local cookie auth with `viewer` / `operator` / `admin` roles
+- local user management, password rotation, and bootstrap credential lifecycle controls
 - PKCS#11 module connection testing
 - slot and token browsing
 - key/object listing, detail, edit, copy, generate, import, destroy workflows
-- tracked session login/logout/cancel controls
+- tracked session login/logout/cancel controls + slot-level close-all
 - health/invalidation visibility for sessions
+- protected PIN caching for repeat operations
+- device-profile configuration export/import
+- PKCS#11 Lab for diagnostics, crypto operations, object inspection, wrap/unwrap, raw attribute reads, and scenario replay
 - append-only chained audit entries with integrity verification
 
 ## Documentation map
@@ -185,8 +192,9 @@ Current capabilities include:
 
 - Full PKCS#11 behavior still depends on the target token / HSM / vendor policy.
 - Some advanced operations (for example import/edit/copy overrides) may be rejected by token policy even when the wrapper supports the call surface.
+- The current admin auth/security model is intentionally local-host oriented; external IdP/IAM, MFA, and centralized secret governance are not part of the app yet.
 - Linux still has the deepest NativeAOT validation path.
-- The admin panel is already useful, but is still evolving toward stronger role management, safer credential rotation, and richer operations UX.
+- PKCS#11 v3 runtime behavior still depends on whether the target module actually exports the relevant v3 interface surface.
 
 ## Contributing
 
@@ -200,8 +208,9 @@ If you want to improve the wrapper, validation matrix, Windows/Linux support, or
 
 Near-term focus areas:
 
-- admin panel Phase D finishing work (credential rotation / config export-import / local user management)
+- admin panel UX/product polish and ops/recovery documentation
 - stronger vendor-backed runtime validation for PKCS#11 v3-capable modules
+- recurring benchmark reruns with latest published baseline refreshes
 - more polished GitHub showcase assets (screenshots / demo media / release notes)
 
 ## Project positioning
