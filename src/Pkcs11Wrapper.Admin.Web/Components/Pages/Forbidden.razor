@@ -3,5 +3,29 @@
 
 <PageTitle>Forbidden</PageTitle>
 
-<h1>Access denied</h1>
-<div class="alert alert-danger">Your current account does not have the role required for this action or page.</div>
+<section class="page-hero page-hero-sessions">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Access control</div>
+        <h1>Access denied</h1>
+        <p class="page-lead">Your current account does not have the role required for this action or page. This message should feel like a clear product state, not a raw framework fallback.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Role-based access</span>
+            <span class="page-tag">Protected route</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Next step</div>
+            <div class="hero-panel-value">Use an authorized account</div>
+            <div class="hero-panel-copy">Sign in with a role that is allowed for this route, or return to the dashboard and continue with permitted operations.</div>
+        </div>
+    </div>
+</section>
+
+<div class="card shadow-sm feature-card accent-card-danger">
+    <div class="card-header">Permission required</div>
+    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div class="alert alert-danger mb-0 flex-grow-1">Your current account does not have the role required for this action or page.</div>
+        <a class="btn btn-outline-secondary" href="/">Return to dashboard</a>
+    </div>
+</div>

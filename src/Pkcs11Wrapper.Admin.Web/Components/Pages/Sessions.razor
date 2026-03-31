@@ -6,8 +6,31 @@
 
 <PageTitle>Sessions</PageTitle>
 
-<h1>Sessions</h1>
-<p class="text-muted">Bu panelin açtığı tracked session’ları gör, invalidate/break durumlarını net şekilde ayır, detaylarını incele, login/logout/cancel çalıştır ve tekil/toplu kapatma işlemlerini yönet.</p>
+<section class="page-hero page-hero-sessions">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Tracked session control</div>
+        <h1>Sessions</h1>
+        <p class="page-lead">Bu panelin açtığı tracked session’ları gör, invalidate/break durumlarını net şekilde ayır, detaylarını incele, login/logout/cancel çalıştır ve tekil/toplu kapatma işlemlerini yönet. Sayfa amacı sadece listelemek değil; sağlıklı ve sorunlu session’ları operatör için hemen ayırt edilebilir hale getirmek.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Health visibility</span>
+            <span class="page-tag">Grouped by device</span>
+            <span class="page-tag">Direct session controls</span>
+            <span class="page-tag">Recovery cleanup</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Operational focus</div>
+            <div class="hero-panel-value">Session recovery</div>
+            <div class="hero-panel-copy">Use this screen when handles break, health flips, or stale tracked sessions need explicit cleanup and state inspection.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Control model</div>
+            <div class="hero-panel-value">Tracked + explicit</div>
+            <div class="hero-panel-copy">The UI keeps dangerous operations visible but deliberate, so bulk cleanup and direct login/logout actions feel controlled.</div>
+        </div>
+    </div>
+</section>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -18,58 +41,58 @@
 {
     <div class="row g-3 mb-4">
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Tracked sessions</div>
-                    <div class="display-6">@_sessions.Count</div>
+                    <div class="metric-label">Tracked sessions</div>
+                    <div class="display-6 metric-meta">@_sessions.Count</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Healthy</div>
-                    <div class="display-6">@_sessions.Count(session => session.IsHealthy)</div>
+                    <div class="metric-label">Healthy</div>
+                    <div class="display-6 metric-meta">@_sessions.Count(session => session.IsHealthy)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Invalidated</div>
-                    <div class="display-6">@_sessions.Count(session => !session.IsHealthy)</div>
+                    <div class="metric-label">Invalidated</div>
+                    <div class="display-6 metric-meta">@_sessions.Count(session => !session.IsHealthy)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Read-write</div>
-                    <div class="display-6">@_sessions.Count(session => session.IsReadWrite)</div>
+                    <div class="metric-label">Read-write</div>
+                    <div class="display-6 metric-meta">@_sessions.Count(session => session.IsReadWrite)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Read-only</div>
-                    <div class="display-6">@_sessions.Count(session => !session.IsReadWrite)</div>
+                    <div class="metric-label">Read-only</div>
+                    <div class="display-6 metric-meta">@_sessions.Count(session => !session.IsReadWrite)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Filtered view</div>
-                    <div class="display-6">@FilteredSessions.Count</div>
-                    <div class="small text-muted">Across @AvailableDevices.Count device(s)</div>
+                    <div class="metric-label">Filtered view</div>
+                    <div class="display-6 metric-meta">@FilteredSessions.Count</div>
+                    <div class="small metric-note">Across @AvailableDevices.Count device(s)</div>
                 </div>
             </div>
         </div>
     </div>
 }
 
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-xl-2 col-lg-3 col-md-6 d-flex gap-2 flex-wrap">
             <button class="btn btn-primary" @onclick="Refresh">Refresh</button>
@@ -116,13 +139,11 @@
 
 @if (_sessions.Count == 0)
 {
-    <p class="text-muted">No tracked sessions.</p>
+    <div class="empty-state">No tracked sessions.</div>
 }
 else if (FilteredSessions.Count == 0)
 {
-    <div class="card shadow-sm">
-        <div class="card-body text-muted">No tracked sessions matched the current filters.</div>
-    </div>
+    <div class="empty-state">No tracked sessions matched the current filters.</div>
 }
 else
 {
@@ -130,12 +151,12 @@ else
         <div class="col-xl-7">
             @foreach (IGrouping<string, AdminSessionSnapshot> deviceGroup in FilteredSessions.GroupBy(session => session.DeviceName).OrderBy(group => group.Key, StringComparer.Ordinal))
             {
-                <div class="card shadow-sm mb-3">
+                <div class="card shadow-sm mb-3 feature-card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>@deviceGroup.Key</span>
                         <span class="small text-muted">@deviceGroup.Count() tracked session(s)</span>
                     </div>
-                    <div class="table-responsive">
+                    <div class="table-responsive table-shell">
                         <table class="table table-striped align-middle mb-0">
                             <thead>
                                 <tr>
@@ -152,9 +173,9 @@ else
                                 @foreach (AdminSessionSnapshot session in SortSessions(deviceGroup))
                                 {
                                     <tr class="@(_selectedSession?.SessionId == session.SessionId ? "table-active" : null)">
-                                        <td><code>@session.SessionId</code></td>
-                                        <td>@session.SlotId</td>
-                                        <td>@(session.IsReadWrite ? "RW" : "RO")</td>
+                                        <td><span class="table-pill table-pill-code">@session.SessionId</span></td>
+                                        <td><span class="table-pill table-pill-code">@session.SlotId</span></td>
+                                        <td><span class="table-pill">@(session.IsReadWrite ? "RW" : "RO")</span></td>
                                         <td>@session.State</td>
                                         <td>@session.LastOperation</td>
                                         <td>
@@ -178,13 +199,11 @@ else
         <div class="col-xl-5">
             @if (_selectedSession is null)
             {
-                <div class="card shadow-sm">
-                    <div class="card-body text-muted">Bir tracked session seçip detaylarını ve operasyon kontrollerini aç.</div>
-                </div>
+                <div class="empty-state">Bir tracked session seçip detaylarını ve operasyon kontrollerini aç.</div>
             }
             else
             {
-                <div class="card shadow-sm">
+                <div class="card shadow-sm feature-card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Session detail</span>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="ClearSelection">Close</button>
@@ -202,7 +221,7 @@ else
                             <div class="alert alert-success py-2">Tracked session is healthy and can accept direct login/logout/cancel actions.</div>
                         }
 
-                        <dl class="row">
+                        <dl class="row detail-grid">
                             <dt class="col-sm-4">Session Id</dt><dd class="col-sm-8"><code>@_selectedSession.SessionId</code></dd>
                             <dt class="col-sm-4">Device</dt><dd class="col-sm-8">@_selectedSession.DeviceName</dd>
                             <dt class="col-sm-4">Slot</dt><dd class="col-sm-8">@_selectedSession.SlotId</dd>

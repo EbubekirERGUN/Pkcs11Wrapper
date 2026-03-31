@@ -1,90 +1,147 @@
-<div class="top-row ps-3 navbar navbar-dark bg-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">Pkcs11Wrapper Admin</a>
-        <AuthorizeView>
-            <Authorized>
-                <div class="text-white small d-flex align-items-center gap-2">
-                    <span>@context.User.Identity?.Name</span>
-                    <form method="post" action="/account/logout" class="d-inline">
-                        <AntiforgeryToken />
-                        <button class="btn btn-sm btn-outline-light" type="submit">Logout</button>
-                    </form>
+@using Pkcs11Wrapper.Admin.Application.Models
+
+<nav class="app-nav">
+    <AuthorizeView>
+        <Authorized Context="userContext">
+            <div class="app-user-panel">
+                <div>
+                    <div class="app-user-label">Signed in</div>
+                    <div class="app-user-name">@userContext.User.Identity?.Name</div>
                 </div>
-            </Authorized>
-            <NotAuthorized>
-                <a class="btn btn-sm btn-outline-light" href="/login">Login</a>
-            </NotAuthorized>
-        </AuthorizeView>
-    </div>
-</div>
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+                <form method="post" action="/account/logout" class="d-inline">
+                    <AntiforgeryToken />
+                    <button class="btn btn-sm btn-outline-light app-logout-button" type="submit">Logout</button>
+                </form>
+            </div>
+        </Authorized>
+        <NotAuthorized>
+            <div class="app-user-panel">
+                <div>
+                    <div class="app-user-label">Access</div>
+                    <div class="app-user-name">Sign in required</div>
+                </div>
 
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <AuthorizeView Roles="viewer,operator,admin">
-            <Authorized>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Dashboard
+                <a class="btn btn-sm btn-light app-login-button" href="/login">Login</a>
+            </div>
+        </NotAuthorized>
+    </AuthorizeView>
+
+    <AuthorizeView Roles="viewer,operator,admin">
+        <Authorized>
+            <div class="app-nav-section">
+                <div class="app-nav-section-title">Overview</div>
+
+                <div class="app-nav-item">
+                    <NavLink class="app-nav-link" href="" Match="NavLinkMatch.All">
+                        <span class="app-nav-icon">D</span>
+                        <span class="app-nav-copy">
+                            <span class="app-nav-title">Dashboard</span>
+                            <span class="app-nav-caption">Health, recovery, quick actions</span>
+                        </span>
+                    </NavLink>
+                </div>
+            </div>
+
+            <div class="app-nav-section">
+                <div class="app-nav-section-title">Inventory</div>
+
+                <div class="app-nav-item">
+                    <NavLink class="app-nav-link" href="devices">
+                        <span class="app-nav-icon">H</span>
+                        <span class="app-nav-copy">
+                            <span class="app-nav-title">Devices</span>
+                            <span class="app-nav-caption">Profiles, module paths, enablement</span>
+                        </span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="devices">
-                        <span class="bi bi-hdd-network-nav-menu" aria-hidden="true"></span> Devices
+                <div class="app-nav-item">
+                    <NavLink class="app-nav-link" href="slots">
+                        <span class="app-nav-icon">S</span>
+                        <span class="app-nav-copy">
+                            <span class="app-nav-title">Slots</span>
+                            <span class="app-nav-caption">Token visibility and slot details</span>
+                        </span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="slots">
-                        <span class="bi bi-grid-3x3-gap-nav-menu" aria-hidden="true"></span> Slots
+                <div class="app-nav-item">
+                    <NavLink class="app-nav-link" href="keys">
+                        <span class="app-nav-icon">K</span>
+                        <span class="app-nav-copy">
+                            <span class="app-nav-title">Keys & Objects</span>
+                            <span class="app-nav-caption">Object lifecycle and capabilities</span>
+                        </span>
                     </NavLink>
                 </div>
+            </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="keys">
-                        <span class="bi bi-key-fill-nav-menu" aria-hidden="true"></span> Keys
-                    </NavLink>
-                </div>
+            <div class="app-nav-section">
+                <div class="app-nav-section-title">Operations</div>
 
                 <AuthorizeView Roles="operator,admin">
                     <Authorized Context="operatorContext">
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="lab">
-                                <span class="bi bi-terminal-nav-menu" aria-hidden="true"></span> PKCS#11 Lab
+                        <div class="app-nav-item">
+                            <NavLink class="app-nav-link" href="lab">
+                                <span class="app-nav-icon">L</span>
+                                <span class="app-nav-copy">
+                                    <span class="app-nav-title">PKCS#11 Lab</span>
+                                    <span class="app-nav-caption">Diagnostics, crypto flows, replay</span>
+                                </span>
                             </NavLink>
                         </div>
                     </Authorized>
                 </AuthorizeView>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="sessions">
-                        <span class="bi bi-activity-nav-menu" aria-hidden="true"></span> Sessions
+                <div class="app-nav-item">
+                    <NavLink class="app-nav-link" href="sessions">
+                        <span class="app-nav-icon">T</span>
+                        <span class="app-nav-copy">
+                            <span class="app-nav-title">Sessions</span>
+                            <span class="app-nav-caption">Tracked session health and cleanup</span>
+                        </span>
                     </NavLink>
                 </div>
 
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="audit">
-                        <span class="bi bi-journal-text-nav-menu" aria-hidden="true"></span> Audit Logs
+                <div class="app-nav-item">
+                    <NavLink class="app-nav-link" href="audit">
+                        <span class="app-nav-icon">A</span>
+                        <span class="app-nav-copy">
+                            <span class="app-nav-title">Audit Logs</span>
+                            <span class="app-nav-caption">Integrity, failures, operator trace</span>
+                        </span>
                     </NavLink>
                 </div>
+            </div>
 
-                <AuthorizeView Roles="admin">
-                    <Authorized Context="adminContext">
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="configuration">
-                                <span class="bi bi-sliders-nav-menu" aria-hidden="true"></span> Configuration
+            <AuthorizeView Roles="admin">
+                <Authorized Context="adminContext">
+                    <div class="app-nav-section">
+                        <div class="app-nav-section-title">Administration</div>
+
+                        <div class="app-nav-item">
+                            <NavLink class="app-nav-link" href="configuration">
+                                <span class="app-nav-icon">C</span>
+                                <span class="app-nav-copy">
+                                    <span class="app-nav-title">Configuration</span>
+                                    <span class="app-nav-caption">Controlled import and export</span>
+                                </span>
                             </NavLink>
                         </div>
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="users">
-                                <span class="bi bi-people-nav-menu" aria-hidden="true"></span> Users
+
+                        <div class="app-nav-item">
+                            <NavLink class="app-nav-link" href="users">
+                                <span class="app-nav-icon">U</span>
+                                <span class="app-nav-copy">
+                                    <span class="app-nav-title">Users</span>
+                                    <span class="app-nav-caption">Bootstrap, roles, password rotation</span>
+                                </span>
                             </NavLink>
                         </div>
-                    </Authorized>
-                </AuthorizeView>
-            </Authorized>
-        </AuthorizeView>
-    </nav>
-</div>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+        </Authorized>
+    </AuthorizeView>
+</nav>

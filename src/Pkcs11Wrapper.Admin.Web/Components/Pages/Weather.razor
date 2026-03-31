@@ -3,45 +3,66 @@
 
 <PageTitle>Weather</PageTitle>
 
-<h1>Weather</h1>
+<section class="page-hero page-hero-audit">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Utility route</div>
+        <h1>Weather</h1>
+        <p class="page-lead">Streaming sample surface used to demonstrate progressive rendering. It is not part of the PKCS#11 admin workflow, but it should still match the application’s visual quality bar.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Stream rendering</span>
+            <span class="page-tag">Sample data</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Forecast rows</div>
+            <div class="hero-panel-value">@(forecasts?.Length ?? 0)</div>
+            <div class="hero-panel-copy">A simple sample table rendered with the same card and table language as the rest of the admin panel.</div>
+        </div>
+    </div>
+</section>
 
-<p>This component demonstrates showing data.</p>
-
-@if (forecasts == null)
-{
-    <p><em>Loading...</em></p>
-}
-else
-{
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Date</th>
-                <th aria-label="Temperature in Celsius">Temp. (C)</th>
-                <th aria-label="Temperature in Fahrenheit">Temp. (F)</th>
-                <th>Summary</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var forecast in forecasts)
-            {
-                <tr>
-                    <td>@forecast.Date.ToShortDateString()</td>
-                    <td>@forecast.TemperatureC</td>
-                    <td>@forecast.TemperatureF</td>
-                    <td>@forecast.Summary</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-}
+<div class="card shadow-sm feature-card">
+    <div class="card-header">Forecast sample</div>
+    <div class="card-body">
+        @if (forecasts == null)
+        {
+            <div class="empty-state"><em>Loading...</em></div>
+        }
+        else
+        {
+            <div class="table-responsive table-shell">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th aria-label="Temperature in Celsius">Temp. (C)</th>
+                            <th aria-label="Temperature in Fahrenheit">Temp. (F)</th>
+                            <th>Summary</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var forecast in forecasts)
+                        {
+                            <tr>
+                                <td><span class="table-pill table-pill-code">@forecast.Date.ToShortDateString()</span></td>
+                                <td>@forecast.TemperatureC</td>
+                                <td>@forecast.TemperatureF</td>
+                                <td><span class="table-pill">@forecast.Summary</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
 
 @code {
     private WeatherForecast[]? forecasts;
 
     protected override async Task OnInitializedAsync()
     {
-        // Simulate asynchronous loading to demonstrate streaming rendering
         await Task.Delay(500);
 
         var startDate = DateOnly.FromDateTime(DateTime.Now);

@@ -8,8 +8,10 @@ using Pkcs11Wrapper.Admin.Web.Configuration;
 using Pkcs11Wrapper.Admin.Web.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.UseStaticWebAssets();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -35,6 +37,7 @@ AdminStorageOptions adminStorage = new()
 Directory.CreateDirectory(adminStorage.DataRoot);
 
 builder.Services.AddSingleton(adminStorage);
+builder.Services.AddSingleton<IOptions<AdminStorageOptions>>(Options.Create(adminStorage));
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(adminStorage.DataRoot, "keys")));
 builder.Services.AddSingleton<IDeviceProfileStore, JsonDeviceProfileStore>();
@@ -47,6 +50,7 @@ builder.Services.AddSingleton<LocalAdminUserStore>();
 builder.Services.AddScoped<IAdminActorContext, HttpContextAdminActorContext>();
 builder.Services.AddScoped<IAdminAuthorizationService, HttpContextAdminAuthorizationService>();
 builder.Services.AddScoped<AuditLogService>();
+builder.Services.AddScoped<LocalAdminSecurityService>();
 builder.Services.AddScoped<HsmAdminService>();
 
 var app = builder.Build();

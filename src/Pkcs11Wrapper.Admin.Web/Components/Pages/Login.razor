@@ -4,28 +4,54 @@
 
 <PageTitle>Admin Login</PageTitle>
 
-<h1>Admin Panel Login</h1>
-<p class="text-muted">Local cookie auth with role-based access. On first run, bootstrap credentials are written to <code>App_Data/bootstrap-admin.txt</code>.</p>
+<div class="auth-page">
+    <div class="auth-panel auth-panel-copy">
+        <div class="auth-eyebrow">Pkcs11Wrapper</div>
+        <h1>Admin Console Login</h1>
+        <p class="text-muted">Local cookie auth with role-based access for device management, diagnostics, audit visibility, and recovery workflows.</p>
 
-@if (_showError)
-{
-    <div class="alert alert-danger">Login failed. Check username/password and try again.</div>
-}
-
-<form method="post" action="/account/login" class="card shadow-sm p-4" style="max-width: 28rem;">
-    <AntiforgeryToken />
-    <input type="hidden" name="returnUrl" value="@_returnUrl" />
-
-    <div class="mb-3">
-        <label class="form-label">Username</label>
-        <input class="form-control" name="username" autocomplete="username" />
+        <div class="auth-feature-list">
+            <div class="auth-feature-item">
+                <div class="auth-feature-title">Controlled local access</div>
+                <div class="auth-feature-copy">Bootstrap credentials are generated on first run and can then be rotated from the Users page.</div>
+            </div>
+            <div class="auth-feature-item">
+                <div class="auth-feature-title">Operator-safe surface</div>
+                <div class="auth-feature-copy">PKCS#11 diagnostics, session operations, and configuration transfer stay on the server side.</div>
+            </div>
+        </div>
     </div>
-    <div class="mb-3">
-        <label class="form-label">Password</label>
-        <input class="form-control" type="password" name="password" autocomplete="current-password" />
-    </div>
-    <button class="btn btn-primary" type="submit">Sign in</button>
-</form>
+
+    <form method="post" action="/account/login" class="auth-panel auth-form-panel">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnUrl" value="@_returnUrl" />
+
+        <div class="auth-form-header">
+            <div class="auth-form-title">Sign in</div>
+            <div class="small text-muted">Use a local admin-panel account to continue.</div>
+        </div>
+
+        @if (_showError)
+        {
+            <div class="alert alert-danger">Login failed. Check username/password and try again.</div>
+        }
+
+        <div class="mb-3">
+            <label class="form-label">Username</label>
+            <input class="form-control" name="username" autocomplete="username" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Password</label>
+            <input class="form-control" type="password" name="password" autocomplete="current-password" />
+        </div>
+
+        <button class="btn btn-primary w-100" type="submit">Sign in</button>
+
+        <div class="form-text mt-3">
+            On first run, bootstrap credentials are written to <code>App_Data/bootstrap-admin.txt</code>.
+        </div>
+    </form>
+</div>
 
 @code {
     private bool _showError;

@@ -4,8 +4,31 @@
 
 <PageTitle>Configuration</PageTitle>
 
-<h1>Configuration Transfer</h1>
-<p class="text-muted">Export or import admin-panel device configuration for backup and migration. Sensitive local state is intentionally excluded from this bundle.</p>
+<section class="page-hero page-hero-configuration">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Controlled transfer</div>
+        <h1>Configuration Transfer</h1>
+        <p class="page-lead">Export or import admin-panel device configuration for backup and migration. Sensitive local state is intentionally excluded from this bundle. Bu sayfanın görevi admin’e net kapsam, net risk ve net geri dönüş noktası vermek.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Backup ready</span>
+            <span class="page-tag">Merge or replace</span>
+            <span class="page-tag">Host-local exclusions</span>
+            <span class="page-tag">Admin-only</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Transfer scope</div>
+            <div class="hero-panel-value">Device profiles</div>
+            <div class="hero-panel-copy">The bundle is intentionally narrow so migrations stay predictable and sensitive host state remains local.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Recommended posture</div>
+            <div class="hero-panel-value">Export first</div>
+            <div class="hero-panel-copy">Always take a fresh bundle before broad configuration changes, migration work, or replace-all imports.</div>
+        </div>
+    </div>
+</section>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -14,37 +37,37 @@
 
 <div class="row g-3 mb-4">
     <div class="col-xl-3 col-md-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Configured devices</div>
-                <div class="display-6">@_deviceCount</div>
+                <div class="metric-label">Configured devices</div>
+                <div class="display-6 metric-meta">@_deviceCount</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Bundle includes</div>
-                <div class="display-6">1</div>
-                <div class="small text-muted">Device profile collection only</div>
+                <div class="metric-label">Bundle includes</div>
+                <div class="display-6 metric-meta">1</div>
+                <div class="small metric-note">Device profile collection only</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Bundle excludes</div>
-                <div class="display-6">5</div>
-                <div class="small text-muted">Users, bootstrap creds, audit, PIN cache, DP keys</div>
+                <div class="metric-label">Bundle excludes</div>
+                <div class="display-6 metric-meta">5</div>
+                <div class="small metric-note">Users, bootstrap creds, audit, PIN cache, DP keys</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Latest import</div>
-                <div class="display-6">@(_lastImportResult is null ? "—" : _lastImportResult.ImportedDeviceProfileCount.ToString())</div>
-                <div class="small text-muted">@(_lastImportResult is null ? "No import run in this session" : _lastImportResult.Summary)</div>
+                <div class="metric-label">Latest import</div>
+                <div class="display-6 metric-meta">@(_lastImportResult is null ? "—" : _lastImportResult.ImportedDeviceProfileCount.ToString())</div>
+                <div class="small metric-note">@(_lastImportResult is null ? "No import run in this session" : _lastImportResult.Summary)</div>
             </div>
         </div>
     </div>
@@ -52,22 +75,22 @@
 
 <div class="row g-4">
     <div class="col-lg-5">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 feature-card workflow-card">
             <div class="card-header">Export</div>
             <div class="card-body d-flex flex-column gap-3">
-                <div>
+                <div class="surface-item">
                     <div class="fw-semibold">Current bundle scope</div>
                     <div class="text-muted small">@_deviceCount configured device profile(s) will be included.</div>
                 </div>
 
-                <div>
+                <div class="surface-item">
                     <div class="fw-semibold small text-uppercase text-muted">Included</div>
                     <ul class="small mb-0">
                         <li>Device profiles</li>
                     </ul>
                 </div>
 
-                <div>
+                <div class="surface-item">
                     <div class="fw-semibold small text-uppercase text-muted">Excluded</div>
                     <ul class="small mb-0">
                         <li>Admin users</li>
@@ -82,7 +105,7 @@
                     <a class="btn btn-primary" href="/configuration/export">Download configuration JSON</a>
                 </div>
 
-                <div class="border-top pt-3 mt-2 small text-muted">
+                <div class="surface-item small text-muted">
                     Recommended flow: export before risky device changes, before host migration, and before large import/replace operations.
                 </div>
             </div>
@@ -90,7 +113,7 @@
     </div>
 
     <div class="col-lg-7">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 feature-card workflow-card">
             <div class="card-header">Import</div>
             <div class="card-body">
                 <div class="mb-3">

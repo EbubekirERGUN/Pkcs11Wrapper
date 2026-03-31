@@ -9,8 +9,38 @@
 
 <PageTitle>Pkcs11Wrapper Admin</PageTitle>
 
-<h1>Pkcs11Wrapper Admin Dashboard</h1>
-<p class="text-muted">Cihaz, session, audit ve recovery görünürlüğünü tek ekranda topla; sonra cihaz yönetimi, PKCS#11 Lab ve güvenlik operasyonlarına hızlı geçiş yap. Bu dilimde dashboard daha güçlü recovery widget’ları ve operasyon özetleriyle genişletildi.</p>
+<section class="page-hero page-hero-dashboard">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Operations overview</div>
+        <h1>Pkcs11Wrapper Admin Dashboard</h1>
+        <p class="page-lead">Cihaz, session, audit ve recovery görünürlüğünü tek ekranda topla; sonra cihaz yönetimi, PKCS#11 Lab ve güvenlik operasyonlarına hızlı geçiş yap. Bu sayfa artık yalnızca veri toplamak için değil, operatörün durumu hızlı okuyup doğru sonraki adıma geçmesi için tasarlanıyor.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Device governance</span>
+            <span class="page-tag">Session health</span>
+            <span class="page-tag">Audit integrity</span>
+            @if (_isOperator)
+            {
+                <span class="page-tag">Controlled diagnostics</span>
+            }
+            @if (_isAdmin)
+            {
+                <span class="page-tag">Recovery administration</span>
+            }
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Console focus</div>
+            <div class="hero-panel-value">Recovery-first</div>
+            <div class="hero-panel-copy">Sessions, audit, configuration safety, and controlled PKCS#11 diagnostics are meant to stay visible from the first screen.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Current role</div>
+            <div class="hero-panel-value">@(_isAdmin ? "Admin" : _isOperator ? "Operator" : "Viewer")</div>
+            <div class="hero-panel-copy">Role-aware surfaces stay on the server side with local auth and protected operational flows.</div>
+        </div>
+    </div>
+</section>
 
 @if (_error is not null)
 {
@@ -23,9 +53,11 @@
 }
 else
 {
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-        <div class="small text-muted">
-            Last refresh: @(_lastLoadedUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "n/a")
+    <div class="page-toolbar">
+        <div class="hero-panel flex-grow-1">
+            <div class="hero-panel-title">Last refresh</div>
+            <div class="hero-panel-value">@(_lastLoadedUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "n/a")</div>
+            <div class="hero-panel-copy">Reload this view after operational changes to refresh health, audit, and recovery widgets.</div>
         </div>
         <button class="btn btn-outline-secondary" @onclick="LoadAsync">Refresh dashboard</button>
     </div>
@@ -52,56 +84,56 @@ else
 
     <div class="row g-3 mb-4">
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Configured devices</div>
-                    <div class="display-6">@_summary.DeviceCount</div>
-                    <div class="small text-muted">Enabled: @_summary.EnabledDeviceCount / Disabled: @_summary.DisabledDeviceCount</div>
+                    <div class="metric-label">Configured devices</div>
+                    <div class="display-6 metric-meta">@_summary.DeviceCount</div>
+                    <div class="small metric-note">Enabled: @_summary.EnabledDeviceCount / Disabled: @_summary.DisabledDeviceCount</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Tracked sessions</div>
-                    <div class="display-6">@_summary.ActiveSessionCount</div>
-                    <div class="small text-muted">Healthy: @_summary.HealthySessionCount / Invalidated: @_summary.InvalidatedSessionCount</div>
+                    <div class="metric-label">Tracked sessions</div>
+                    <div class="display-6 metric-meta">@_summary.ActiveSessionCount</div>
+                    <div class="small metric-note">Healthy: @_summary.HealthySessionCount / Invalidated: @_summary.InvalidatedSessionCount</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Recent audit window</div>
-                    <div class="display-6">@_summary.RecentAuditCount</div>
-                    <div class="small text-muted">Failures: @_summary.RecentAuditFailureCount</div>
+                    <div class="metric-label">Recent audit window</div>
+                    <div class="display-6 metric-meta">@_summary.RecentAuditCount</div>
+                    <div class="small metric-note">Failures: @_summary.RecentAuditFailureCount</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Audit integrity</div>
-                    <div class="display-6">@(_summary.AuditIntegrityValid ? "OK" : "WARN")</div>
-                    <div class="small text-muted text-truncate">@_summary.AuditIntegritySummary</div>
+                    <div class="metric-label">Audit integrity</div>
+                    <div class="display-6 metric-meta">@(_summary.AuditIntegrityValid ? "OK" : "WARN")</div>
+                    <div class="small metric-note text-truncate">@_summary.AuditIntegritySummary</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Config backup</div>
-                    <div class="display-6">@BackupStatusLabel</div>
-                    <div class="small text-muted">@BackupStatusDescription</div>
+                    <div class="metric-label">Config backup</div>
+                    <div class="display-6 metric-meta">@BackupStatusLabel</div>
+                    <div class="small metric-note">@BackupStatusDescription</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-2 col-md-4 col-sm-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Next operator step</div>
-                    <div class="display-6">@(_summary.ActiveSessionCount == 0 ? "Lab" : "Sessions")</div>
-                    <div class="small text-muted">Start diagnostics in the Lab or review tracked-session health.</div>
+                    <div class="metric-label">Next operator step</div>
+                    <div class="display-6 metric-meta">@(_summary.ActiveSessionCount == 0 ? "Lab" : "Sessions")</div>
+                    <div class="small metric-note">Start diagnostics in the Lab or review tracked-session health.</div>
                 </div>
             </div>
         </div>
@@ -109,7 +141,7 @@ else
 
     <div class="row g-4 mb-4">
         <div class="col-xl-7">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 feature-card">
                 <div class="card-header">Quick actions</div>
                 <div class="card-body d-flex flex-column gap-4">
                     <div>
@@ -143,7 +175,7 @@ else
         </div>
 
         <div class="col-xl-5">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 feature-card">
                 <div class="card-header">Ops / recovery checklist</div>
                 <div class="card-body">
                     <ol class="small ps-3 mb-0 d-flex flex-column gap-2">
@@ -166,7 +198,7 @@ else
 
     <div class="row g-4 mb-4">
         <div class="col-xl-4">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 feature-card">
                 <div class="card-header">Failure categories</div>
                 <div class="card-body">
                     @if (FailureCategories.Count == 0)
@@ -178,7 +210,7 @@ else
                         <div class="d-flex flex-column gap-2">
                             @foreach (DashboardFailureCategoryItem item in FailureCategories)
                             {
-                                <div class="border rounded p-2 small">
+                                <div class="surface-item small">
                                     <div class="d-flex justify-content-between align-items-center gap-2">
                                         <div class="fw-semibold">@item.Category</div>
                                         <span class="badge text-bg-danger">@item.Count</span>
@@ -194,7 +226,7 @@ else
         </div>
 
         <div class="col-xl-4">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 feature-card">
                 <div class="card-header">Invalidated sessions by device</div>
                 <div class="card-body">
                     @if (InvalidatedDevices.Count == 0)
@@ -206,7 +238,7 @@ else
                         <div class="d-flex flex-column gap-2">
                             @foreach (DashboardInvalidatedDeviceItem item in InvalidatedDevices)
                             {
-                                <div class="border rounded p-2 small">
+                                <div class="surface-item small">
                                     <div class="d-flex justify-content-between align-items-center gap-2">
                                         <div class="fw-semibold">@item.DeviceName</div>
                                         <span class="badge text-bg-danger">@item.Count</span>
@@ -222,12 +254,12 @@ else
         </div>
 
         <div class="col-xl-4">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 feature-card">
                 <div class="card-header">Recovery widgets</div>
                 <div class="card-body d-flex flex-column gap-3">
                     @if (_isAdmin)
                     {
-                        <div class="border rounded p-2 small">
+                        <div class="surface-item small">
                             <div class="fw-semibold">Local admin hardening</div>
                             <div>Total users: @(_securitySnapshot?.Users.Count ?? 0)</div>
                             <div>Admin-capable users: @AdminUserCount</div>
@@ -236,12 +268,12 @@ else
                     }
                     else
                     {
-                        <div class="border rounded p-2 small text-muted">Local-user hardening widgets are shown to admin accounts only.</div>
+                        <div class="empty-state small">Local-user hardening widgets are shown to admin accounts only.</div>
                     }
 
                     @if (_isOperator)
                     {
-                        <div class="border rounded p-2 small">
+                        <div class="surface-item small">
                             <div class="fw-semibold">Saved Lab templates</div>
                             <div>Total templates: @_templates.Count</div>
                             @if (RecentTemplateNames.Count == 0)
@@ -256,10 +288,10 @@ else
                     }
                     else
                     {
-                        <div class="border rounded p-2 small text-muted">Lab template widgets are shown to operator/admin accounts.</div>
+                        <div class="empty-state small">Lab template widgets are shown to operator/admin accounts.</div>
                     }
 
-                    <div class="border rounded p-2 small">
+                    <div class="surface-item small">
                         <div class="fw-semibold">Configuration export freshness</div>
                         <div>@BackupStatusDescription</div>
                         <div class="text-muted">Keep a recent bundle before large import/replace or host migration work.</div>
@@ -272,12 +304,12 @@ else
 
 @if (_recentLogs.Count != 0)
 {
-    <div class="card shadow-sm">
+    <div class="card shadow-sm feature-card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span>Recent audit events</span>
             <a class="btn btn-sm btn-outline-secondary" href="audit">Open full audit view</a>
         </div>
-        <div class="table-responsive">
+        <div class="table-responsive table-shell">
             <table class="table table-sm table-striped align-middle mb-0">
                 <thead>
                     <tr>

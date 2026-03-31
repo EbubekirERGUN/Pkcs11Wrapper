@@ -1,19 +1,46 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
+@inject NavigationManager Navigation
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
-
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+<div class="admin-shell">
+    <aside class="admin-sidebar">
+        <div class="admin-brand">
+            <div class="admin-brand-mark">P11</div>
+            <div>
+                <div class="admin-brand-eyebrow">Pkcs11Wrapper</div>
+                <div class="admin-brand-title">Admin Console</div>
+            </div>
         </div>
 
-        <article class="content px-4">
+        <div class="admin-brand-copy">
+            Local-host PKCS#11 operations, diagnostics, and recovery workflows in one place.
+        </div>
+
+        <NavMenu />
+
+        <div class="admin-sidebar-footer">
+            <div class="sidebar-footer-title">Deployment model</div>
+            <div class="sidebar-footer-copy">Blazor Server · local auth · controlled PKCS#11 admin surface</div>
+        </div>
+    </aside>
+
+    <div class="admin-main">
+        <header class="admin-topbar">
+            <div>
+                <div class="admin-topbar-eyebrow">Operations workspace</div>
+                <div class="admin-topbar-title">@CurrentSectionTitle</div>
+            </div>
+
+            <div class="admin-topbar-meta">
+                <span class="admin-chip">Blazor Server</span>
+                <span class="admin-chip admin-chip-muted">.NET 10</span>
+                <span class="admin-chip admin-chip-muted">PKCS#11</span>
+            </div>
+        </header>
+
+        <main class="admin-page-host">
             @Body
-        </article>
-    </main>
+        </main>
+    </div>
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
@@ -21,3 +48,26 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private string CurrentSectionTitle
+    {
+        get
+        {
+            string relative = Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/').ToLowerInvariant();
+            return relative switch
+            {
+                "" => "Dashboard",
+                "devices" => "Device Profiles",
+                "slots" => "Slots & Tokens",
+                "keys" => "Keys & Objects",
+                "sessions" => "Tracked Sessions",
+                "audit" => "Audit Logs",
+                "configuration" => "Configuration Transfer",
+                "lab" => "PKCS#11 Lab",
+                "users" => "Local Users",
+                _ => "Admin Console"
+            };
+        }
+    }
+}

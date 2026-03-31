@@ -5,8 +5,31 @@
 
 <PageTitle>Users</PageTitle>
 
-<h1>Local Users</h1>
-<p class="text-muted">Manage local admin-panel users, rotate passwords, retire the bootstrap notice after initial setup, and keep a clear view of local role assignments.</p>
+<section class="page-hero page-hero-users">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Local identity management</div>
+        <h1>Local Users</h1>
+        <p class="page-lead">Manage local admin-panel users, rotate passwords, retire the bootstrap notice after initial setup, and keep a clear view of local role assignments. Bu ekranın hissi güven veren, kontrollü ve operasyon odaklı olmalı; özellikle bootstrap ve role yönetimi gibi hassas alanlarda.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Bootstrap lifecycle</span>
+            <span class="page-tag">Role governance</span>
+            <span class="page-tag">Password rotation</span>
+            <span class="page-tag">Admin-only</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Security model</div>
+            <div class="hero-panel-value">Local-host</div>
+            <div class="hero-panel-copy">This page governs embedded local auth for the admin panel, not an external identity provider. Clarity and safety matter more than density.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Primary outcome</div>
+            <div class="hero-panel-value">Least surprise</div>
+            <div class="hero-panel-copy">The interface should make user creation, role edits, bootstrap retirement, and deletion intent obvious before changes are applied.</div>
+        </div>
+    </div>
+</section>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -15,7 +38,7 @@
 
 @if (_snapshot is null)
 {
-    <div class="text-muted">Loading...</div>
+    <div class="empty-state">Loading...</div>
 }
 else
 {
@@ -39,35 +62,35 @@ else
 
     <div class="row g-3 mb-4">
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Total local users</div>
-                    <div class="display-6">@_snapshot.Users.Count</div>
+                    <div class="metric-label">Total local users</div>
+                    <div class="display-6 metric-meta">@_snapshot.Users.Count</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Admins</div>
-                    <div class="display-6">@CountUsersWithRole(AdminRoles.Admin)</div>
+                    <div class="metric-label">Admins</div>
+                    <div class="display-6 metric-meta">@CountUsersWithRole(AdminRoles.Admin)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Operators</div>
-                    <div class="display-6">@CountUsersWithRole(AdminRoles.Operator)</div>
+                    <div class="metric-label">Operators</div>
+                    <div class="display-6 metric-meta">@CountUsersWithRole(AdminRoles.Operator)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Bootstrap notice</div>
-                    <div class="display-6">@(_snapshot.BootstrapStatus.NoticeExists ? "Open" : "Retired")</div>
-                    <div class="small text-muted">Current session: @_snapshot.CurrentUserName</div>
+                    <div class="metric-label">Bootstrap notice</div>
+                    <div class="display-6 metric-meta">@(_snapshot.BootstrapStatus.NoticeExists ? "Open" : "Retired")</div>
+                    <div class="small metric-note">Current session: @_snapshot.CurrentUserName</div>
                 </div>
             </div>
         </div>
@@ -75,7 +98,7 @@ else
 
     <div class="row g-4">
         <div class="col-xl-5">
-            <div class="card shadow-sm mb-4">
+            <div class="card shadow-sm mb-4 feature-card workflow-card">
                 <div class="card-header">Create local user</div>
                 <div class="card-body row g-3">
                     <div class="col-12">
@@ -103,7 +126,7 @@ else
 
             @if (_selectedUser is not null)
             {
-                <div class="card shadow-sm">
+                <div class="card shadow-sm feature-card workflow-card accent-card-secondary">
                     <div class="card-header">Manage user: @_selectedUser.Username</div>
                     <div class="card-body row g-3">
                         <div class="col-12 small text-muted">
@@ -145,7 +168,7 @@ else
 
                         <div class="col-12">
                             <label class="form-label">Delete confirmation</label>
-                            <input class="form-control" @bind="_deleteConfirmation" placeholder="Type username to confirm" disabled="@_selectedUser.IsCurrentUser" />
+                            <input class="form-control" @bind="_deleteConfirmation" @bind:event="oninput" placeholder="Type username to confirm" disabled="@_selectedUser.IsCurrentUser" />
                             <div class="form-text">Type <code>@_selectedUser.Username</code> to delete this user.</div>
                         </div>
                         <div class="col-12 d-flex gap-2 flex-wrap">
@@ -161,7 +184,7 @@ else
         </div>
 
         <div class="col-xl-7">
-            <div class="card shadow-sm">
+            <div class="card shadow-sm feature-card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Local user list</span>
                     <span class="small text-muted">Current session: @_snapshot.CurrentUserName</span>
@@ -194,11 +217,11 @@ else
                 <div class="card-body p-0">
                     @if (FilteredUsers.Count == 0)
                     {
-                        <div class="p-3 text-muted">No local users matched the current filters.</div>
+                        <div class="p-3"><div class="empty-state">No local users matched the current filters.</div></div>
                     }
                     else
                     {
-                        <div class="table-responsive">
+                        <div class="table-responsive table-shell">
                             <table class="table table-hover align-middle mb-0">
                                 <thead>
                                     <tr>

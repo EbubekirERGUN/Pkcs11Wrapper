@@ -4,8 +4,31 @@
 
 <PageTitle>Audit Logs</PageTitle>
 
-<h1>Audit Logs</h1>
-<p class="text-muted">Yönetim panelinde yapılan işlemlerin audit kaydı. Buradan son olayları filtrele, başarısız operasyonları ayır ve audit chain sağlığını takip et.</p>
+<section class="page-hero page-hero-audit">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Traceability</div>
+        <h1>Audit Logs</h1>
+        <p class="page-lead">Yönetim panelinde yapılan işlemlerin audit kaydı. Buradan son olayları filtrele, başarısız operasyonları ayır ve audit chain sağlığını takip et. Ekran artık gözle okunur ve doğrulama odaklı bir operasyon kaydı yüzeyi gibi hissettirmeli.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Audit integrity</span>
+            <span class="page-tag">Failure isolation</span>
+            <span class="page-tag">Actor trace</span>
+            <span class="page-tag">Paged review</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Review mode</div>
+            <div class="hero-panel-value">Recent + filterable</div>
+            <div class="hero-panel-copy">Use the search window to isolate suspicious actions, non-success outcomes, or a specific actor/target trail quickly.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Chain posture</div>
+            <div class="hero-panel-value">Integrity aware</div>
+            <div class="hero-panel-copy">The chain summary stays visible so audit review feels trustworthy before users rely on the entries.</div>
+        </div>
+    </div>
+</section>
 
 @if (_integrity is not null)
 {
@@ -21,40 +44,40 @@
 
 <div class="row g-3 mb-3">
     <div class="col-xl-3 col-md-4 col-sm-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Loaded entries</div>
-                <div class="display-6">@_logs.Count</div>
+                <div class="metric-label">Loaded entries</div>
+                <div class="display-6 metric-meta">@_logs.Count</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-4 col-sm-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Filtered entries</div>
-                <div class="display-6">@GetFilteredLogs().Count</div>
+                <div class="metric-label">Filtered entries</div>
+                <div class="display-6 metric-meta">@GetFilteredLogs().Count</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-4 col-sm-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Failure outcomes</div>
-                <div class="display-6">@GetFilteredLogs().Count(log => !string.Equals(log.Outcome, "Success", StringComparison.OrdinalIgnoreCase))</div>
+                <div class="metric-label">Failure outcomes</div>
+                <div class="display-6 metric-meta">@GetFilteredLogs().Count(log => !string.Equals(log.Outcome, "Success", StringComparison.OrdinalIgnoreCase))</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-4 col-sm-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Categories in window</div>
-                <div class="display-6">@AvailableCategories.Count</div>
+                <div class="metric-label">Categories in window</div>
+                <div class="display-6 metric-meta">@AvailableCategories.Count</div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-xl-2 col-lg-3 col-md-6">
             <button class="btn btn-primary" @onclick="LoadAsync">Refresh</button>
@@ -95,13 +118,11 @@
 
 @if (_logs.Count == 0)
 {
-    <p class="text-muted">No audit entries yet.</p>
+    <div class="empty-state">No audit entries yet.</div>
 }
 else if (GetFilteredLogs().Count == 0)
 {
-    <div class="card shadow-sm">
-        <div class="card-body text-muted">No audit entries matched the current filters.</div>
-    </div>
+    <div class="empty-state">No audit entries matched the current filters.</div>
 }
 else
 {
@@ -112,7 +133,7 @@ else
         <div class="small text-muted">Page @CurrentPageIndex of @TotalPages</div>
     </div>
 
-    <div class="table-responsive">
+    <div class="table-responsive table-shell">
         <table class="table table-striped align-middle">
             <thead>
                 <tr>
@@ -130,10 +151,10 @@ else
                 @foreach (AdminAuditLogEntry log in CurrentPageLogs)
                 {
                     <tr>
-                        <td>@log.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td><span class="table-pill table-pill-code">@log.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</span></td>
                         <td>@log.Actor</td>
                         <td>@string.Join(", ", log.ActorRoles)</td>
-                        <td>@log.Category</td>
+                        <td><span class="table-pill">@log.Category</span></td>
                         <td>@log.Action</td>
                         <td>@log.Target</td>
                         <td>

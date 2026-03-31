@@ -1,3 +1,4 @@
+using System.Reflection;
 using Pkcs11Wrapper.Admin.Application.Models;
 using Pkcs11Wrapper.Admin.Application.Services;
 
@@ -80,6 +81,30 @@ public sealed class HsmAdminServiceTests
 
         ArgumentOutOfRangeException ex = Assert.Throws<ArgumentOutOfRangeException>(() => HsmAdminService.ValidateImportAesKeyRequest(request));
         Assert.Contains("Imported AES key value", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CreateImportedAesTemplateDoesNotEmitValueLengthWhenValueIsPresent()
+    {
+        MethodInfo method = typeof(HsmAdminService).GetMethod("CreateImportedAesTemplate", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("CreateImportedAesTemplate was not found.");
+
+        ImportAesKeyRequest request = new()
+        {
+            Label = "aes-import",
+            ValueHex = "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF"
+        };
+
+        Pkcs11ObjectAttribute[] attributes = (Pkcs11ObjectAttribute[])method.Invoke(null,
+        [
+            request,
+            System.Text.Encoding.UTF8.GetBytes(request.Label),
+            Array.Empty<byte>(),
+            Convert.FromHexString(request.ValueHex)
+        ])!;
+
+        Assert.Contains(attributes, attribute => attribute.Type == Pkcs11AttributeTypes.Value);
+        Assert.DoesNotContain(attributes, attribute => attribute.Type == Pkcs11AttributeTypes.ValueLen);
     }
 
     [Fact]

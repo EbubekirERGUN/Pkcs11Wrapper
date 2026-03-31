@@ -5,8 +5,34 @@
 
 <PageTitle>Devices</PageTitle>
 
-<h1>HSM Devices</h1>
-<p class="text-muted">PKCS#11 module path'lerini tanımla, bağlantı testi yap ve admin panelinin hangi cihazlara erişeceğini yönet. Bu görünüm ikinci polish diliminde özet, arama, filtre ve sıralama ergonomisiyle güçlendirildi.</p>
+<section class="page-hero page-hero-devices">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Device inventory</div>
+        <h1>HSM Devices</h1>
+        <p class="page-lead">PKCS#11 module path'lerini tanımla, bağlantı testi yap ve admin panelinin hangi cihazlara erişeceğini yönet. Hedef burada sadece CRUD değil; cihaz envanterini okunaklı, güven veren ve operatörün hızlı karar verebileceği bir yüzeyde sunmak.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Profile catalog</span>
+            <span class="page-tag">Connection testing</span>
+            <span class="page-tag">Operational filtering</span>
+            @if (_isAdmin)
+            {
+                <span class="page-tag">Admin-managed changes</span>
+            }
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Change authority</div>
+            <div class="hero-panel-value">@(_isAdmin ? "Admin write access" : "Read / test only")</div>
+            <div class="hero-panel-copy">Only admin accounts can create, edit, or delete profiles; operators focus on inspection and connection verification.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Primary outcome</div>
+            <div class="hero-panel-value">Cleaner inventory</div>
+            <div class="hero-panel-copy">Profiles should be easy to scan, test, and trust before users move deeper into slot and key workflows.</div>
+        </div>
+    </div>
+</section>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -17,35 +43,35 @@
 {
     <div class="row g-3 mb-4">
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Configured devices</div>
-                    <div class="display-6">@_devices.Count</div>
+                    <div class="metric-label">Configured devices</div>
+                    <div class="display-6 metric-meta">@_devices.Count</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Enabled devices</div>
-                    <div class="display-6">@_devices.Count(device => device.IsEnabled)</div>
+                    <div class="metric-label">Enabled devices</div>
+                    <div class="display-6 metric-meta">@_devices.Count(device => device.IsEnabled)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Disabled devices</div>
-                    <div class="display-6">@_devices.Count(device => !device.IsEnabled)</div>
+                    <div class="metric-label">Disabled devices</div>
+                    <div class="display-6 metric-meta">@_devices.Count(device => !device.IsEnabled)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Filtered view</div>
-                    <div class="display-6">@FilteredDevices.Count</div>
-                    <div class="small text-muted">@(_editingId is null ? "No device is being edited." : "One device is currently selected for editing.")</div>
+                    <div class="metric-label">Filtered view</div>
+                    <div class="display-6 metric-meta">@FilteredDevices.Count</div>
+                    <div class="small metric-note">@(_editingId is null ? "No device is being edited." : "One device is currently selected for editing.")</div>
                 </div>
             </div>
         </div>
@@ -54,7 +80,7 @@
 
 <div class="row g-4">
     <div class="col-lg-4">
-        <div class="card shadow-sm">
+        <div class="card shadow-sm feature-card">
             <div class="card-header">@(_editingId is null ? "Add Device" : "Edit Device")</div>
             <div class="card-body">
                 <EditForm Model="_input" OnValidSubmit="SaveAsync">
@@ -95,7 +121,7 @@
     </div>
 
     <div class="col-lg-8">
-        <div class="card shadow-sm">
+        <div class="card shadow-sm panel-toolbar-card feature-card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span>Configured Devices</span>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync">Refresh</button>
@@ -127,15 +153,15 @@
             <div class="card-body">
                 @if (_devices.Count == 0)
                 {
-                    <p class="text-muted mb-0">No devices configured yet.</p>
+                    <div class="empty-state mb-0">No devices configured yet.</div>
                 }
                 else if (FilteredDevices.Count == 0)
                 {
-                    <p class="text-muted mb-0">No devices matched the current filters.</p>
+                    <div class="empty-state mb-0">No devices matched the current filters.</div>
                 }
                 else
                 {
-                    <div class="table-responsive">
+                    <div class="table-responsive table-shell">
                         <table class="table table-striped align-middle">
                             <thead>
                                 <tr>

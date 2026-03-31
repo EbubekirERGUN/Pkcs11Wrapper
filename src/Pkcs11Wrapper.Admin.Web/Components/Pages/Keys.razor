@@ -7,15 +7,38 @@
 
 <PageTitle>Keys</PageTitle>
 
-<h1>Keys / Objects</h1>
-<p class="text-muted">Slot içindeki objeleri listele, capability-aware üret/import akışlarını çalıştır, desteklenen attribute’ları düzenle, obje kopyala ve destroy işlemlerinde typed confirmation kullan.</p>
+<section class="page-hero page-hero-keys">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Object operations</div>
+        <h1>Keys / Objects</h1>
+        <p class="page-lead">Slot içindeki objeleri listele, capability-aware üret/import akışlarını çalıştır, desteklenen attribute’ları düzenle, obje kopyala ve destroy işlemlerinde typed confirmation kullan. Bu ekranın amacı operatöre hem güçlü işlev hem de temiz, güvenilir bir operasyon deneyimi vermek.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Capability-aware flows</span>
+            <span class="page-tag">Server-side object actions</span>
+            <span class="page-tag">Safer destructive operations</span>
+            <span class="page-tag">Lab handoff presets</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Primary usage</div>
+            <div class="hero-panel-value">Provision + inspect</div>
+            <div class="hero-panel-copy">Select a device and slot, load objects, then move into generation, import, update, copy, or lab-assisted diagnostics.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Security posture</div>
+            <div class="hero-panel-value">Server-side</div>
+            <div class="hero-panel-copy">PKCS#11 access, object inspection, and PIN-backed actions stay inside the Blazor Server application boundary.</div>
+        </div>
+    </div>
+</section>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
     <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
 }
 
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-lg-3">
             <label class="form-label">Device</label>
@@ -59,7 +82,7 @@
 
 @if (_slotCapabilities is not null)
 {
-    <div class="card shadow-sm mb-4">
+    <div class="card shadow-sm mb-4 feature-card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span>Selected slot capability snapshot</span>
             <span class="small text-muted">Slot @_slotCapabilities.SlotId</span>
@@ -88,7 +111,7 @@
                 @foreach (SlotMechanismSupport mechanism in _slotCapabilities.Mechanisms)
                 {
                     <div class="col-xl-4 col-md-6">
-                        <div class="border rounded p-2 h-100">
+                        <div class="surface-item h-100">
                             <div class="fw-semibold">@mechanism.Name</div>
                             <div class="text-muted"><code>@mechanism.TypeHex</code></div>
                             <div class="mt-1">@(mechanism.Available ? mechanism.Summary : "Not exposed by slot")</div>
@@ -102,7 +125,7 @@
 
 <div class="row g-4 mb-4">
     <div class="col-xl-4">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 workflow-card feature-card">
             <div class="card-header">Generate AES key</div>
             <div class="card-body row g-3">
                 @RenderOperationWarnings(GetAesWarnings())
@@ -144,7 +167,7 @@
     </div>
 
     <div class="col-xl-4">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 workflow-card feature-card">
             <div class="card-header">Import AES key</div>
             <div class="card-body row g-3">
                 @RenderOperationWarnings(GetImportWarnings())
@@ -181,7 +204,7 @@
     </div>
 
     <div class="col-xl-4">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 workflow-card feature-card">
             <div class="card-header">Generate RSA key pair</div>
             <div class="card-body row g-3">
                 @RenderOperationWarnings(GetRsaWarnings())
@@ -229,40 +252,40 @@
 {
     <div class="row g-3 mb-4">
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Loaded objects</div>
-                    <div class="display-6">@_keys.Count</div>
+                    <div class="metric-label">Loaded objects</div>
+                    <div class="display-6 metric-meta">@_keys.Count</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Filtered objects</div>
-                    <div class="display-6">@FilteredKeys.Count</div>
+                    <div class="metric-label">Filtered objects</div>
+                    <div class="display-6 metric-meta">@FilteredKeys.Count</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Secret keys</div>
-                    <div class="display-6">@CountByClass("secretkey")</div>
+                    <div class="metric-label">Secret keys</div>
+                    <div class="display-6 metric-meta">@CountByClass("secretkey")</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Asymmetric keys</div>
-                    <div class="display-6">@(CountByClass("privatekey") + CountByClass("publickey"))</div>
+                    <div class="metric-label">Asymmetric keys</div>
+                    <div class="display-6 metric-meta">@(CountByClass("privatekey") + CountByClass("publickey"))</div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="card shadow-sm mb-4">
+    <div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
         <div class="card-body row g-3 align-items-end">
             <div class="col-xl-4 col-lg-5 col-md-6">
                 <label class="form-label">Search</label>
@@ -320,13 +343,11 @@
             </div>
             @if (FilteredKeys.Count == 0)
             {
-                <div class="card shadow-sm">
-                    <div class="card-body text-muted">No objects matched the current filters.</div>
-                </div>
+                <div class="empty-state">No objects matched the current filters.</div>
             }
             else
             {
-                <div class="table-responsive">
+                <div class="table-responsive table-shell">
                     <table class="table table-striped table-hover align-middle">
                         <thead>
                             <tr>
@@ -343,12 +364,14 @@
                             @foreach (HsmKeyObjectSummary key in CurrentPageKeys)
                             {
                                 <tr class="@(_selectedDetailHandle == key.Handle ? "table-active" : null)">
-                                    <td>@key.Handle</td>
-                                    <td>@key.Label</td>
-                                    <td><code>@key.IdHex</code></td>
-                                    <td>@key.ObjectClass</td>
-                                    <td>@key.KeyType</td>
-                                    <td class="small">@CapabilitySummary(key)</td>
+                                    <td><span class="table-pill table-pill-code">@key.Handle</span></td>
+                                    <td>
+                                        <div class="fw-semibold">@(string.IsNullOrWhiteSpace(key.Label) ? "Unlabeled object" : key.Label)</div>
+                                    </td>
+                                    <td><span class="table-pill table-pill-code">@key.IdHex</span></td>
+                                    <td><span class="table-pill">@key.ObjectClass</span></td>
+                                    <td><span class="table-pill">@(string.IsNullOrWhiteSpace(key.KeyType) ? "n/a" : key.KeyType)</span></td>
+                                    <td class="small capability-text">@CapabilitySummary(key)</td>
                                     <td class="text-end">
                                         <div class="btn-group btn-group-sm">
                                             <button class="btn btn-outline-primary" @onclick="() => ShowDetailAsync(key)">Details</button>
@@ -375,14 +398,12 @@
         <div class="col-xl-5">
             @if (_selectedDetail is null && _destroyTarget is null && _editRequest is null && _copyRequest is null)
             {
-                <div class="card shadow-sm">
-                    <div class="card-body text-muted">Bir obje seçip detaylarını, edit/copy panelini veya destroy confirmation panelini aç.</div>
-                </div>
+                <div class="empty-state">Bir obje seçip detaylarını, edit/copy panelini veya destroy confirmation panelini aç.</div>
             }
 
             @if (_selectedDetail is not null)
             {
-                <div class="card shadow-sm mb-4">
+                <div class="card shadow-sm mb-4 feature-card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Object detail</span>
                         <div class="btn-group btn-group-sm">
@@ -393,7 +414,7 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <dl class="row mb-0">
+                        <dl class="row mb-0 detail-grid">
                             <dt class="col-sm-4">Handle</dt><dd class="col-sm-8">@_selectedDetail.Handle</dd>
                             <dt class="col-sm-4">Label</dt><dd class="col-sm-8">@_selectedDetail.Label</dd>
                             <dt class="col-sm-4">ID</dt><dd class="col-sm-8"><code>@_selectedDetail.IdHex</code></dd>
@@ -485,7 +506,7 @@
 
             @if (_editRequest is not null)
             {
-                <div class="card border-secondary shadow-sm mb-4">
+                <div class="card border-secondary shadow-sm mb-4 feature-card workflow-card accent-card-secondary">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Edit supported attributes</span>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="CancelEdit">Close</button>
@@ -535,7 +556,7 @@
 
             @if (_copyRequest is not null)
             {
-                <div class="card border-info shadow-sm mb-4">
+                <div class="card border-info shadow-sm mb-4 feature-card workflow-card accent-card-info">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Copy object</span>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="CancelCopy">Close</button>
@@ -585,8 +606,8 @@
 
             @if (_destroyTarget is not null)
             {
-                <div class="card border-danger shadow-sm">
-                    <div class="card-header bg-danger-subtle text-danger-emphasis">Destroy object</div>
+                <div class="card border-danger shadow-sm feature-card workflow-card accent-card-danger">
+                    <div class="card-header">Destroy object</div>
                     <div class="card-body">
                         <p class="mb-2">This permanently removes the selected object from the token.</p>
                         <ul>

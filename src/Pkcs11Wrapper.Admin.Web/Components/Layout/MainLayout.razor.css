@@ -1,98 +1,199 @@
-.page {
-    position: relative;
+.admin-shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 24rem),
+        linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
+}
+
+.admin-sidebar {
+    position: sticky;
+    top: 0;
+    min-height: 100vh;
+    padding: 1.5rem 1.25rem 1.25rem;
+    background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.22), transparent 16rem),
+        linear-gradient(180deg, #0f172a 0%, #111c36 52%, #172554 100%);
+    color: #e5eefc;
+    border-right: 1px solid rgba(148, 163, 184, 0.16);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
+}
+
+.admin-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.95rem;
+    margin-bottom: 1rem;
+}
+
+.admin-brand-mark {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 1rem;
+    display: grid;
+    place-items: center;
+    font-size: 0.95rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #eff6ff;
+    background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+    box-shadow: 0 16px 28px rgba(37, 99, 235, 0.28);
+}
+
+.admin-brand-eyebrow {
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(191, 219, 254, 0.72);
+}
+
+.admin-brand-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #f8fbff;
+}
+
+.admin-brand-copy {
+    margin-bottom: 1.4rem;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    color: rgba(226, 232, 240, 0.74);
+}
+
+.admin-sidebar-footer {
+    margin-top: 1.5rem;
+    padding: 1rem 1.05rem;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 1rem;
+    background: rgba(15, 23, 42, 0.26);
+}
+
+.sidebar-footer-title {
+    margin-bottom: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(191, 219, 254, 0.72);
+}
+
+.sidebar-footer-copy {
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: rgba(226, 232, 240, 0.78);
+}
+
+.admin-main {
+    min-width: 0;
     display: flex;
     flex-direction: column;
 }
 
-main {
-    flex: 1;
-}
-
-.sidebar {
-    background-image: linear-gradient(180deg, rgb(5, 39, 103) 0%, #3a0647 70%);
-}
-
-.top-row {
-    background-color: #f7f7f7;
-    border-bottom: 1px solid #d6d5d5;
-    justify-content: flex-end;
-    height: 3.5rem;
+.admin-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
     display: flex;
+    justify-content: space-between;
     align-items: center;
+    gap: 1rem;
+    padding: 1.35rem 2rem 1.2rem;
+    background: rgba(248, 251, 255, 0.9);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    backdrop-filter: blur(14px);
 }
 
-    .top-row ::deep a, .top-row ::deep .btn-link {
-        white-space: nowrap;
-        margin-left: 1.5rem;
-        text-decoration: none;
+.admin-topbar-eyebrow {
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.admin-topbar-title {
+    margin-top: 0.15rem;
+    font-size: clamp(1.4rem, 1.1rem + 1vw, 2rem);
+    line-height: 1.1;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: #0f172a;
+}
+
+.admin-topbar-meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.65rem;
+}
+
+.admin-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 0.8rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
+    border: 1px solid rgba(96, 165, 250, 0.25);
+    color: #1d4ed8;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.admin-chip-muted {
+    background: #ffffff;
+    border-color: rgba(148, 163, 184, 0.24);
+    color: #475569;
+}
+
+.admin-page-host {
+    min-width: 0;
+    padding: 2rem;
+}
+
+@media (max-width: 1100px) {
+    .admin-shell {
+        grid-template-columns: 280px minmax(0, 1fr);
     }
 
-    .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
-        text-decoration: underline;
-    }
-
-    .top-row ::deep a:first-child {
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-@media (max-width: 640.98px) {
-    .top-row {
-        justify-content: space-between;
-    }
-
-    .top-row ::deep a, .top-row ::deep .btn-link {
-        margin-left: 0;
+    .admin-topbar,
+    .admin-page-host {
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
     }
 }
 
-@media (min-width: 641px) {
-    .page {
-        flex-direction: row;
+@media (max-width: 860px) {
+    .admin-shell {
+        grid-template-columns: 1fr;
     }
 
-    .sidebar {
-        width: 250px;
-        height: 100vh;
-        position: sticky;
-        top: 0;
+    .admin-sidebar {
+        position: static;
+        min-height: auto;
+        padding-bottom: 1rem;
     }
 
-    .top-row {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-    }
-
-    .top-row.auth ::deep a:first-child {
-        flex: 1;
-        text-align: right;
-        width: 0;
-    }
-
-    .top-row, article {
-        padding-left: 2rem !important;
-        padding-right: 1.5rem !important;
+    .admin-topbar {
+        position: static;
+        padding-top: 1.1rem;
+        padding-bottom: 1rem;
     }
 }
 
-#blazor-error-ui {
-    color-scheme: light only;
-    background: lightyellow;
-    bottom: 0;
-    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
-    box-sizing: border-box;
-    display: none;
-    left: 0;
-    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
-    position: fixed;
-    width: 100%;
-    z-index: 1000;
-}
-
-    #blazor-error-ui .dismiss {
-        cursor: pointer;
-        position: absolute;
-        right: 0.75rem;
-        top: 0.5rem;
+@media (max-width: 640px) {
+    .admin-topbar {
+        align-items: flex-start;
+        flex-direction: column;
     }
+
+    .admin-topbar-meta {
+        justify-content: flex-start;
+    }
+
+    .admin-page-host {
+        padding: 1.1rem;
+    }
+}

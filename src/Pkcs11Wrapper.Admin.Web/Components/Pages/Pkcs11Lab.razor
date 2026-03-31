@@ -7,15 +7,38 @@
 
 <PageTitle>PKCS#11 Lab</PageTitle>
 
-<h1>PKCS#11 Lab</h1>
-<p class="text-muted">Bağlı HSM cihazında tanı/deney amaçlı PKCS#11 operasyonlarını transient session’larla çalıştır. Bu ilk sürüm kontrollü bir diagnostic console’dur; serbest raw function execution yüzeyi değildir.</p>
+<section class="page-hero page-hero-lab">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Controlled diagnostics</div>
+        <h1>PKCS#11 Lab</h1>
+        <p class="page-lead">Bağlı HSM cihazında tanı ve deney amaçlı PKCS#11 operasyonlarını transient session'larla çalıştır. Bu yüzey serbest raw function execution için değil; kontrollü, tekrar edilebilir ve daha profesyonel operatör teşhisi için tasarlanıyor.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Diagnostics</span>
+            <span class="page-tag">Crypto experiments</span>
+            <span class="page-tag">Scenario replay</span>
+            <span class="page-tag">Template favorites</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Execution model</div>
+            <div class="hero-panel-value">Controlled</div>
+            <div class="hero-panel-copy">Transient sessions, validation, audit logging, and PIN-handling guardrails stay in front of every lab action.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Best fit</div>
+            <div class="hero-panel-value">Repeatable ops</div>
+            <div class="hero-panel-copy">Use templates, history, and palette shortcuts when you need fast diagnostics without dropping to ad-hoc shelling.</div>
+        </div>
+    </div>
+</section>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
     <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
 }
 
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-xl-3 col-lg-4">
             <label class="form-label">Device</label>
@@ -71,43 +94,43 @@
 
 <div class="row g-3 mb-4">
     <div class="col-xl-3 col-md-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Configured devices</div>
-                <div class="display-6">@_devices.Count</div>
+                <div class="metric-label">Configured devices</div>
+                <div class="display-6 metric-meta">@_devices.Count</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Loaded slots</div>
-                <div class="display-6">@_slots.Count</div>
-                <div class="small text-muted">For the selected device</div>
+                <div class="metric-label">Loaded slots</div>
+                <div class="display-6 metric-meta">@_slots.Count</div>
+                <div class="small metric-note">For the selected device</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Scenario history</div>
-                <div class="display-6">@_history.Count</div>
-                <div class="small text-muted">Success: @_history.Count(item => item.Result.Success) / Failure: @_history.Count(item => !item.Result.Success)</div>
+                <div class="metric-label">Scenario history</div>
+                <div class="display-6 metric-meta">@_history.Count</div>
+                <div class="small metric-note">Success: @_history.Count(item => item.Result.Success) / Failure: @_history.Count(item => !item.Result.Success)</div>
             </div>
         </div>
     </div>
     <div class="col-xl-3 col-md-6">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="text-muted small">Current operation group</div>
-                <div class="display-6">@GetCategoryLabel(_operationPaletteCategory)</div>
-                <div class="small text-muted">@GetOperationLabel(_request.Operation)</div>
+                <div class="metric-label">Current operation group</div>
+                <div class="display-6 metric-meta">@GetCategoryLabel(_operationPaletteCategory)</div>
+                <div class="small metric-note">@GetOperationLabel(_request.Operation)</div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm mb-4 feature-card workflow-card">
     <div class="card-header">Quick operation palette</div>
     <div class="card-body d-flex flex-column gap-3">
         <div class="d-flex flex-wrap gap-2">
@@ -128,7 +151,7 @@
     </div>
 </div>
 
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm mb-4 feature-card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>Saved templates / favorites</span>
         <span class="small text-muted">Stored under App_Data · user PIN is never persisted</span>
@@ -173,18 +196,18 @@
 
             @if (_templates.Count == 0)
             {
-                <div class="text-muted small">No saved templates yet. Save a favorite once and reuse it later without re-entering the full request shape.</div>
+                <div class="empty-state small">No saved templates yet. Save a favorite once and reuse it later without re-entering the full request shape.</div>
             }
             else if (FilteredTemplates.Count == 0)
             {
-                <div class="text-muted small">No template matched the current filters.</div>
+                <div class="empty-state small">No template matched the current filters.</div>
             }
             else
             {
                 <div class="d-flex flex-column gap-2">
                     @foreach (Pkcs11LabSavedTemplate template in FilteredTemplates)
                     {
-                        <div class="border rounded p-3 small">
+                        <div class="surface-item small">
                             <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
                                 <div>
                                     <div class="fw-semibold">@template.Name</div>
@@ -222,7 +245,7 @@
 
 <div class="row g-4 mb-4">
     <div class="col-xl-5">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 feature-card workflow-card">
             <div class="card-header">Operation parameters</div>
             <div class="card-body row g-3">
                 <div class="col-12">
@@ -584,7 +607,7 @@
     </div>
 
     <div class="col-xl-7">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100 feature-card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span>Execution result</span>
                 @if (_lastResult is not null)
@@ -595,7 +618,7 @@
             <div class="card-body">
                 @if (_lastResult is null)
                 {
-                    <div class="text-muted">Bir operation çalıştırınca sonuç burada görünecek.</div>
+                    <div class="empty-state">Bir operation çalıştırınca sonuç burada görünecek.</div>
                 }
                 else
                 {
@@ -625,7 +648,7 @@
                         </div>
                     }
 
-                    <pre class="bg-body-tertiary border rounded p-3 small mb-0" style="max-height: 36rem; overflow: auto; white-space: pre-wrap;">@_lastResult.OutputText</pre>
+                    <pre class="result-console small mb-0">@_lastResult.OutputText</pre>
                 }
 
                 @if (_history.Count > 0)
@@ -664,14 +687,14 @@
 
                     @if (FilteredHistory.Count == 0)
                     {
-                        <div class="text-muted small">No scenario history item matched the current filters.</div>
+                        <div class="empty-state small">No scenario history item matched the current filters.</div>
                     }
                     else
                     {
                         <div class="d-flex flex-column gap-2">
                             @foreach (LabHistoryItem item in FilteredHistory)
                             {
-                                <div class="border rounded p-2 small">
+                                <div class="history-item small">
                                     <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
                                         <div>
                                             <div class="fw-semibold">@item.Result.Operation</div>
@@ -717,7 +740,7 @@
     public Guid? QueryDevice { get; set; }
 
     [SupplyParameterFromQuery(Name = "slot")]
-    public ulong? QuerySlot { get; set; }
+    public string? QuerySlot { get; set; }
 
     [SupplyParameterFromQuery(Name = "op")]
     public string? QueryOperation { get; set; }
@@ -885,7 +908,7 @@
             await LoadSlotsForSelectedDeviceAsync();
         }
 
-        if (QuerySlot is ulong slotId && _slots.Any(slot => slot.SlotId == (nuint)slotId))
+        if (ulong.TryParse(QuerySlot, out ulong slotId) && _slots.Any(slot => slot.SlotId == (nuint)slotId))
         {
             _selectedSlotId = slotId.ToString();
             await LoadProtectedPinAsync();

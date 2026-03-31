@@ -3,11 +3,35 @@
 
 <PageTitle>Counter</PageTitle>
 
-<h1>Counter</h1>
+<section class="page-hero page-hero-dashboard">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Utility route</div>
+        <h1>Counter</h1>
+        <p class="page-lead">Small interactive sample surface for verifying that the server-rendered UI is responsive. Even utility routes should look like part of the same product, not leftover scaffold content.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Interactive Server</span>
+            <span class="page-tag">UI sanity check</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Current count</div>
+            <div class="hero-panel-value">@currentCount</div>
+            <div class="hero-panel-copy">Use the button below to confirm the interactive circuit is alive and updating correctly.</div>
+        </div>
+    </div>
+</section>
 
-<p role="status">Current count: @currentCount</p>
-
-<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+<div class="card shadow-sm feature-card workflow-card">
+    <div class="card-header">Counter interaction</div>
+    <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+        <div>
+            <div class="metric-label">Current count</div>
+            <div class="display-6 metric-meta">@currentCount</div>
+        </div>
+        <button class="btn btn-primary" @onclick="IncrementCount">Increment counter</button>
+    </div>
+</div>
 
 @code {
     private int currentCount = 0;

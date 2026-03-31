@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
+using Pkcs11Wrapper.Native;
 
 namespace Pkcs11Wrapper.Admin.Application.Services;
 
@@ -471,7 +472,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "generate AES keys");
-        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+        LoginUserToleratingAlreadyLoggedIn(session, userPin);
 
         Pkcs11ObjectHandle handle = session.GenerateKey(new Pkcs11Mechanism(Pkcs11MechanismTypes.AesKeyGen), CreateAesTemplate(request, label, id));
         string idHex = id.Length == 0 ? "(empty)" : Convert.ToHexString(id);
@@ -492,7 +493,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "import AES keys");
-        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+        LoginUserToleratingAlreadyLoggedIn(session, userPin);
 
         Pkcs11ObjectHandle handle = session.CreateObject(CreateImportedAesTemplate(request, label, id, value));
         string idHex = id.Length == 0 ? "(empty)" : Convert.ToHexString(id);
@@ -513,7 +514,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "generate RSA key pairs");
-        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+        LoginUserToleratingAlreadyLoggedIn(session, userPin);
 
         Pkcs11GeneratedKeyPair pair = session.GenerateKeyPair(
             new Pkcs11Mechanism(Pkcs11MechanismTypes.RsaPkcsKeyPairGen),
@@ -537,7 +538,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             string notes = "Public session";
             if (!string.IsNullOrWhiteSpace(userPin))
             {
-                session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+                LoginUserToleratingAlreadyLoggedIn(session, userPin);
                 notes = "User-authenticated session";
             }
 
@@ -615,7 +616,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
-        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(request.UserPin));
+        LoginUserToleratingAlreadyLoggedIn(session, request.UserPin);
         session.DestroyObject(new Pkcs11ObjectHandle(request.Handle));
         await auditLog.WriteAsync("Key", "Destroy", $"{device.Name}/slot-{slotIdValue}/handle-{request.Handle}", "Success", "Object destroyed through admin panel after typed confirmation.", cancellationToken: cancellationToken);
     }
@@ -629,7 +630,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "update object attributes");
-        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+        LoginUserToleratingAlreadyLoggedIn(session, userPin);
 
         byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
         session.SetAttributeValue(new Pkcs11ObjectHandle(request.Handle), CreateEditableAttributeTemplate(request, id));
@@ -648,7 +649,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "copy objects");
-        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+        LoginUserToleratingAlreadyLoggedIn(session, userPin);
 
         byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
         Pkcs11ObjectHandle copied = session.CopyObject(new Pkcs11ObjectHandle(request.SourceHandle), CreateCopyTemplate(request, id));
@@ -1449,7 +1450,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             return "public";
         }
 
-        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(request.UserPin));
+        LoginUserToleratingAlreadyLoggedIn(session, request.UserPin);
         notes.Add("Authenticated the transient lab session as CKU_USER using the supplied PIN.");
         return "user";
     }
@@ -1786,7 +1787,9 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     private static void AppendAttributeReadResult(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType, StringBuilder output, List<string> notes)
     {
-        Pkcs11AttributeReadResult info = session.GetAttributeValueInfo(handle, attributeType);
+        Pkcs11AttributeReadResult info = TryGetAttributeValueInfo(session, handle, attributeType, out Pkcs11AttributeReadResult readInfo)
+            ? readInfo
+            : new Pkcs11AttributeReadResult(Pkcs11AttributeReadStatus.TypeInvalid, nuint.MaxValue);
         output.AppendLine();
         output.AppendLine($"Attribute: {DescribeAttributeType(attributeType)}");
         output.AppendLine($"Read status: {info.Status}");
@@ -2028,7 +2031,11 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     private static HsmObjectAttributeView? ReadAttributeView(Pkcs11Session session, Pkcs11ObjectHandle handle, AttributeDescriptor descriptor)
     {
-        Pkcs11AttributeReadResult info = session.GetAttributeValueInfo(handle, descriptor.Type);
+        if (!TryGetAttributeValueInfo(session, handle, descriptor.Type, out Pkcs11AttributeReadResult info))
+        {
+            return null;
+        }
+
         if (descriptor.TreatUnreadableAsSensitive && info.Status == Pkcs11AttributeReadStatus.Sensitive)
         {
             return new HsmObjectAttributeView(descriptor.Name, "[sensitive]", true);
@@ -2096,6 +2103,17 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return results;
     }
 
+    private static void LoginUserToleratingAlreadyLoggedIn(Pkcs11Session session, string userPin)
+    {
+        try
+        {
+            session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+        }
+        catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == 0x100)
+        {
+        }
+    }
+
     private static string LoginIfProvided(Pkcs11Session session, string? userPin)
     {
         if (string.IsNullOrWhiteSpace(userPin))
@@ -2103,13 +2121,17 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             return "public";
         }
 
-        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+        LoginUserToleratingAlreadyLoggedIn(session, userPin);
         return "user-login";
     }
 
     private static string? ReadUtf8Attribute(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType)
     {
-        Pkcs11AttributeReadResult info = session.GetAttributeValueInfo(handle, attributeType);
+        if (!TryGetAttributeValueInfo(session, handle, attributeType, out Pkcs11AttributeReadResult info))
+        {
+            return null;
+        }
+
         if (!info.IsReadable || info.Length > int.MaxValue || info.Length == 0)
         {
             return null;
@@ -2126,7 +2148,11 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     private static string? ReadHexAttribute(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType)
     {
-        Pkcs11AttributeReadResult info = session.GetAttributeValueInfo(handle, attributeType);
+        if (!TryGetAttributeValueInfo(session, handle, attributeType, out Pkcs11AttributeReadResult info))
+        {
+            return null;
+        }
+
         if (!info.IsReadable || info.Length > int.MaxValue || info.Length == 0)
         {
             return null;
@@ -2142,10 +2168,38 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     }
 
     private static bool? ReadBooleanAttribute(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType)
-        => session.TryGetAttributeBoolean(handle, attributeType, out bool value, out _) ? value : null;
+    {
+        if (!TryGetAttributeValueInfo(session, handle, attributeType, out _))
+        {
+            return null;
+        }
+
+        return session.TryGetAttributeBoolean(handle, attributeType, out bool value, out _) ? value : null;
+    }
 
     private static nuint? ReadNuintAttribute(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType)
-        => session.TryGetAttributeNuint(handle, attributeType, out nuint value, out _) ? value : null;
+    {
+        if (!TryGetAttributeValueInfo(session, handle, attributeType, out _))
+        {
+            return null;
+        }
+
+        return session.TryGetAttributeNuint(handle, attributeType, out nuint value, out _) ? value : null;
+    }
+
+    private static bool TryGetAttributeValueInfo(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType, out Pkcs11AttributeReadResult info)
+    {
+        try
+        {
+            info = session.GetAttributeValueInfo(handle, attributeType);
+            return true;
+        }
+        catch
+        {
+            info = new Pkcs11AttributeReadResult(Pkcs11AttributeReadStatus.TypeInvalid, nuint.MaxValue);
+            return false;
+        }
+    }
 
     private static nuint? ReadObjectSize(Pkcs11Session session, Pkcs11ObjectHandle handle)
     {
@@ -2258,8 +2312,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Extractable, request.Extractable),
             Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, label),
             Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, id),
-            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Value, value),
-            Pkcs11ObjectAttribute.Nuint(Pkcs11AttributeTypes.ValueLen, (nuint)value.Length)
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Value, value)
         ];
 
     private static Pkcs11ObjectAttribute[] CreateEditableAttributeTemplate(UpdateObjectAttributesRequest request, byte[] id)

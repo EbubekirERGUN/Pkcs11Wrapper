@@ -6,15 +6,41 @@
 
 <PageTitle>Slots</PageTitle>
 
-<h1>Slots</h1>
-<p class="text-muted">Seçilen cihaz için slot ve token bilgisini görüntüle. Buradan read-only/read-write session açabilir, slot seviyesinde <code>CloseAllSessions</code> çağırabilir ve loaded slot görünümünü filtreleyebilirsin.</p>
+<section class="page-hero page-hero-slots">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Slot visibility</div>
+        <h1>Slots</h1>
+        <p class="page-lead">Seçilen cihaz için slot ve token bilgisini görüntüle. Buradan read-only/read-write session açabilir, slot seviyesinde <code>CloseAllSessions</code> çağırabilir ve loaded slot görünümünü filtreleyebilirsin. Hedef burada slot sağlığını ve token varlığını temiz, okunabilir bir operasyon yüzeyinde sunmak.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Slot inventory</span>
+            <span class="page-tag">Token presence</span>
+            <span class="page-tag">Tracked session visibility</span>
+            @if (_isOperator)
+            {
+                <span class="page-tag">Direct slot actions</span>
+            }
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Primary usage</div>
+            <div class="hero-panel-value">Inspect + act</div>
+            <div class="hero-panel-copy">Load device slots, verify token presence, then open sessions or close stale slot sessions without leaving the view.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Operator model</div>
+            <div class="hero-panel-value">Guided controls</div>
+            <div class="hero-panel-copy">High-impact slot actions stay explicit and grouped next to the slot inventory so the page feels operational, not accidental.</div>
+        </div>
+    </div>
+</section>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
     <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
 }
 
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-lg-4">
             <label class="form-label">Device</label>
@@ -45,41 +71,41 @@
 {
     <div class="row g-3 mb-4">
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Loaded slots</div>
-                    <div class="display-6">@_slots.Count</div>
+                    <div class="metric-label">Loaded slots</div>
+                    <div class="display-6 metric-meta">@_slots.Count</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Token present</div>
-                    <div class="display-6">@_slots.Count(slot => slot.TokenPresent)</div>
+                    <div class="metric-label">Token present</div>
+                    <div class="display-6 metric-meta">@_slots.Count(slot => slot.TokenPresent)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">No token</div>
-                    <div class="display-6">@_slots.Count(slot => !slot.TokenPresent)</div>
+                    <div class="metric-label">No token</div>
+                    <div class="display-6 metric-meta">@_slots.Count(slot => !slot.TokenPresent)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100">
+            <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="text-muted small">Tracked sessions</div>
-                    <div class="display-6">@CurrentDeviceSessions.Count</div>
-                    <div class="small text-muted">Selected device only</div>
+                    <div class="metric-label">Tracked sessions</div>
+                    <div class="display-6 metric-meta">@CurrentDeviceSessions.Count</div>
+                    <div class="small metric-note">Selected device only</div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="card shadow-sm mb-4">
+    <div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
         <div class="card-body row g-3 align-items-end">
             <div class="col-lg-5">
                 <label class="form-label">Search</label>
@@ -107,13 +133,11 @@
 
     @if (FilteredSlots.Count == 0)
     {
-        <div class="card shadow-sm mb-4">
-            <div class="card-body text-muted">No slots matched the current filters.</div>
-        </div>
+        <div class="empty-state mb-4">No slots matched the current filters.</div>
     }
     else
     {
-        <div class="table-responsive">
+        <div class="table-responsive table-shell">
             <table class="table table-striped align-middle">
                 <thead>
                     <tr>
@@ -130,8 +154,8 @@
                     {
                         <tr>
                             <td>
-                                <div class="fw-semibold">@slot.SlotId</div>
-                                <div class="small text-muted">@slot.SlotManufacturer</div>
+                                <div><span class="table-pill table-pill-code">@slot.SlotId</span></div>
+                                <div class="small text-muted mt-1">@slot.SlotManufacturer</div>
                             </td>
                             <td>@slot.SlotDescription</td>
                             <td>
@@ -150,7 +174,7 @@
                                 <div>@slot.SlotFlags</div>
                                 <div class="small text-muted">@slot.TokenFlags</div>
                             </td>
-                            <td>@slot.MechanismCount</td>
+                            <td><span class="table-pill">@slot.MechanismCount mechanism(s)</span></td>
                             <td class="text-end">
                                 <div class="btn-group btn-group-sm">
                                     <button class="btn btn-outline-primary" @onclick="() => OpenSessionAsync(slot, false)" disabled="@(!_isOperator)">Open RO</button>
@@ -168,8 +192,12 @@
 
 @if (CurrentDeviceSessions.Count != 0)
 {
-    <h2 class="h4 mt-4">Tracked Sessions for Selected Device</h2>
-    <div class="table-responsive">
+    <div class="card shadow-sm feature-card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Tracked Sessions for Selected Device</span>
+            <span class="small text-muted">@CurrentDeviceSessions.Count tracked session(s)</span>
+        </div>
+        <div class="table-responsive table-shell">
         <table class="table table-sm table-bordered align-middle">
             <thead>
                 <tr>
@@ -186,9 +214,9 @@
                 @foreach (AdminSessionSnapshot session in CurrentDeviceSessions.OrderByDescending(session => session.LastTouchedUtc))
                 {
                     <tr>
-                        <td><code>@session.SessionId</code></td>
-                        <td>@session.SlotId</td>
-                        <td>@(session.IsReadWrite ? "RW" : "RO")</td>
+                        <td><span class="table-pill table-pill-code">@session.SessionId</span></td>
+                        <td><span class="table-pill table-pill-code">@session.SlotId</span></td>
+                        <td><span class="table-pill">@(session.IsReadWrite ? "RW" : "RO")</span></td>
                         <td>@session.State</td>
                         <td><span class="badge @(session.IsHealthy ? "text-bg-success" : "text-bg-danger")">@session.HealthLabel</span></td>
                         <td>@session.LastOperation</td>
@@ -197,6 +225,7 @@
                 }
             </tbody>
         </table>
+        </div>
     </div>
 }
 
