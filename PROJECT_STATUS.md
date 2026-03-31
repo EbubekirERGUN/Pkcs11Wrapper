@@ -1,6 +1,9 @@
 # PROJECT_STATUS
 
 ## Tamamlananlar
+- README İngilizce/Türkçe dosyaları GitHub vitrini odaklı olarak yeniden düzenlendi; badge'ler, feature highlights, quick start, architecture diyagramı, docs map ve roadmap snapshot eklendi.
+- GitHub topluluk/sağlık dosyaları eklendi: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue template'leri ve PR template.
+- Repository settings tarafında uygulanmak üzere `docs/github-showcase.md` oluşturuldu.
 - Faz 1.1, 1.2, 1.3, 1.4 daha önce tamamlandı.
 - Faz 1.5 kapsamında mechanism matrix genişletildi.
 - AES-CTR ve AES-CBC-PAD için yeni SoftHSM regression testleri eklendi.

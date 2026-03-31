@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest a wrapper, validation, or admin panel improvement.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Core wrapper
+        - PKCS#11 v3 support
+        - Windows/Linux validation
+        - Vendor regression
+        - Admin panel
+        - Documentation / onboarding
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
