@@ -1,0 +1,361 @@
+@page "/users"
+@using Pkcs11Wrapper.Admin.Web.Security
+@attribute [Authorize(Policy = AdminRoles.Admin)]
+@inject LocalAdminSecurityService Security
+
+<PageTitle>Users</PageTitle>
+
+<h1>Local Users</h1>
+<p class="text-muted">Manage local admin-panel users, rotate passwords, and retire the bootstrap credential notice after initial setup is complete.</p>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+}
+
+@if (_snapshot is null)
+{
+    <div class="text-muted">Loading...</div>
+}
+else
+{
+    @if (_snapshot.BootstrapStatus.NoticeExists)
+    {
+        <div class="alert alert-warning">
+            <div class="fw-semibold">Bootstrap credential notice is still present</div>
+            <div class="small">Path: <code>@_snapshot.BootstrapStatus.NoticePath</code></div>
+            @if (_snapshot.BootstrapStatus.UserName is not null)
+            {
+                <div class="small">User: <code>@_snapshot.BootstrapStatus.UserName</code></div>
+            }
+            @if (_snapshot.BootstrapStatus.LastModifiedUtc is DateTimeOffset modifiedUtc)
+            {
+                <div class="small">Updated: @modifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+            }
+            <div class="small mt-2">Rotate the bootstrap credential to a password you control, then retire this plaintext notice file.</div>
+            <button class="btn btn-sm btn-outline-danger mt-3" @onclick="RetireBootstrapNoticeAsync">Retire bootstrap notice</button>
+        </div>
+    }
+
+    <div class="row g-4">
+        <div class="col-xl-5">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header">Create local user</div>
+                <div class="card-body row g-3">
+                    <div class="col-12">
+                        <label class="form-label">Username</label>
+                        <input class="form-control" @bind="_createUserName" placeholder="operator1" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Initial password</label>
+                        <input class="form-control" type="password" @bind="_createPassword" />
+                        <div class="form-text">At least 12 characters.</div>
+                    </div>
+                    <div class="col-12">
+                        <div class="small text-muted mb-2">Roles</div>
+                        <div class="d-flex flex-wrap gap-3">
+                            <label class="form-check-label"><InputCheckbox class="form-check-input me-1" @bind-Value="_createViewer" /> Viewer</label>
+                            <label class="form-check-label"><InputCheckbox class="form-check-input me-1" @bind-Value="_createOperator" /> Operator</label>
+                            <label class="form-check-label"><InputCheckbox class="form-check-input me-1" @bind-Value="_createAdmin" /> Admin</label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-primary" @onclick="CreateUserAsync">Create user</button>
+                    </div>
+                </div>
+            </div>
+
+            @if (_selectedUser is not null)
+            {
+                <div class="card shadow-sm">
+                    <div class="card-header">Manage user: @_selectedUser.UserName</div>
+                    <div class="card-body row g-3">
+                        <div class="col-12 small text-muted">
+                            Created: @_selectedUser.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                            @if (_selectedUser.IsCurrentUser)
+                            {
+                                <span class="badge text-bg-info ms-2">Current session</span>
+                            }
+                        </div>
+
+                        <div class="col-12">
+                            <div class="small text-muted mb-2">Roles</div>
+                            <div class="d-flex flex-wrap gap-3">
+                                <label class="form-check-label"><InputCheckbox class="form-check-input me-1" @bind-Value="_editViewer" disabled="@_selectedUser.IsCurrentUser" /> Viewer</label>
+                                <label class="form-check-label"><InputCheckbox class="form-check-input me-1" @bind-Value="_editOperator" disabled="@_selectedUser.IsCurrentUser" /> Operator</label>
+                                <label class="form-check-label"><InputCheckbox class="form-check-input me-1" @bind-Value="_editAdmin" disabled="@_selectedUser.IsCurrentUser" /> Admin</label>
+                            </div>
+                            @if (_selectedUser.IsCurrentUser)
+                            {
+                                <div class="form-text">For safety, current signed-in admin cannot change their own roles from this screen.</div>
+                            }
+                        </div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-outline-primary" @onclick="SaveRolesAsync" disabled="@_selectedUser.IsCurrentUser">Save roles</button>
+                        </div>
+
+                        <div class="col-12"><hr class="my-1" /></div>
+
+                        <div class="col-12">
+                            <label class="form-label">Rotate password</label>
+                            <input class="form-control" type="password" @bind="_rotatePassword" />
+                            <div class="form-text">Set a new password for this local user.</div>
+                        </div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-warning" @onclick="RotatePasswordAsync">Rotate password</button>
+                        </div>
+
+                        <div class="col-12"><hr class="my-1" /></div>
+
+                        <div class="col-12">
+                            <label class="form-label">Delete confirmation</label>
+                            <input class="form-control" @bind="_deleteConfirmation" placeholder="Type username to confirm" disabled="@_selectedUser.IsCurrentUser" />
+                            <div class="form-text">Type <code>@_selectedUser.UserName</code> to delete this user.</div>
+                        </div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-outline-danger" @onclick="DeleteUserAsync" disabled="@(_selectedUser.IsCurrentUser || !string.Equals(_deleteConfirmation, _selectedUser.UserName, StringComparison.Ordinal))">Delete user</button>
+                            @if (_selectedUser.IsCurrentUser)
+                            {
+                                <span class="small text-muted align-self-center">Current signed-in admin cannot delete their own account from this screen.</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="col-xl-7">
+            <div class="card shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Local user list</span>
+                    <span class="small text-muted">Current session: @_snapshot.CurrentUserName</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Roles</th>
+                                    <th>Created</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (LocalAdminUserSummary user in _snapshot.Users)
+                                {
+                                    <tr class="@(ReferenceEquals(user, _selectedUser) ? "table-active" : null)">
+                                        <td>
+                                            <div class="fw-semibold">@user.Username</div>
+                                            <div class="d-flex flex-wrap gap-1 mt-1">
+                                                @if (user.IsCurrentUser)
+                                                {
+                                                    <span class="badge text-bg-info">Current</span>
+                                                }
+                                                @if (user.IsBootstrapNoticeUser)
+                                                {
+                                                    <span class="badge text-bg-warning">Bootstrap notice</span>
+                                                }
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="d-flex flex-wrap gap-1">
+                                                @foreach (string role in user.Roles)
+                                                {
+                                                    <span class="badge text-bg-secondary">@role</span>
+                                                }
+                                            </div>
+                                        </td>
+                                        <td class="small text-muted">@user.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                                        <td class="text-end">
+                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => SelectUser(user)">Manage</button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private LocalAdminSecuritySnapshot? _snapshot;
+    private LocalAdminUserSummary? _selectedUser;
+    private string? _statusMessage;
+    private bool _statusIsError;
+
+    private string _createUserName = string.Empty;
+    private string _createPassword = string.Empty;
+    private bool _createViewer = true;
+    private bool _createOperator;
+    private bool _createAdmin;
+
+    private bool _editViewer;
+    private bool _editOperator;
+    private bool _editAdmin;
+    private string _rotatePassword = string.Empty;
+    private string _deleteConfirmation = string.Empty;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync(string? selectedUserName = null)
+    {
+        _snapshot = await Security.GetSnapshotAsync();
+        _selectedUser = selectedUserName is null
+            ? _selectedUser is null ? _snapshot.Users.FirstOrDefault() : _snapshot.Users.FirstOrDefault(user => string.Equals(user.Username, _selectedUser.Username, StringComparison.OrdinalIgnoreCase))
+            : _snapshot.Users.FirstOrDefault(user => string.Equals(user.Username, selectedUserName, StringComparison.OrdinalIgnoreCase));
+
+        if (_selectedUser is not null)
+        {
+            SyncSelectedUserState(_selectedUser);
+        }
+    }
+
+    private void SelectUser(LocalAdminUserSummary user)
+    {
+        _selectedUser = user;
+        SyncSelectedUserState(user);
+    }
+
+    private async Task CreateUserAsync()
+    {
+        try
+        {
+            string createdUserName = _createUserName;
+            await Security.CreateUserAsync(new CreateLocalAdminUserRequest
+            {
+                UserName = createdUserName,
+                Password = _createPassword,
+                Roles = GetRoles(_createViewer, _createOperator, _createAdmin)
+            });
+
+            _createUserName = string.Empty;
+            _createPassword = string.Empty;
+            _createViewer = true;
+            _createOperator = false;
+            _createAdmin = false;
+            await ReloadAsync(createdUserName);
+            _statusMessage = "Local user created.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task SaveRolesAsync()
+    {
+        if (_selectedUser is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await Security.UpdateRolesAsync(new UpdateLocalAdminUserRolesRequest
+            {
+                UserName = _selectedUser.Username,
+                Roles = GetRoles(_editViewer, _editOperator, _editAdmin)
+            });
+
+            await ReloadAsync(_selectedUser.Username);
+            _statusMessage = "Roles updated.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task RotatePasswordAsync()
+    {
+        if (_selectedUser is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await Security.RotatePasswordAsync(new RotateLocalAdminPasswordRequest
+            {
+                UserName = _selectedUser.Username,
+                NewPassword = _rotatePassword
+            });
+
+            _rotatePassword = string.Empty;
+            await ReloadAsync(_selectedUser.Username);
+            _statusMessage = "Password rotated.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task DeleteUserAsync()
+    {
+        if (_selectedUser is null)
+        {
+            return;
+        }
+
+        try
+        {
+            string deletedUser = _selectedUser.Username;
+            await Security.DeleteUserAsync(deletedUser);
+            _deleteConfirmation = string.Empty;
+            await ReloadAsync();
+            _statusMessage = $"Deleted user '{deletedUser}'.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task RetireBootstrapNoticeAsync()
+    {
+        try
+        {
+            await Security.RetireBootstrapNoticeAsync();
+            await ReloadAsync(_selectedUser?.Username);
+            _statusMessage = "Bootstrap credential notice retired.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private void SyncSelectedUserState(LocalAdminUserSummary user)
+    {
+        HashSet<string> roles = user.Roles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _editViewer = roles.Contains(AdminRoles.Viewer);
+        _editOperator = roles.Contains(AdminRoles.Operator);
+        _editAdmin = roles.Contains(AdminRoles.Admin);
+        _rotatePassword = string.Empty;
+        _deleteConfirmation = string.Empty;
+    }
+
+    private static List<string> GetRoles(bool viewer, bool @operator, bool admin)
+    {
+        List<string> roles = [];
+        if (viewer) roles.Add(AdminRoles.Viewer);
+        if (@operator) roles.Add(AdminRoles.Operator);
+        if (admin) roles.Add(AdminRoles.Admin);
+        return roles;
+    }
+}

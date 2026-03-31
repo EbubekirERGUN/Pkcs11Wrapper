@@ -1,86 +1,324 @@
-using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.Admin.Application.Models;
 using Pkcs11Wrapper.Admin.Infrastructure;
 
 namespace Pkcs11Wrapper.Admin.Web.Security;
 
-public sealed class LocalAdminUserStore(AdminStorageOptions options)
+public sealed class LocalAdminUserStore(IOptions<AdminStorageOptions> options)
 {
-    private readonly SemaphoreSlim _mutex = new(1, 1);
-    private readonly PasswordHasher<AdminWebUserRecord> _hasher = new();
+    private readonly PasswordHasher<AdminWebUserRecord> _passwordHasher = new();
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public async Task<AdminWebUserRecord?> ValidateCredentialsAsync(string username, string password)
+    public async Task<(bool Success, AdminWebUserRecord? User)> ValidateCredentialsAsync(string? userName, string? password, CancellationToken cancellationToken = default)
     {
-        await _mutex.WaitAsync();
+        string normalizedUserName = NormalizeUserName(userName);
+        string providedPassword = password ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedUserName) || string.IsNullOrEmpty(providedPassword))
+        {
+            return (false, null);
+        }
+
+        await EnsureSeedDataAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
         try
         {
-            AdminWebUserRecord? user = (await ReadAllCoreAsync()).FirstOrDefault(x => string.Equals(x.Username, username, StringComparison.OrdinalIgnoreCase));
-            if (user is null)
+            List<AdminWebUserRecord> users = await ReadUsersUnsafeAsync(cancellationToken);
+            int index = users.FindIndex(record => string.Equals(record.UserName, normalizedUserName, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
             {
-                return null;
+                return (false, null);
             }
 
-            PasswordVerificationResult result = _hasher.VerifyHashedPassword(user, user.PasswordHash, password);
-            return result == PasswordVerificationResult.Failed ? null : user;
+            AdminWebUserRecord user = users[index];
+            PasswordVerificationResult verification = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, providedPassword);
+            if (verification == PasswordVerificationResult.Failed)
+            {
+                return (false, null);
+            }
+
+            if (verification == PasswordVerificationResult.SuccessRehashNeeded)
+            {
+                AdminWebUserRecord updated = user with { PasswordHash = _passwordHasher.HashPassword(user, providedPassword) };
+                users[index] = updated;
+                await SaveUsersUnsafeAsync(users, cancellationToken);
+                user = updated;
+            }
+
+            return (true, Clone(user));
         }
         finally
         {
-            _mutex.Release();
+            _gate.Release();
         }
     }
 
-    public async Task EnsureSeedDataAsync()
+    public async Task<IReadOnlyList<AdminWebUserRecord>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        await _mutex.WaitAsync();
+        await EnsureSeedDataAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
         try
         {
-            List<AdminWebUserRecord> users = await ReadAllCoreAsync();
-            if (users.Count != 0)
+            return (await ReadUsersUnsafeAsync(cancellationToken)).Select(Clone).ToArray();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<BootstrapCredentialStatus> GetBootstrapStatusAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureSeedDataAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            FileInfo file = new(BootstrapNoticePath);
+            if (!file.Exists)
+            {
+                return new(false, BootstrapNoticePath, null, null);
+            }
+
+            string? userName = await TryReadBootstrapUserNameUnsafeAsync(cancellationToken);
+            return new(true, BootstrapNoticePath, file.LastWriteTimeUtc, userName);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<AdminWebUserRecord> CreateUserAsync(string userName, string password, IReadOnlyList<string> roles, CancellationToken cancellationToken = default)
+    {
+        await EnsureSeedDataAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            List<AdminWebUserRecord> users = await ReadUsersUnsafeAsync(cancellationToken);
+            string normalizedUserName = NormalizeUserName(userName);
+            if (users.Any(record => string.Equals(record.UserName, normalizedUserName, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Local admin user '{normalizedUserName}' already exists.");
+            }
+
+            string[] normalizedRoles = NormalizeRoles(roles);
+            AdminWebUserRecord created = new(
+                normalizedUserName,
+                string.Empty,
+                normalizedRoles,
+                DateTimeOffset.UtcNow);
+            created = created with { PasswordHash = _passwordHasher.HashPassword(created, password) };
+            users.Add(created);
+            await SaveUsersUnsafeAsync(users, cancellationToken);
+            return Clone(created);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<AdminWebUserRecord> UpdateRolesAsync(string userName, IReadOnlyList<string> roles, CancellationToken cancellationToken = default)
+    {
+        await EnsureSeedDataAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            List<AdminWebUserRecord> users = await ReadUsersUnsafeAsync(cancellationToken);
+            int index = FindUserIndex(users, userName);
+            string[] normalizedRoles = NormalizeRoles(roles);
+            users[index] = users[index] with { Roles = normalizedRoles };
+            EnsureAtLeastOneAdmin(users);
+            await SaveUsersUnsafeAsync(users, cancellationToken);
+            return Clone(users[index]);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<AdminWebUserRecord> RotatePasswordAsync(string userName, string password, CancellationToken cancellationToken = default)
+    {
+        await EnsureSeedDataAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            List<AdminWebUserRecord> users = await ReadUsersUnsafeAsync(cancellationToken);
+            int index = FindUserIndex(users, userName);
+            AdminWebUserRecord current = users[index];
+            users[index] = current with { PasswordHash = _passwordHasher.HashPassword(current, password) };
+            await SaveUsersUnsafeAsync(users, cancellationToken);
+            return Clone(users[index]);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task DeleteUserAsync(string userName, CancellationToken cancellationToken = default)
+    {
+        await EnsureSeedDataAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            List<AdminWebUserRecord> users = await ReadUsersUnsafeAsync(cancellationToken);
+            int index = FindUserIndex(users, userName);
+            users.RemoveAt(index);
+            EnsureAtLeastOneAdmin(users);
+            await SaveUsersUnsafeAsync(users, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task RetireBootstrapNoticeAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureSeedDataAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (File.Exists(BootstrapNoticePath))
+            {
+                File.Delete(BootstrapNoticePath);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task EnsureSeedDataAsync(CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(StorageRoot);
+        if (File.Exists(UserFilePath))
+        {
+            return;
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (File.Exists(UserFilePath))
             {
                 return;
             }
 
-            string bootstrapPassword = Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
+            string password = GenerateBootstrapPassword();
+            DateTimeOffset createdUtc = DateTimeOffset.UtcNow;
             AdminWebUserRecord admin = new(
                 "admin",
                 string.Empty,
-                [AdminRoles.Admin],
-                DateTimeOffset.UtcNow);
+                [AdminRoles.Admin, AdminRoles.Operator, AdminRoles.Viewer],
+                createdUtc);
+            admin = admin with { PasswordHash = _passwordHasher.HashPassword(admin, password) };
 
-            admin = admin with { PasswordHash = _hasher.HashPassword(admin, bootstrapPassword) };
-            users.Add(admin);
-            await WriteAllCoreAsync(users);
+            await SaveUsersUnsafeAsync([admin], cancellationToken);
+            string bootstrap = $"""
+Pkcs11Wrapper Admin bootstrap credential
+======================================
+username: admin
+password: {password}
+generated_utc: {createdUtc:O}
 
-            string noticePath = Path.Combine(options.DataRoot, "bootstrap-admin.txt");
-            await File.WriteAllTextAsync(noticePath, $"Initial admin credentials\nusername=admin\npassword={bootstrapPassword}\nRotate this file and create a new admin credential before broader exposure.\n");
+Rotate this password after first sign-in and then retire this file.
+""";
+            await File.WriteAllTextAsync(BootstrapNoticePath, bootstrap, Encoding.UTF8, cancellationToken);
         }
         finally
         {
-            _mutex.Release();
+            _gate.Release();
         }
     }
 
-    private async Task<List<AdminWebUserRecord>> ReadAllCoreAsync()
+    private async Task<List<AdminWebUserRecord>> ReadUsersUnsafeAsync(CancellationToken cancellationToken)
     {
-        string path = GetPath();
-        if (!File.Exists(path))
+        if (!File.Exists(UserFilePath))
         {
             return [];
         }
 
-        await using FileStream stream = File.OpenRead(path);
-        return await JsonSerializer.DeserializeAsync(stream, AdminWebJsonContext.Default.ListAdminWebUserRecord) ?? [];
+        await using FileStream stream = File.OpenRead(UserFilePath);
+        AdminWebUserRecord[]? users = await JsonSerializer.DeserializeAsync(stream, AdminWebJsonContext.Default.AdminWebUserRecordArray, cancellationToken);
+        return users?.Select(Clone).ToList() ?? [];
     }
 
-    private async Task WriteAllCoreAsync(List<AdminWebUserRecord> users)
+    private async Task SaveUsersUnsafeAsync(IReadOnlyList<AdminWebUserRecord> users, CancellationToken cancellationToken)
     {
-        string path = GetPath();
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await using FileStream stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, users, AdminWebJsonContext.Default.ListAdminWebUserRecord);
+        Directory.CreateDirectory(StorageRoot);
+        await using FileStream stream = File.Create(UserFilePath);
+        await JsonSerializer.SerializeAsync(stream, users.Select(Clone).ToArray(), AdminWebJsonContext.Default.AdminWebUserRecordArray, cancellationToken);
+        await stream.FlushAsync(cancellationToken);
     }
 
-    private string GetPath() => Path.Combine(options.DataRoot, "admin-users.json");
+    private async Task<string?> TryReadBootstrapUserNameUnsafeAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(BootstrapNoticePath))
+        {
+            return null;
+        }
+
+        string[] lines = await File.ReadAllLinesAsync(BootstrapNoticePath, cancellationToken);
+        foreach (string line in lines)
+        {
+            if (line.StartsWith("username:", StringComparison.OrdinalIgnoreCase))
+            {
+                return line["username:".Length..].Trim();
+            }
+        }
+
+        return "admin";
+    }
+
+    private static int FindUserIndex(List<AdminWebUserRecord> users, string userName)
+    {
+        string normalizedUserName = NormalizeUserName(userName);
+        int index = users.FindIndex(record => string.Equals(record.UserName, normalizedUserName, StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+        {
+            throw new InvalidOperationException($"Local admin user '{normalizedUserName}' was not found.");
+        }
+
+        return index;
+    }
+
+    private static void EnsureAtLeastOneAdmin(IEnumerable<AdminWebUserRecord> users)
+    {
+        if (!users.Any(record => record.Roles.Contains(AdminRoles.Admin, StringComparer.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("At least one local admin user must retain the admin role.");
+        }
+    }
+
+    private static string NormalizeUserName(string? value)
+        => value?.Trim() ?? string.Empty;
+
+    private static string[] NormalizeRoles(IEnumerable<string> roles)
+        => roles
+            .Select(role => role.Trim().ToLowerInvariant())
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(static role => role, StringComparer.Ordinal)
+            .ToArray();
+
+    private static AdminWebUserRecord Clone(AdminWebUserRecord record)
+        => record with { Roles = [.. record.Roles] };
+
+    private string StorageRoot => options.Value.RootPath;
+
+    private string UserFilePath => Path.Combine(StorageRoot, "admin-users.json");
+
+    private string BootstrapNoticePath => Path.Combine(StorageRoot, "bootstrap-admin.txt");
+
+    private static string GenerateBootstrapPassword()
+        => Convert.ToBase64String(Guid.NewGuid().ToByteArray())
+            .Replace("/", "A", StringComparison.Ordinal)
+            .Replace("+", "B", StringComparison.Ordinal)
+            .Replace("=", "9", StringComparison.Ordinal);
 }

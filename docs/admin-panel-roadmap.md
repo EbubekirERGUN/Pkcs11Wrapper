@@ -79,6 +79,7 @@ Goals:
 - role-based authorization (viewer/operator/admin) ✅
 - immutable audit enhancements ✅
 - configuration export/import ✅
+- bootstrap credential rotation + local user management ✅
 
 Delivered in current slice:
 - local cookie-backed authentication with a bootstrap admin credential seeded into `App_Data/bootstrap-admin.txt` on first run, plus role claims for `viewer` / `operator` / `admin`
@@ -87,11 +88,13 @@ Delivered in current slice:
 - Data Protection-backed protected PIN cache for the current app shape, with opt-in remember toggles on slot/key/session workflows and encrypted-at-rest storage under `App_Data`
 - tamper-evident audit chaining via sequence number + previous hash + entry hash, plus actor roles/auth/request metadata and integrity verification surfaced in the audit page
 - admin-only configuration transfer slice: export endpoint + configuration page, JSON bundle format, merge/replace-all import modes, audit coverage, and explicit exclusion of local secrets/users/audit history/Data Protection keys from the transferable bundle
+- admin-only user/security management slice: local Users page, bootstrap notice visibility + retirement, local user creation, password rotation, role updates, self-protection rules, and audit coverage for user-management events
 
 Current boundaries:
 - this is a strong local-host hardening step, not a full multi-user identity system; credentials remain local-file-backed and should be rotated before broader/shared deployment
 - protected PIN storage relies on local ASP.NET Core Data Protection keys on the same host; that is appropriate for the current embedded app shape but not equivalent to an external HSM/KMS-backed secret vault
 - configuration transfer currently covers device profiles only; admin users, bootstrap credentials, audit history, protected PIN cache, and Data Protection keys intentionally stay local to the host
+- local user management currently targets a single-host embedded admin deployment; it is not yet a substitute for external IdP/IAM, MFA, or centralized audit/secret governance
 
 ## Phase E - UX / product polish
 

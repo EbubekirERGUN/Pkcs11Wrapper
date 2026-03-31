@@ -33,10 +33,11 @@
 - PKCS#11 Lab beşinci dalgası teslim edildi: AES-CBC / AES-CTR / AES-GCM için parameter editor'ün ilk dilimi eklendi; crypto lab operasyonlarında IV/counter/AAD/tag alanları kullanılabiliyor. Read Attribute operasyonu multi-attribute/code-list batch desteği kazandı ve Keys/Lab preset mekanizma kodları wrapper sabitleriyle hizalandı.
 - PKCS#11 Lab altıncı dalgası teslim edildi: RSA OAEP / RSA PSS parameter editor desteği eklendi; crypto lab operasyonlarında hash profile, OAEP source-data ve PSS salt-length alanları kullanılabiliyor. Ayrıca Keys ekranından RSA key/object detail üzerinden OAEP encrypt/decrypt ve PSS sign/verify preset'leri Lab'a query-bound şekilde taşınabiliyor.
 - PKCS#11 Lab yedinci dalgası teslim edildi: Lab içine scenario history/recorder katmanı eklendi; başarılı run'lar yeniden yüklenebiliyor ve sign→verify, encrypt→decrypt, wrap→unwrap ile created-handle inspect akışları tek tıkla hazırlanabiliyor. Ayrıca Read Attribute için named attribute/code-set preset library eklendi.
+- Admin panel Phase D kullanıcı/credential management dilimi teslim edildi: admin-only Users sayfası, local user creation, password rotation, role updates, self-delete/self-role-change korumaları, bootstrap credential notice görünürlüğü + retire akışı ve audit coverage eklendi.
 - Admin panel uygulama katmanı için yeni doğrulama testleri eklendi; çözüm testleri ve hedefli admin web build doğrulaması temiz geçti.
 
 ## Şu an üzerinde çalışılan
-- PKCS#11 Lab yedinci dalgası da tamamlandı; güvenlik/ops tarafında kalan iş bootstrap credential rotation UX'i, local user-management/maintenance akışı ve auth/ops dokümantasyonunun biraz daha ürünleştirilmesi.
+- Phase D'nin kullanıcı/credential management dilimi de tamamlandı; güvenlik/ops tarafında kalan iş auth/ops dokümantasyonunun biraz daha ürünleştirilmesi ve istenirse maintenance/CLI recovery akışının ayrıca tanımlanması.
 
 ## Sıradaki işler
 - Bootstrap admin credential rotation / local user management UX'ini panel içine almak veya en azından kontrollü bir CLI/maintenance akışı tanımlamak.
@@ -52,4 +53,4 @@
 
 ## Commit / push durumu
 - `v0.1.0` release GitHub'da yayınlandı.
-- Admin panel PKCS#11 Lab yedinci dalga slice'ı yerelde değişiklik olarak duruyor; henüz commit/push yapılmadı.
+- Phase D kullanıcı/credential management slice'ı ve önceki Lab ilerlemeleri yerelde değişiklik olarak duruyor; henüz commit/push yapılmadı.
