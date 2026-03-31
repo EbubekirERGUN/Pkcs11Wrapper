@@ -8,6 +8,15 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 {
     private const string DestroyConfirmationPrefix = "DESTROY ";
 
+    private static readonly (Pkcs11MechanismType Type, string Name)[] KeyMechanisms =
+    [
+        (Pkcs11MechanismTypes.AesKeyGen, "CKM_AES_KEY_GEN"),
+        (Pkcs11MechanismTypes.RsaPkcsKeyPairGen, "CKM_RSA_PKCS_KEY_PAIR_GEN"),
+        (Pkcs11MechanismTypes.AesCbc, "CKM_AES_CBC"),
+        (Pkcs11MechanismTypes.AesKeyWrapPad, "CKM_AES_KEY_WRAP_PAD"),
+        (Pkcs11MechanismTypes.RsaPkcs, "CKM_RSA_PKCS")
+    ];
+
     private static readonly AttributeDescriptor[] DetailAttributes =
     [
         new("Label", Pkcs11AttributeTypes.Label, AttributeValueKind.Utf8),
@@ -156,6 +165,89 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return detail;
     }
 
+    public async Task<KeyManagementSlotCapabilities> GetKeyManagementCapabilitiesAsync(Guid deviceId, nuint slotIdValue, CancellationToken cancellationToken = default)
+    {
+        HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
+        using Pkcs11Module module = CreateInitializedModule(device);
+
+        bool tokenPresent = module.TryGetTokenInfo(new Pkcs11SlotId(slotIdValue), out _);
+        List<string> warnings = [];
+        if (!tokenPresent)
+        {
+            warnings.Add("No token is present in the selected slot, so key-management operations are unavailable.");
+        }
+
+        List<SlotMechanismSupport> mechanisms = [];
+        HashSet<nuint> available = [];
+
+        try
+        {
+            int mechanismCount = module.GetMechanismCount(new Pkcs11SlotId(slotIdValue));
+            if (mechanismCount > 0)
+            {
+                Pkcs11MechanismType[] buffer = new Pkcs11MechanismType[mechanismCount];
+                if (module.TryGetMechanisms(new Pkcs11SlotId(slotIdValue), buffer, out int written))
+                {
+                    for (int i = 0; i < written; i++)
+                    {
+                        available.Add(buffer[i].Value);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"Could not read mechanism list for the slot: {ex.Message}");
+        }
+
+        foreach ((Pkcs11MechanismType type, string name) in KeyMechanisms)
+        {
+            bool present = available.Contains(type.Value);
+            Pkcs11MechanismFlags flags = 0;
+            if (present)
+            {
+                try
+                {
+                    flags = module.GetMechanismInfo(new Pkcs11SlotId(slotIdValue), type).Flags;
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"Could not read {name} info: {ex.Message}");
+                }
+            }
+
+            mechanisms.Add(new SlotMechanismSupport(
+                name,
+                $"0x{type.Value:x}",
+                present,
+                present && flags.HasFlag(Pkcs11MechanismFlags.Generate),
+                present && flags.HasFlag(Pkcs11MechanismFlags.GenerateKeyPair),
+                present && flags.HasFlag(Pkcs11MechanismFlags.Encrypt),
+                present && flags.HasFlag(Pkcs11MechanismFlags.Decrypt),
+                present && flags.HasFlag(Pkcs11MechanismFlags.Sign),
+                present && flags.HasFlag(Pkcs11MechanismFlags.Verify),
+                present && flags.HasFlag(Pkcs11MechanismFlags.Wrap),
+                present && flags.HasFlag(Pkcs11MechanismFlags.Unwrap),
+                present ? flags.ToString() : "Not exposed by slot"));
+        }
+
+        bool supportsAesGen = mechanisms.Any(x => x.Name == "CKM_AES_KEY_GEN" && x.SupportsGenerate);
+        bool supportsRsaGen = mechanisms.Any(x => x.Name == "CKM_RSA_PKCS_KEY_PAIR_GEN" && x.SupportsGenerateKeyPair);
+        bool supportsCreateObject = tokenPresent;
+
+        if (!supportsAesGen)
+        {
+            warnings.Add("AES generate is gated because CKM_AES_KEY_GEN with generate support is not exposed by the selected slot.");
+        }
+
+        if (!supportsRsaGen)
+        {
+            warnings.Add("RSA key-pair generate is gated because CKM_RSA_PKCS_KEY_PAIR_GEN with generate-key-pair support is not exposed by the selected slot.");
+        }
+
+        return new KeyManagementSlotCapabilities(deviceId, slotIdValue, tokenPresent, supportsAesGen, supportsRsaGen, supportsCreateObject, warnings, mechanisms);
+    }
+
     public async Task<KeyManagementResult> GenerateAesKeyAsync(Guid deviceId, nuint slotIdValue, GenerateAesKeyRequest request, string userPin, CancellationToken cancellationToken = default)
     {
         ValidateGenerateAesKeyRequest(request);
@@ -287,6 +379,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
         module.CloseAllSessions(new Pkcs11SlotId(slotIdValue));
+        sessionRegistry.MarkInvalidatedForSlot(deviceId, slotIdValue, "Invalidated by CloseAllSessions on the same slot.", "CloseAllSessions");
         await auditLog.WriteAsync("Session", "CloseAll", $"{device.Name}/slot-{slotIdValue}", "Success", "Invoked CloseAllSessions on slot.", cancellationToken: cancellationToken);
     }
 
@@ -318,6 +411,23 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         string summary = $"Updated editable attributes for handle {request.Handle} ({request.Label.Trim()}).";
         await auditLog.WriteAsync("Key", "UpdateAttributes", $"{device.Name}/slot-{slotIdValue}/handle-{request.Handle}", "Success", summary, cancellationToken: cancellationToken);
         return new KeyManagementResult("UpdateObjectAttributes", summary, [request.Handle], request.Label.Trim(), id.Length == 0 ? null : Convert.ToHexString(id));
+    }
+
+    public async Task<KeyManagementResult> CopyObjectAsync(Guid deviceId, nuint slotIdValue, CopyObjectRequest request, string userPin, CancellationToken cancellationToken = default)
+    {
+        ValidateCopyObjectRequest(request);
+
+        HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
+        using Pkcs11Module module = CreateInitializedModule(device);
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
+        RequireUserPin(userPin, "copy objects");
+        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+
+        byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+        Pkcs11ObjectHandle copied = session.CopyObject(new Pkcs11ObjectHandle(request.SourceHandle), CreateCopyTemplate(request, id));
+        string summary = $"Copied handle {request.SourceHandle} to new handle {copied.Value} with label '{request.Label.Trim()}'.";
+        await auditLog.WriteAsync("Key", "CopyObject", $"{device.Name}/slot-{slotIdValue}/handle-{copied.Value}", "Success", summary, cancellationToken: cancellationToken);
+        return new KeyManagementResult("CopyObject", summary, [copied.Value], request.Label.Trim(), id.Length == 0 ? null : Convert.ToHexString(id));
     }
 
     public static void ValidateGenerateAesKeyRequest(GenerateAesKeyRequest request)
@@ -411,6 +521,22 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         _ = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
     }
 
+    public static void ValidateCopyObjectRequest(CopyObjectRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.SourceHandle == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Source handle is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Label))
+        {
+            throw new ArgumentException("Label is required.", nameof(request));
+        }
+
+        _ = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+    }
+
     public static void ValidateDestroyRequest(DestroyObjectRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -461,6 +587,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             }
         }
 
+        ObjectEditCapabilities editCapabilities = BuildEditCapabilities(session, handle);
+
         return new HsmObjectDetail(
             deviceId,
             slotIdValue,
@@ -486,7 +614,38 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             ReadNuintAttribute(session, handle, Pkcs11AttributeTypes.ModulusBits),
             ReadHexAttribute(session, handle, Pkcs11AttributeTypes.PublicExponent),
             ReadHexAttribute(session, handle, Pkcs11AttributeTypes.EcParams),
+            editCapabilities,
             attributes);
+    }
+
+    private static ObjectEditCapabilities BuildEditCapabilities(Pkcs11Session session, Pkcs11ObjectHandle handle)
+    {
+        bool modifiable = ReadBooleanAttribute(session, handle, Pkcs11AttributeTypes.Modifiable) == true;
+        nuint? objectClass = ReadNuintAttribute(session, handle, Pkcs11AttributeTypes.Class);
+        bool isSecretOrPrivate = objectClass is 0x00000003u or 0x00000004u;
+        bool isSecret = objectClass == 0x00000004u;
+        bool isPrivate = objectClass == 0x00000003u;
+        bool isPublic = objectClass == 0x00000002u;
+
+        List<string> warnings = [];
+        if (!modifiable)
+        {
+            warnings.Add("CKA_MODIFIABLE is not true/readable for this object, so token-side SetAttributeValue may reject edits.");
+        }
+
+        return new ObjectEditCapabilities(
+            modifiable,
+            modifiable,
+            modifiable && isSecretOrPrivate,
+            modifiable && isSecretOrPrivate,
+            modifiable && (isSecret || isPublic),
+            modifiable && (isSecret || isPrivate),
+            modifiable && isPrivate,
+            modifiable && isPublic,
+            modifiable && isSecret,
+            modifiable && isSecret,
+            modifiable && isPrivate,
+            warnings);
     }
 
     private static HsmObjectAttributeView? ReadAttributeView(Pkcs11Session session, Pkcs11ObjectHandle handle, AttributeDescriptor descriptor)
@@ -727,6 +886,27 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         {
             attributes.Add(Pkcs11ObjectAttribute.Boolean(type, value.Value));
         }
+    }
+
+    private static Pkcs11ObjectAttribute[] CreateCopyTemplate(CopyObjectRequest request, byte[] id)
+    {
+        List<Pkcs11ObjectAttribute> attributes =
+        [
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, Encoding.UTF8.GetBytes(request.Label.Trim())),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, id)
+        ];
+
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Token, request.Token);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Private, request.Private);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Extractable, request.Extractable);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Encrypt, request.AllowEncrypt);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Decrypt, request.AllowDecrypt);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Sign, request.AllowSign);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Verify, request.AllowVerify);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Wrap, request.AllowWrap);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Unwrap, request.AllowUnwrap);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Derive, request.AllowDerive);
+        return [.. attributes];
     }
 
     private static Pkcs11ObjectAttribute[] CreateRsaPublicTemplate(GenerateRsaKeyPairRequest request, byte[] label, byte[] id, byte[] exponent)

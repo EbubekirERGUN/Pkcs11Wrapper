@@ -28,6 +28,7 @@ public sealed class AdminSessionRegistry
         {
             tracked.LastOperation = operation;
             tracked.LastTouchedUtc = DateTimeOffset.UtcNow;
+            tracked.InvalidationReason = null;
             return true;
         }
 
@@ -77,11 +78,36 @@ public sealed class AdminSessionRegistry
         try
         {
             Pkcs11SessionInfo info = tracked.Session.GetInfo();
+            tracked.InvalidationReason = null;
             return tracked.ToSnapshot(info, true, tracked.Notes);
         }
         catch (Exception ex)
         {
+            tracked.InvalidationReason ??= ex.Message;
             return tracked.ToSnapshot(default, false, ex.Message);
+        }
+    }
+
+    public void MarkInvalidated(Guid sessionId, string reason, string operation)
+    {
+        if (_sessions.TryGetValue(sessionId, out TrackedSession? tracked))
+        {
+            tracked.LastOperation = operation;
+            tracked.LastTouchedUtc = DateTimeOffset.UtcNow;
+            tracked.InvalidationReason = reason;
+        }
+    }
+
+    public void MarkInvalidatedForSlot(Guid deviceId, nuint slotId, string reason, string operation)
+    {
+        foreach (TrackedSession tracked in _sessions.Values)
+        {
+            if (tracked.DeviceId == deviceId && tracked.Session.SlotId.Value == slotId)
+            {
+                tracked.LastOperation = operation;
+                tracked.LastTouchedUtc = DateTimeOffset.UtcNow;
+                tracked.InvalidationReason = reason;
+            }
         }
     }
 
@@ -115,6 +141,7 @@ public sealed class AdminSessionRegistry
         public DateTimeOffset LastTouchedUtc { get; set; } = lastTouchedUtc;
         public string LastOperation { get; set; } = lastOperation;
         public string Notes { get; } = notes;
+        public string? InvalidationReason { get; set; }
 
         public AdminSessionSnapshot ToSnapshot(Pkcs11SessionInfo info = default, bool isHealthy = true, string? notesOverride = null)
         {
@@ -123,7 +150,11 @@ public sealed class AdminSessionRegistry
             string state = isHealthy ? info.State.ToString() : "Unavailable";
             string flags = isHealthy ? info.Flags.ToString() : "Unavailable";
             nuint deviceError = isHealthy ? info.DeviceError : 0;
-            return new AdminSessionSnapshot(Id, DeviceId, DeviceName, Session.SlotId.Value, IsReadWrite, state, flags, deviceError, isUserAuthenticated, isSoAuthenticated, OpenedUtc, LastTouchedUtc, LastOperation, isHealthy, notesOverride ?? Notes);
+            string healthLabel = isHealthy ? "Healthy" : InvalidationReason is null ? "Broken" : "Invalidated";
+            bool canLogin = isHealthy && !isUserAuthenticated && !isSoAuthenticated;
+            bool canLogout = isHealthy && (isUserAuthenticated || isSoAuthenticated);
+            bool canCancel = isHealthy;
+            return new AdminSessionSnapshot(Id, DeviceId, DeviceName, Session.SlotId.Value, IsReadWrite, state, flags, deviceError, isUserAuthenticated, isSoAuthenticated, OpenedUtc, LastTouchedUtc, LastOperation, isHealthy, notesOverride ?? Notes, healthLabel, InvalidationReason, canLogin, canLogout, canCancel, true, true);
         }
 
         public ValueTask DisposeAsync()

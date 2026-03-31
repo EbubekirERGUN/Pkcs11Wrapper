@@ -27,4 +27,5 @@ public sealed record HsmObjectDetail(
     nuint? ModulusBits,
     string? PublicExponentHex,
     string? EcParametersHex,
+    ObjectEditCapabilities EditCapabilities,
     IReadOnlyList<HsmObjectAttributeView> Attributes);

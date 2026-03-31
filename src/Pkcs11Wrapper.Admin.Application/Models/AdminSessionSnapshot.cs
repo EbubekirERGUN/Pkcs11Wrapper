@@ -15,4 +15,11 @@ public sealed record AdminSessionSnapshot(
     DateTimeOffset LastTouchedUtc,
     string LastOperation,
     bool IsHealthy,
-    string? Notes);
+    string? Notes,
+    string HealthLabel,
+    string? InvalidationReason,
+    bool CanLogin,
+    bool CanLogout,
+    bool CanCancel,
+    bool CanCloseTracked,
+    bool CanCloseSlot);

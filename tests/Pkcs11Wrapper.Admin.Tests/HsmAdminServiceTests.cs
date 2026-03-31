@@ -93,4 +93,29 @@ public sealed class HsmAdminServiceTests
 
         Assert.Throws<ArgumentOutOfRangeException>(() => HsmAdminService.ValidateUpdateObjectAttributesRequest(request));
     }
+
+    [Fact]
+    public void ValidateCopyObjectRequestRejectsMissingSourceHandle()
+    {
+        CopyObjectRequest request = new()
+        {
+            SourceHandle = 0,
+            Label = "copy-of-key"
+        };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => HsmAdminService.ValidateCopyObjectRequest(request));
+    }
+
+    [Fact]
+    public void ValidateCopyObjectRequestRejectsMissingLabel()
+    {
+        CopyObjectRequest request = new()
+        {
+            SourceHandle = 77,
+            Label = "   "
+        };
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateCopyObjectRequest(request));
+        Assert.Contains("Label is required", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

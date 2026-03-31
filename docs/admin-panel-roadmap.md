@@ -52,8 +52,7 @@ Goals:
 
 Remaining for Phase B:
 - deeper mechanism-aware affordances (for example conditional wrap/unwrap presets per slot capabilities)
-- consider object copy/template-based flows if a real operator need appears
-- evaluate whether per-token editability hints should be surfaced before submit (today failures are handled cleanly after token enforcement)
+- consider fuller template libraries if operators need reusable multi-object provisioning recipes beyond one-off copy flows
 
 ## Phase C - Session operations
 
@@ -64,10 +63,11 @@ Delivered in current slice:
 - login/logout controls directly against the tracked session context
 - operation visibility improvements through last-operation, auth-state, and slot/session metadata
 - tracked-session `C_SessionCancel` control and slot-level `CloseAllSessions` trigger from the admin panel
+- explicit invalidated-session UX: tracked sessions now record/present invalidation reason after `CloseAllSessions` or broken lifecycle states, with control gating for stale sessions
+- grouped/filterable session table so high-volume tracked-session lists stay readable while healthy vs invalidated states remain obvious
 
 Remaining for Phase C:
-- optionally distinguish tracked session invalidated-by-slot-close state even more explicitly in UI
-- consider per-device/per-slot grouping and filters if session volume grows
+- optionally track more PKCS#11-specific invalidation categories if vendors surface richer error codes in session lifecycle failures
 
 ## Phase D - Security and ops hardening
 
@@ -88,3 +88,9 @@ Goals:
 - filtering/sorting/paging
 - release-ready docs and screenshots
 - optional API split if the web host needs to be decoupled later
+
+## Newly delivered slice summary
+
+- capability/mechanism-aware key-management UX: slot-level mechanism probing, pre-submit warnings, and disabled generate/import actions when the selected slot obviously cannot satisfy them
+- object edit affordances are now more object-aware: obvious unsupported toggles are disabled based on object class + `CKA_MODIFIABLE` visibility
+- object copy workflow delivered via `C_CopyObject`, including label/ID/capability override template fields and admin-layer validation

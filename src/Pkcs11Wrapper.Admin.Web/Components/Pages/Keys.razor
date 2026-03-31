@@ -4,7 +4,7 @@
 <PageTitle>Keys</PageTitle>
 
 <h1>Keys / Objects</h1>
-<p class="text-muted">Slot içindeki objeleri listele, üret/import akışlarını çalıştır, düzenlenebilir attribute’ları güncelle ve destroy işlemlerinde typed confirmation kullan.</p>
+<p class="text-muted">Slot içindeki objeleri listele, capability-aware üret/import akışlarını çalıştır, desteklenen attribute’ları düzenle, obje kopyala ve destroy işlemlerinde typed confirmation kullan.</p>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -25,7 +25,7 @@
         </div>
         <div class="col-lg-2">
             <label class="form-label">Slot</label>
-            <select class="form-select" @bind="_selectedSlotId">
+            <select class="form-select" @bind="_selectedSlotId" @bind:after="OnSelectedSlotChangedAsync">
                 <option value="">Select slot...</option>
                 @foreach (HsmSlotSummary slot in _slots)
                 {
@@ -48,11 +48,55 @@
     </div>
 </div>
 
+@if (_slotCapabilities is not null)
+{
+    <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Selected slot capability snapshot</span>
+            <span class="small text-muted">Slot @_slotCapabilities.SlotId</span>
+        </div>
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <span class="badge @( _slotCapabilities.TokenPresent ? "text-bg-success" : "text-bg-danger")">@(_slotCapabilities.TokenPresent ? "Token present" : "No token")</span>
+                <span class="badge @(_slotCapabilities.SupportsAesKeyGeneration ? "text-bg-success" : "text-bg-secondary")">AES generate</span>
+                <span class="badge @(_slotCapabilities.SupportsAesObjectImport ? "text-bg-success" : "text-bg-secondary")">AES import/create</span>
+                <span class="badge @(_slotCapabilities.SupportsRsaKeyPairGeneration ? "text-bg-success" : "text-bg-secondary")">RSA keypair generate</span>
+            </div>
+
+            @if (_slotCapabilities.Warnings.Count != 0)
+            {
+                <div class="alert alert-warning small">
+                    <ul class="mb-0 ps-3">
+                        @foreach (string warning in _slotCapabilities.Warnings)
+                        {
+                            <li>@warning</li>
+                        }
+                    </ul>
+                </div>
+            }
+
+            <div class="row g-3 small">
+                @foreach (SlotMechanismSupport mechanism in _slotCapabilities.Mechanisms)
+                {
+                    <div class="col-xl-4 col-md-6">
+                        <div class="border rounded p-2 h-100">
+                            <div class="fw-semibold">@mechanism.Name</div>
+                            <div class="text-muted"><code>@mechanism.TypeHex</code></div>
+                            <div class="mt-1">@(mechanism.Available ? mechanism.Summary : "Not exposed by slot")</div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
 <div class="row g-4 mb-4">
     <div class="col-xl-4">
         <div class="card shadow-sm h-100">
             <div class="card-header">Generate AES key</div>
             <div class="card-body row g-3">
+                @RenderOperationWarnings(GetAesWarnings())
                 <div class="col-md-6">
                     <label class="form-label">Label</label>
                     <input class="form-control" @bind="_aesRequest.Label" />
@@ -84,7 +128,7 @@
                     @CapabilityCheckbox(() => _aesRequest.Extractable, value => _aesRequest.Extractable = value, "Extractable")
                 </div>
                 <div class="col-12">
-                    <button class="btn btn-success" @onclick="GenerateAesAsync" disabled="@(!CanManageKeys)">Generate AES Key</button>
+                    <button class="btn btn-success" @onclick="GenerateAesAsync" disabled="@(!CanGenerateAes)">Generate AES Key</button>
                 </div>
             </div>
         </div>
@@ -94,6 +138,7 @@
         <div class="card shadow-sm h-100">
             <div class="card-header">Import AES key</div>
             <div class="card-body row g-3">
+                @RenderOperationWarnings(GetImportWarnings())
                 <div class="col-md-6">
                     <label class="form-label">Label</label>
                     <input class="form-control" @bind="_importAesRequest.Label" />
@@ -120,7 +165,7 @@
                     @CapabilityCheckbox(() => _importAesRequest.Extractable, value => _importAesRequest.Extractable = value, "Extractable")
                 </div>
                 <div class="col-12">
-                    <button class="btn btn-warning" @onclick="ImportAesAsync" disabled="@(!CanManageKeys)">Import AES Key</button>
+                    <button class="btn btn-warning" @onclick="ImportAesAsync" disabled="@(!CanImportAes)">Import AES Key</button>
                 </div>
             </div>
         </div>
@@ -130,6 +175,7 @@
         <div class="card shadow-sm h-100">
             <div class="card-header">Generate RSA key pair</div>
             <div class="card-body row g-3">
+                @RenderOperationWarnings(GetRsaWarnings())
                 <div class="col-md-6">
                     <label class="form-label">Label</label>
                     <input class="form-control" @bind="_rsaRequest.Label" />
@@ -163,7 +209,7 @@
                     @CapabilityCheckbox(() => _rsaRequest.Extractable, value => _rsaRequest.Extractable = value, "Extractable private key")
                 </div>
                 <div class="col-12">
-                    <button class="btn btn-success" @onclick="GenerateRsaAsync" disabled="@(!CanManageKeys)">Generate RSA Key Pair</button>
+                    <button class="btn btn-success" @onclick="GenerateRsaAsync" disabled="@(!CanGenerateRsa)">Generate RSA Key Pair</button>
                 </div>
             </div>
         </div>
@@ -205,6 +251,7 @@
                                     <div class="btn-group btn-group-sm">
                                         <button class="btn btn-outline-primary" @onclick="() => ShowDetailAsync(key)">Details</button>
                                         <button class="btn btn-outline-secondary" @onclick="() => BeginEdit(key)">Edit</button>
+                                        <button class="btn btn-outline-info" @onclick="() => BeginCopy(key)">Copy</button>
                                         <button class="btn btn-outline-danger" @onclick="() => BeginDestroy(key)">Destroy</button>
                                     </div>
                                 </td>
@@ -216,10 +263,10 @@
         </div>
 
         <div class="col-xl-5">
-            @if (_selectedDetail is null && _destroyTarget is null && _editRequest is null)
+            @if (_selectedDetail is null && _destroyTarget is null && _editRequest is null && _copyRequest is null)
             {
                 <div class="card shadow-sm">
-                    <div class="card-body text-muted">Bir obje seçip detaylarını, edit panelini veya destroy confirmation panelini aç.</div>
+                    <div class="card-body text-muted">Bir obje seçip detaylarını, edit/copy panelini veya destroy confirmation panelini aç.</div>
                 </div>
             }
 
@@ -230,6 +277,7 @@
                         <span>Object detail</span>
                         <div class="btn-group btn-group-sm">
                             <button class="btn btn-outline-secondary" @onclick="() => BeginEditFromDetail(_selectedDetail)">Edit attributes</button>
+                            <button class="btn btn-outline-info" @onclick="() => BeginCopyFromDetail(_selectedDetail)">Copy object</button>
                             <button class="btn btn-outline-secondary" @onclick="ClearDetail">Close</button>
                         </div>
                     </div>
@@ -245,6 +293,18 @@
                             <dt class="col-sm-4">Modulus Bits</dt><dd class="col-sm-8">@FormatNullable(_selectedDetail.ModulusBits)</dd>
                             <dt class="col-sm-4">Flags</dt><dd class="col-sm-8">@string.Join(", ", GetFlags(_selectedDetail))</dd>
                         </dl>
+
+                        @if (_selectedDetail.EditCapabilities.Warnings.Count != 0)
+                        {
+                            <div class="alert alert-warning small mt-3 mb-0">
+                                <ul class="mb-0 ps-3">
+                                    @foreach (string warning in _selectedDetail.EditCapabilities.Warnings)
+                                    {
+                                        <li>@warning</li>
+                                    }
+                                </ul>
+                            </div>
+                        }
 
                         <hr />
                         <h2 class="h6">Readable attributes</h2>
@@ -269,6 +329,7 @@
                         <button class="btn btn-sm btn-outline-secondary" @onclick="CancelEdit">Close</button>
                     </div>
                     <div class="card-body row g-3">
+                        @RenderOperationWarnings(GetEditWarnings())
                         <div class="col-md-6">
                             <label class="form-label">Handle</label>
                             <input class="form-control" value="@_editRequest.Handle" disabled />
@@ -286,25 +347,75 @@
                             <input class="form-control" @bind="_editRequest.IdHex" />
                         </div>
                         <div class="col-12">
-                            <div class="alert alert-warning small mb-0">Only attributes supported by both PKCS#11 and the token are updated. Typical safe targets: label, ID and selected capability booleans on modifiable objects.</div>
+                            <div class="alert alert-warning small mb-0">Only attributes supported by both PKCS#11 and the token are updated. Disabled toggles below are obviously unsupported for the selected object type or because the object is not modifiable.</div>
                         </div>
                         <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
-                            @NullableCheckbox(() => _editRequest.Token, value => _editRequest.Token = value, "Token")
-                            @NullableCheckbox(() => _editRequest.Private, value => _editRequest.Private = value, "Private")
-                            @NullableCheckbox(() => _editRequest.Extractable, value => _editRequest.Extractable = value, "Extractable")
+                            @NullableCheckbox(() => _editRequest.Token, value => _editRequest.Token = value, "Token", CanEdit(x => x.CanEditToken))
+                            @NullableCheckbox(() => _editRequest.Private, value => _editRequest.Private = value, "Private", CanEdit(x => x.CanEditPrivate))
+                            @NullableCheckbox(() => _editRequest.Extractable, value => _editRequest.Extractable = value, "Extractable", CanEdit(x => x.CanEditExtractable))
                         </div>
                         <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
-                            @NullableCheckbox(() => _editRequest.AllowEncrypt, value => _editRequest.AllowEncrypt = value, "Encrypt")
-                            @NullableCheckbox(() => _editRequest.AllowDecrypt, value => _editRequest.AllowDecrypt = value, "Decrypt")
-                            @NullableCheckbox(() => _editRequest.AllowSign, value => _editRequest.AllowSign = value, "Sign")
-                            @NullableCheckbox(() => _editRequest.AllowVerify, value => _editRequest.AllowVerify = value, "Verify")
-                            @NullableCheckbox(() => _editRequest.AllowWrap, value => _editRequest.AllowWrap = value, "Wrap")
-                            @NullableCheckbox(() => _editRequest.AllowUnwrap, value => _editRequest.AllowUnwrap = value, "Unwrap")
-                            @NullableCheckbox(() => _editRequest.AllowDerive, value => _editRequest.AllowDerive = value, "Derive")
+                            @NullableCheckbox(() => _editRequest.AllowEncrypt, value => _editRequest.AllowEncrypt = value, "Encrypt", CanEdit(x => x.CanEditEncrypt))
+                            @NullableCheckbox(() => _editRequest.AllowDecrypt, value => _editRequest.AllowDecrypt = value, "Decrypt", CanEdit(x => x.CanEditDecrypt))
+                            @NullableCheckbox(() => _editRequest.AllowSign, value => _editRequest.AllowSign = value, "Sign", CanEdit(x => x.CanEditSign))
+                            @NullableCheckbox(() => _editRequest.AllowVerify, value => _editRequest.AllowVerify = value, "Verify", CanEdit(x => x.CanEditVerify))
+                            @NullableCheckbox(() => _editRequest.AllowWrap, value => _editRequest.AllowWrap = value, "Wrap", CanEdit(x => x.CanEditWrap))
+                            @NullableCheckbox(() => _editRequest.AllowUnwrap, value => _editRequest.AllowUnwrap = value, "Unwrap", CanEdit(x => x.CanEditUnwrap))
+                            @NullableCheckbox(() => _editRequest.AllowDerive, value => _editRequest.AllowDerive = value, "Derive", CanEdit(x => x.CanEditDerive))
                         </div>
                         <div class="col-12 d-flex gap-2">
-                            <button class="btn btn-primary" @onclick="SaveEditAsync" disabled="@(!CanManageKeys)">Save changes</button>
+                            <button class="btn btn-primary" @onclick="SaveEditAsync" disabled="@(!CanSaveEdit)">Save changes</button>
                             <button class="btn btn-outline-secondary" @onclick="ResetEditBooleans">Reset toggles to keep existing</button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (_copyRequest is not null)
+            {
+                <div class="card border-info shadow-sm mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Copy object</span>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="CancelCopy">Close</button>
+                    </div>
+                    <div class="card-body row g-3">
+                        @RenderOperationWarnings(GetCopyWarnings())
+                        <div class="col-md-6">
+                            <label class="form-label">Source handle</label>
+                            <input class="form-control" value="@_copyRequest.SourceHandle" disabled />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Source label</label>
+                            <input class="form-control" value="@_copyRequest.SourceLabel" disabled />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">New Label</label>
+                            <input class="form-control" @bind="_copyRequest.Label" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">ID (hex)</label>
+                            <input class="form-control" @bind="_copyRequest.IdHex" />
+                        </div>
+                        <div class="col-12">
+                            <div class="alert alert-info small mb-0">This uses PKCS#11 <code>C_CopyObject</code>. The token still decides which attributes may be overridden during the copy.</div>
+                        </div>
+                        <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
+                            @NullableCheckbox(() => _copyRequest.Token, value => _copyRequest.Token = value, "Token", true)
+                            @NullableCheckbox(() => _copyRequest.Private, value => _copyRequest.Private = value, "Private", true)
+                            @NullableCheckbox(() => _copyRequest.Extractable, value => _copyRequest.Extractable = value, "Extractable", true)
+                        </div>
+                        <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
+                            @NullableCheckbox(() => _copyRequest.AllowEncrypt, value => _copyRequest.AllowEncrypt = value, "Encrypt", true)
+                            @NullableCheckbox(() => _copyRequest.AllowDecrypt, value => _copyRequest.AllowDecrypt = value, "Decrypt", true)
+                            @NullableCheckbox(() => _copyRequest.AllowSign, value => _copyRequest.AllowSign = value, "Sign", true)
+                            @NullableCheckbox(() => _copyRequest.AllowVerify, value => _copyRequest.AllowVerify = value, "Verify", true)
+                            @NullableCheckbox(() => _copyRequest.AllowWrap, value => _copyRequest.AllowWrap = value, "Wrap", true)
+                            @NullableCheckbox(() => _copyRequest.AllowUnwrap, value => _copyRequest.AllowUnwrap = value, "Unwrap", true)
+                            @NullableCheckbox(() => _copyRequest.AllowDerive, value => _copyRequest.AllowDerive = value, "Derive", true)
+                        </div>
+                        <div class="col-12 d-flex gap-2">
+                            <button class="btn btn-info" @onclick="CopyAsync" disabled="@(!CanCopyObject)">Copy object</button>
+                            <button class="btn btn-outline-secondary" @onclick="ResetCopyBooleans">Reset overrides</button>
                         </div>
                     </div>
                 </div>
@@ -355,6 +466,8 @@
     private HsmKeyObjectSummary? _destroyTarget;
     private DestroyObjectRequest _destroyRequest = new();
     private UpdateObjectAttributesRequest? _editRequest;
+    private CopyObjectRequest? _copyRequest;
+    private KeyManagementSlotCapabilities? _slotCapabilities;
     private GenerateAesKeyRequest _aesRequest = new() { Label = "aes-admin-" + Guid.NewGuid().ToString("N")[..10] };
     private ImportAesKeyRequest _importAesRequest = new() { Label = "aes-import-" + Guid.NewGuid().ToString("N")[..10] };
     private GenerateRsaKeyPairRequest _rsaRequest = new() { Label = "rsa-admin-" + Guid.NewGuid().ToString("N")[..10] };
@@ -363,6 +476,11 @@
 
     private bool CanLoadKeys => Guid.TryParse(_selectedDeviceId, out _) && nuint.TryParse(_selectedSlotId, out _);
     private bool CanManageKeys => CanLoadKeys && !string.IsNullOrWhiteSpace(_userPin);
+    private bool CanGenerateAes => CanManageKeys && _slotCapabilities?.SupportsAesKeyGeneration == true;
+    private bool CanImportAes => CanManageKeys && _slotCapabilities?.SupportsAesObjectImport == true;
+    private bool CanGenerateRsa => CanManageKeys && _slotCapabilities?.SupportsRsaKeyPairGeneration == true;
+    private bool CanSaveEdit => CanManageKeys && _editRequest is not null && (_selectedDetail?.EditCapabilities.CanEditAnyAttributes ?? true);
+    private bool CanCopyObject => CanManageKeys && _copyRequest is not null && _slotCapabilities?.TokenPresent == true;
     private string DestroyConfirmationText => _destroyTarget is null ? string.Empty : HsmAdminService.BuildDestroyConfirmationText(_destroyTarget.Handle, _destroyTarget.Label);
 
     protected override async Task OnInitializedAsync()
@@ -373,6 +491,7 @@
     }
 
     private async Task OnSelectedDeviceChangedAsync() => await ReloadSlotsAsync();
+    private async Task OnSelectedSlotChangedAsync() => await ReloadSlotCapabilitiesAsync();
 
     private async Task ReloadSlotsAsync()
     {
@@ -382,6 +501,9 @@
         _destroyTarget = null;
         _destroyRequest = new();
         _editRequest = null;
+        _copyRequest = null;
+        _slotCapabilities = null;
+
         if (!Guid.TryParse(_selectedDeviceId, out Guid deviceId))
         {
             _slots = [];
@@ -390,6 +512,25 @@
 
         _slots = await Admin.GetSlotsAsync(deviceId);
         _selectedSlotId = _slots.FirstOrDefault()?.SlotId.ToString();
+        await ReloadSlotCapabilitiesAsync();
+    }
+
+    private async Task ReloadSlotCapabilitiesAsync()
+    {
+        _slotCapabilities = null;
+        if (!TryGetSelection(out Guid deviceId, out nuint slotId))
+        {
+            return;
+        }
+
+        try
+        {
+            _slotCapabilities = await Admin.GetKeyManagementCapabilitiesAsync(deviceId, slotId);
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, true);
+        }
     }
 
     private async Task LoadKeysAsync()
@@ -407,6 +548,7 @@
             _selectedDetail = null;
             _selectedDetailHandle = null;
             _editRequest = null;
+            _copyRequest = null;
             SetStatus($"Loaded {_keys.Count} object(s).", false);
         }
         catch (Exception ex)
@@ -429,6 +571,7 @@
             _destroyTarget = null;
             _destroyRequest = new();
             _editRequest = null;
+            _copyRequest = null;
             SetStatus($"Loaded detail for handle {key.Handle}.", false);
         }
         catch (Exception ex)
@@ -445,13 +588,8 @@
 
     private void BeginEdit(HsmKeyObjectSummary key)
     {
-        _editRequest = new UpdateObjectAttributesRequest
-        {
-            Handle = key.Handle,
-            CurrentLabel = key.Label,
-            Label = key.Label ?? $"object-{key.Handle}",
-            IdHex = key.IdHex
-        };
+        _editRequest = new UpdateObjectAttributesRequest { Handle = key.Handle, CurrentLabel = key.Label, Label = key.Label ?? $"object-{key.Handle}", IdHex = key.IdHex };
+        _copyRequest = null;
         _destroyTarget = null;
         _selectedDetail = null;
         _selectedDetailHandle = key.Handle;
@@ -459,23 +597,30 @@
 
     private void BeginEditFromDetail(HsmObjectDetail detail)
     {
-        _editRequest = new UpdateObjectAttributesRequest
-        {
-            Handle = detail.Handle,
-            CurrentLabel = detail.Label,
-            Label = detail.Label ?? $"object-{detail.Handle}",
-            IdHex = detail.IdHex
-        };
+        _editRequest = new UpdateObjectAttributesRequest { Handle = detail.Handle, CurrentLabel = detail.Label, Label = detail.Label ?? $"object-{detail.Handle}", IdHex = detail.IdHex };
+        _copyRequest = null;
+        _destroyTarget = null;
+    }
+
+    private void BeginCopy(HsmKeyObjectSummary key)
+    {
+        _copyRequest = new CopyObjectRequest { SourceHandle = key.Handle, SourceLabel = key.Label, SourceObjectClass = key.ObjectClass, Label = $"{(key.Label ?? "object")}-copy", IdHex = key.IdHex };
+        _editRequest = null;
+        _destroyTarget = null;
+        _selectedDetail = null;
+        _selectedDetailHandle = key.Handle;
+    }
+
+    private void BeginCopyFromDetail(HsmObjectDetail detail)
+    {
+        _copyRequest = new CopyObjectRequest { SourceHandle = detail.Handle, SourceLabel = detail.Label, SourceObjectClass = detail.ObjectClass, Label = $"{(detail.Label ?? "object")}-copy", IdHex = detail.IdHex };
+        _editRequest = null;
         _destroyTarget = null;
     }
 
     private void ResetEditBooleans()
     {
-        if (_editRequest is null)
-        {
-            return;
-        }
-
+        if (_editRequest is null) return;
         _editRequest.Token = null;
         _editRequest.Private = null;
         _editRequest.Extractable = null;
@@ -488,7 +633,23 @@
         _editRequest.AllowDerive = null;
     }
 
+    private void ResetCopyBooleans()
+    {
+        if (_copyRequest is null) return;
+        _copyRequest.Token = null;
+        _copyRequest.Private = null;
+        _copyRequest.Extractable = null;
+        _copyRequest.AllowEncrypt = null;
+        _copyRequest.AllowDecrypt = null;
+        _copyRequest.AllowSign = null;
+        _copyRequest.AllowVerify = null;
+        _copyRequest.AllowWrap = null;
+        _copyRequest.AllowUnwrap = null;
+        _copyRequest.AllowDerive = null;
+    }
+
     private void CancelEdit() => _editRequest = null;
+    private void CancelCopy() => _copyRequest = null;
 
     private void BeginDestroy(HsmKeyObjectSummary key)
     {
@@ -496,6 +657,7 @@
         _selectedDetail = null;
         _selectedDetailHandle = null;
         _editRequest = null;
+        _copyRequest = null;
         _destroyRequest = new DestroyObjectRequest { Handle = key.Handle, Label = key.Label, UserPin = _userPin ?? string.Empty };
     }
 
@@ -509,11 +671,7 @@
     {
         try
         {
-            if (_editRequest is null || !TryGetSelection(out Guid deviceId, out nuint slotId))
-            {
-                return;
-            }
-
+            if (_editRequest is null || !TryGetSelection(out Guid deviceId, out nuint slotId)) return;
             KeyManagementResult result = await Admin.UpdateObjectAttributesAsync(deviceId, slotId, _editRequest, _userPin ?? string.Empty);
             SetStatus(result.Summary, false);
             _labelFilter = result.Label;
@@ -526,15 +684,28 @@
         }
     }
 
+    private async Task CopyAsync()
+    {
+        try
+        {
+            if (_copyRequest is null || !TryGetSelection(out Guid deviceId, out nuint slotId)) return;
+            KeyManagementResult result = await Admin.CopyObjectAsync(deviceId, slotId, _copyRequest, _userPin ?? string.Empty);
+            SetStatus(result.Summary, false);
+            _labelFilter = result.Label;
+            _copyRequest = null;
+            await LoadKeysAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, true);
+        }
+    }
+
     private async Task DestroyAsync()
     {
         try
         {
-            if (_destroyTarget is null || !TryGetSelection(out Guid deviceId, out nuint slotId))
-            {
-                return;
-            }
-
+            if (_destroyTarget is null || !TryGetSelection(out Guid deviceId, out nuint slotId)) return;
             _destroyRequest.Handle = _destroyTarget.Handle;
             _destroyRequest.Label = _destroyTarget.Label;
             _destroyRequest.UserPin = _userPin ?? string.Empty;
@@ -554,8 +725,9 @@
     {
         try
         {
-            if (!TryGetSelection(out Guid deviceId, out nuint slotId))
+            if (!CanGenerateAes || !TryGetSelection(out Guid deviceId, out nuint slotId))
             {
+                SetStatus(string.Join(' ', GetAesWarnings()), true);
                 return;
             }
 
@@ -575,8 +747,9 @@
     {
         try
         {
-            if (!TryGetSelection(out Guid deviceId, out nuint slotId))
+            if (!CanImportAes || !TryGetSelection(out Guid deviceId, out nuint slotId))
             {
+                SetStatus(string.Join(' ', GetImportWarnings()), true);
                 return;
             }
 
@@ -596,8 +769,9 @@
     {
         try
         {
-            if (!TryGetSelection(out Guid deviceId, out nuint slotId))
+            if (!CanGenerateRsa || !TryGetSelection(out Guid deviceId, out nuint slotId))
             {
+                SetStatus(string.Join(' ', GetRsaWarnings()), true);
                 return;
             }
 
@@ -619,6 +793,75 @@
         bool hasSlot = nuint.TryParse(_selectedSlotId, out slotId);
         return hasDevice && hasSlot;
     }
+
+    private bool CanEdit(Func<ObjectEditCapabilities, bool> selector) => _selectedDetail is not null && selector(_selectedDetail.EditCapabilities);
+
+    private IReadOnlyList<string> GetAesWarnings()
+    {
+        List<string> warnings = [];
+        if (!CanLoadKeys) warnings.Add("Select a device and slot first.");
+        if (string.IsNullOrWhiteSpace(_userPin)) warnings.Add("User PIN is required for key-management operations.");
+        if (_slotCapabilities?.SupportsAesKeyGeneration == false) warnings.Add("Selected slot does not expose CKM_AES_KEY_GEN with generate support.");
+        if (_slotCapabilities?.TokenPresent == false) warnings.Add("No token is present in the selected slot.");
+        return warnings;
+    }
+
+    private IReadOnlyList<string> GetImportWarnings()
+    {
+        List<string> warnings = [];
+        if (!CanLoadKeys) warnings.Add("Select a device and slot first.");
+        if (string.IsNullOrWhiteSpace(_userPin)) warnings.Add("User PIN is required for key-management operations.");
+        if (_slotCapabilities?.SupportsAesObjectImport == false) warnings.Add("Import is gated because the selected slot has no token present.");
+        return warnings;
+    }
+
+    private IReadOnlyList<string> GetRsaWarnings()
+    {
+        List<string> warnings = [];
+        if (!CanLoadKeys) warnings.Add("Select a device and slot first.");
+        if (string.IsNullOrWhiteSpace(_userPin)) warnings.Add("User PIN is required for key-management operations.");
+        if (_slotCapabilities?.SupportsRsaKeyPairGeneration == false) warnings.Add("Selected slot does not expose CKM_RSA_PKCS_KEY_PAIR_GEN with generate-key-pair support.");
+        if (_slotCapabilities?.TokenPresent == false) warnings.Add("No token is present in the selected slot.");
+        return warnings;
+    }
+
+    private IReadOnlyList<string> GetEditWarnings()
+    {
+        List<string> warnings = [];
+        if (_selectedDetail?.EditCapabilities.CanEditAnyAttributes == false) warnings.Add("The selected object does not currently look modifiable, so SetAttributeValue is likely to fail.");
+        if (string.IsNullOrWhiteSpace(_userPin)) warnings.Add("User PIN is required for write operations.");
+        return warnings;
+    }
+
+    private IReadOnlyList<string> GetCopyWarnings()
+    {
+        List<string> warnings = [];
+        if (string.IsNullOrWhiteSpace(_userPin)) warnings.Add("User PIN is required for write operations.");
+        if (_slotCapabilities?.TokenPresent == false) warnings.Add("No token is present in the selected slot.");
+        warnings.Add("Some tokens reject copy-time overrides for sensitive or policy-controlled attributes; unchanged fields can be left as 'keep existing'.");
+        return warnings;
+    }
+
+    private RenderFragment RenderOperationWarnings(IReadOnlyList<string> warnings) => builder =>
+    {
+        if (warnings.Count == 0) return;
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "col-12");
+        builder.OpenElement(2, "div");
+        builder.AddAttribute(3, "class", "alert alert-warning small mb-0");
+        builder.OpenElement(4, "ul");
+        builder.AddAttribute(5, "class", "mb-0 ps-3");
+        int seq = 6;
+        foreach (string warning in warnings)
+        {
+            builder.OpenElement(seq++, "li");
+            builder.AddContent(seq++, warning);
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+        builder.CloseElement();
+        builder.CloseElement();
+    };
 
     private void SetStatus(string message, bool isError)
     {
@@ -673,7 +916,7 @@
         builder.CloseElement();
     };
 
-    private RenderFragment NullableCheckbox(Func<bool?> getValue, Action<bool?> setValue, string label) => builder =>
+    private RenderFragment NullableCheckbox(Func<bool?> getValue, Action<bool?> setValue, string label, bool enabled) => builder =>
     {
         bool current = getValue() == true;
         builder.OpenElement(0, "div");
@@ -682,11 +925,12 @@
         builder.AddAttribute(3, "class", "form-check-input");
         builder.AddAttribute(4, "type", "checkbox");
         builder.AddAttribute(5, "checked", current);
-        builder.AddAttribute(6, "onchange", EventCallback.Factory.CreateBinder<bool>(this, value => setValue(value), current));
+        builder.AddAttribute(6, "disabled", !enabled);
+        builder.AddAttribute(7, "onchange", EventCallback.Factory.CreateBinder<bool>(this, value => setValue(value), current));
         builder.CloseElement();
-        builder.OpenElement(7, "label");
-        builder.AddAttribute(8, "class", "form-check-label");
-        builder.AddContent(9, getValue() is null ? $"{label} (keep existing)" : label);
+        builder.OpenElement(8, "label");
+        builder.AddAttribute(9, "class", "form-check-label");
+        builder.AddContent(10, !enabled ? $"{label} (unsupported here)" : getValue() is null ? $"{label} (keep existing)" : label);
         builder.CloseElement();
         builder.CloseElement();
     };

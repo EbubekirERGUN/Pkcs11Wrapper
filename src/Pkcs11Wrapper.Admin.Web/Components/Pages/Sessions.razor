@@ -4,16 +4,28 @@
 <PageTitle>Sessions</PageTitle>
 
 <h1>Sessions</h1>
-<p class="text-muted">Bu panelin açtığı tracked session’ları gör, detaylarını incele, login/logout yap, cancel çalıştır ve tekil/toplu kapatma işlemlerini yönet.</p>
+<p class="text-muted">Bu panelin açtığı tracked session’ları gör, invalidate/break durumlarını net şekilde ayır, detaylarını incele, login/logout/cancel çalıştır ve tekil/toplu kapatma işlemlerini yönet.</p>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
     <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
 }
 
-<div class="d-flex gap-2 mb-3">
+<div class="d-flex flex-wrap gap-2 mb-3">
     <button class="btn btn-primary" @onclick="Refresh">Refresh</button>
     <button class="btn btn-outline-danger" @onclick="CloseAllTrackedAsync" disabled="@(_sessions.Count == 0)">Close All Tracked</button>
+    <select class="form-select w-auto" @bind="_healthFilter">
+        <option value="all">All health states</option>
+        <option value="healthy">Healthy only</option>
+        <option value="invalidated">Invalidated only</option>
+    </select>
+    <select class="form-select w-auto" @bind="_deviceFilter">
+        <option value="">All devices</option>
+        @foreach (string deviceName in _sessions.Select(x => x.DeviceName).Distinct().OrderBy(x => x))
+        {
+            <option value="@deviceName">@deviceName</option>
+        }
+    </select>
 </div>
 
 @if (_sessions.Count == 0)
@@ -24,55 +36,51 @@ else
 {
     <div class="row g-4">
         <div class="col-xl-7">
-            <div class="table-responsive">
-                <table class="table table-striped align-middle">
-                    <thead>
-                        <tr>
-                            <th>Session Id</th>
-                            <th>Device</th>
-                            <th>Slot</th>
-                            <th>Mode</th>
-                            <th>State</th>
-                            <th>Flags</th>
-                            <th>Opened</th>
-                            <th>Last Operation</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (AdminSessionSnapshot session in _sessions)
-                        {
-                            <tr class="@(_selectedSession?.SessionId == session.SessionId ? "table-active" : null)">
-                                <td><code>@session.SessionId</code></td>
-                                <td>@session.DeviceName</td>
-                                <td>@session.SlotId</td>
-                                <td>@(session.IsReadWrite ? "RW" : "RO")</td>
-                                <td>@session.State</td>
-                                <td class="small">@session.SessionFlags</td>
-                                <td>@session.OpenedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
-                                <td>@session.LastOperation</td>
-                                <td>
-                                    @if (session.IsHealthy)
-                                    {
-                                        <span class="badge text-bg-success">Healthy</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="badge text-bg-danger">Broken</span>
-                                    }
-                                </td>
-                                <td class="text-end">
-                                    <div class="btn-group btn-group-sm">
-                                        <button class="btn btn-outline-primary" @onclick="() => SelectSession(session.SessionId)">Details</button>
-                                        <button class="btn btn-outline-secondary" @onclick="() => CloseAsync(session.SessionId)">Close</button>
-                                    </div>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+            @foreach (IGrouping<string, AdminSessionSnapshot> deviceGroup in FilteredSessions.GroupBy(x => x.DeviceName).OrderBy(x => x.Key))
+            {
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>@deviceGroup.Key</span>
+                        <span class="small text-muted">@deviceGroup.Count() tracked session(s)</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-striped align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Session Id</th>
+                                    <th>Slot</th>
+                                    <th>Mode</th>
+                                    <th>State</th>
+                                    <th>Last Operation</th>
+                                    <th>Status</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (AdminSessionSnapshot session in deviceGroup.OrderByDescending(x => x.LastTouchedUtc))
+                                {
+                                    <tr class="@(_selectedSession?.SessionId == session.SessionId ? "table-active" : null)">
+                                        <td><code>@session.SessionId</code></td>
+                                        <td>@session.SlotId</td>
+                                        <td>@(session.IsReadWrite ? "RW" : "RO")</td>
+                                        <td>@session.State</td>
+                                        <td>@session.LastOperation</td>
+                                        <td>
+                                            <span class="badge @(session.IsHealthy ? "text-bg-success" : "text-bg-danger")">@session.HealthLabel</span>
+                                        </td>
+                                        <td class="text-end">
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary" @onclick="() => SelectSession(session.SessionId)">Details</button>
+                                                <button class="btn btn-outline-secondary" @onclick="() => CloseAsync(session.SessionId)" disabled="@(!session.CanCloseTracked)">Close</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
         </div>
 
         <div class="col-xl-5">
@@ -90,11 +98,25 @@ else
                         <button class="btn btn-sm btn-outline-secondary" @onclick="ClearSelection">Close</button>
                     </div>
                     <div class="card-body">
+                        @if (!_selectedSession.IsHealthy)
+                        {
+                            <div class="alert alert-danger">
+                                <div class="fw-semibold">This tracked session is no longer usable.</div>
+                                <div>@(_selectedSession.InvalidationReason ?? "The underlying session handle no longer responds.")</div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="alert alert-success py-2">Tracked session is healthy and can accept direct login/logout/cancel actions.</div>
+                        }
+
                         <dl class="row">
                             <dt class="col-sm-4">Session Id</dt><dd class="col-sm-8"><code>@_selectedSession.SessionId</code></dd>
                             <dt class="col-sm-4">Device</dt><dd class="col-sm-8">@_selectedSession.DeviceName</dd>
                             <dt class="col-sm-4">Slot</dt><dd class="col-sm-8">@_selectedSession.SlotId</dd>
                             <dt class="col-sm-4">Mode</dt><dd class="col-sm-8">@(_selectedSession.IsReadWrite ? "Read-write" : "Read-only")</dd>
+                            <dt class="col-sm-4">Health</dt><dd class="col-sm-8">@_selectedSession.HealthLabel</dd>
+                            <dt class="col-sm-4">Invalidation</dt><dd class="col-sm-8">@(_selectedSession.InvalidationReason ?? "n/a")</dd>
                             <dt class="col-sm-4">State</dt><dd class="col-sm-8">@_selectedSession.State</dd>
                             <dt class="col-sm-4">Flags</dt><dd class="col-sm-8">@_selectedSession.SessionFlags</dd>
                             <dt class="col-sm-4">Device Error</dt><dd class="col-sm-8">@_selectedSession.DeviceError</dd>
@@ -111,14 +133,14 @@ else
                             <div class="col-12">
                                 <label class="form-label">User PIN</label>
                                 <input class="form-control" type="password" @bind="_userPin" />
-                                <div class="form-text">Login/logout operates on the tracked session itself so you can watch state transitions immediately.</div>
+                                <div class="form-text">Login/logout operates on the tracked session itself so you can watch state transitions immediately. Once invalidated, only close/refresh remain meaningful.</div>
                             </div>
                             <div class="col-12 d-flex flex-wrap gap-2">
-                                <button class="btn btn-success" @onclick="LoginAsync">Login User</button>
-                                <button class="btn btn-outline-warning" @onclick="LogoutAsync">Logout</button>
-                                <button class="btn btn-outline-secondary" @onclick="CancelAsync">Cancel Active Ops</button>
-                                <button class="btn btn-outline-danger" @onclick="CloseSelectedSlotSessionsAsync">Close Slot Sessions (module)</button>
-                                <button class="btn btn-danger" @onclick="CloseSelectedAsync">Close Tracked Session</button>
+                                <button class="btn btn-success" @onclick="LoginAsync" disabled="@(!_selectedSession.CanLogin)">Login User</button>
+                                <button class="btn btn-outline-warning" @onclick="LogoutAsync" disabled="@(!_selectedSession.CanLogout)">Logout</button>
+                                <button class="btn btn-outline-secondary" @onclick="CancelAsync" disabled="@(!_selectedSession.CanCancel)">Cancel Active Ops</button>
+                                <button class="btn btn-outline-danger" @onclick="CloseSelectedSlotSessionsAsync" disabled="@(!_selectedSession.CanCloseSlot)">Close Slot Sessions (module)</button>
+                                <button class="btn btn-danger" @onclick="CloseSelectedAsync" disabled="@(!_selectedSession.CanCloseTracked)">Close Tracked Session</button>
                             </div>
                         </div>
                     </div>
@@ -134,6 +156,17 @@ else
     private string? _userPin;
     private string? _statusMessage;
     private bool _statusIsError;
+    private string _healthFilter = "all";
+    private string? _deviceFilter;
+
+    private IEnumerable<AdminSessionSnapshot> FilteredSessions => _sessions.Where(session =>
+        (_healthFilter, session.IsHealthy) switch
+        {
+            ("healthy", false) => false,
+            ("invalidated", true) => false,
+            _ => true
+        }
+        && (string.IsNullOrWhiteSpace(_deviceFilter) || string.Equals(_deviceFilter, session.DeviceName, StringComparison.Ordinal)));
 
     protected override void OnInitialized() => Refresh();
 
@@ -156,11 +189,7 @@ else
 
     private async Task LoginAsync()
     {
-        if (_selectedSession is null)
-        {
-            return;
-        }
-
+        if (_selectedSession is null) return;
         try
         {
             _selectedSession = await Admin.LoginTrackedSessionAsync(_selectedSession.SessionId, _userPin ?? string.Empty);
@@ -171,16 +200,13 @@ else
         catch (Exception ex)
         {
             SetStatus(ex.Message, true);
+            Refresh();
         }
     }
 
     private async Task LogoutAsync()
     {
-        if (_selectedSession is null)
-        {
-            return;
-        }
-
+        if (_selectedSession is null) return;
         try
         {
             _selectedSession = await Admin.LogoutTrackedSessionAsync(_selectedSession.SessionId);
@@ -191,16 +217,13 @@ else
         catch (Exception ex)
         {
             SetStatus(ex.Message, true);
+            Refresh();
         }
     }
 
     private async Task CancelAsync()
     {
-        if (_selectedSession is null)
-        {
-            return;
-        }
-
+        if (_selectedSession is null) return;
         try
         {
             _selectedSession = await Admin.CancelTrackedSessionOperationsAsync(_selectedSession.SessionId);
@@ -211,21 +234,19 @@ else
         catch (Exception ex)
         {
             SetStatus(ex.Message, true);
+            Refresh();
         }
     }
 
     private async Task CloseSelectedSlotSessionsAsync()
     {
-        if (_selectedSession is null)
-        {
-            return;
-        }
-
+        if (_selectedSession is null) return;
         try
         {
             await Admin.CloseAllSessionsAsync(_selectedSession.DeviceId, _selectedSession.SlotId);
-            SetStatus($"Invoked CloseAllSessions for device slot {_selectedSession.SlotId}. Existing tracked sessions on that slot may now show invalidated state until refreshed/closed.", false);
+            SetStatus($"Invoked CloseAllSessions for device slot {_selectedSession.SlotId}. Matching tracked sessions are now explicitly marked invalidated until you close them.", false);
             Refresh();
+            SelectSession(_selectedSession.SessionId);
         }
         catch (Exception ex)
         {
@@ -235,11 +256,7 @@ else
 
     private async Task CloseSelectedAsync()
     {
-        if (_selectedSession is null)
-        {
-            return;
-        }
-
+        if (_selectedSession is null) return;
         await CloseAsync(_selectedSession.SessionId);
     }
 
@@ -274,16 +291,8 @@ else
 
     private static string AuthSummary(AdminSessionSnapshot session)
     {
-        if (session.IsSecurityOfficerAuthenticated)
-        {
-            return "Security officer";
-        }
-
-        if (session.IsUserAuthenticated)
-        {
-            return "User";
-        }
-
+        if (session.IsSecurityOfficerAuthenticated) return "Security officer";
+        if (session.IsUserAuthenticated) return "User";
         return "Public";
     }
 }

@@ -19,14 +19,15 @@
 - Admin panel için başlangıç yol haritası `docs/admin-panel-roadmap.md` içinde oluşturuldu.
 - Admin panel Phase B için ilk anlamlı genişleme tamamlandı: key/object detail paneli, AES key generate akışı, RSA keypair generate akışı ve typed confirmation + kalıcı silme onayı isteyen daha güvenli destroy UX'i eklendi.
 - Admin panel Phase B/C devamı işlendi: AES raw-value import/create akışı, desteklenen alanlar için object attribute editing paneli, daha güvenli key/object UX iyileştirmeleri, richer tracked-session detail görünümü, tracked session üzerinde login/logout kontrolleri, `C_SessionCancel` yüzeyi ve slot bazlı `CloseAllSessions` tetikleme eklendi.
+- Admin panel için sıradaki üç UX iyileştirme slice'ı tamamlandı: slot capability/mechanism keşfi ile generate/import aksiyonları pre-submit gated hale getirildi, object edit ekranı obje sınıfı + `CKA_MODIFIABLE` görünürlüğüne göre obvious unsupported toggle'ları kapatacak şekilde güçlendirildi, tracked session'larda invalidation reason/health labeling/grouped filtering eklendi ve `C_CopyObject` tabanlı yeni object copy akışı teslim edildi.
 - Admin panel uygulama katmanı için yeni doğrulama testleri eklendi; çözüm testleri ve hedefli admin web build doğrulaması temiz geçti.
 
 ## Şu an üzerinde çalışılan
-- Admin panelde yeni eklenen Phase B/C slice'ının son gözden geçirmesi ve sonraki dilimin planlanması.
+- Admin panelde capability-aware/copy/session invalidation slice'ının son gözden geçirmesi tamamlandı; sonraki dilim Phase D güvenlik/rol yetkilendirme eksenine kayıyor.
 
 ## Sıradaki işler
-- Admin panelde token capability/mechanism bilgisini kullanarak edit/import formlarını daha öngörülü hale getirmek.
-- Session ekranında grouped/filterable görünüm ve invalidated tracked session'lar için daha belirgin UX düşünmek.
+- Admin panel için role-based authorization ve protected secret/PIN handling hardening başlatmak.
+- Object copy akışına vendor-specific failure rehberi veya optional preset/template library katmanı düşünmek.
 - PKCS#11 v3 message API'lerini gerçekten expose eden bir vendor/modül ile runtime regression eklemek.
 - Gerekirse Windows runtime lane'ini GitHub üzerinde ilk gerçek koşusunda gözleyip paket/araç yolu ince ayarı yapmak.
 
@@ -34,4 +35,4 @@
 - Mevcut SoftHSM build'leri `C_GetInterface*` export etmediği için yeni v3 yüzeyin runtime pozitif doğrulaması henüz SoftHSM ile yapılamıyor; şimdilik ABI/layout + capability-gated davranış testleri var.
 
 ## Commit / push durumu
-- Yerel değişiklikler mevcut; bu admin panel Phase B slice'ı commitlenecek, push yapılmadı.
+- Yeni admin panel UX slice'ı yerelde commitlenecek; push yapılmadı.
