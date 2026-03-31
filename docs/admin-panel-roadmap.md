@@ -110,6 +110,7 @@ Goals:
 ## Newly delivered slice summary
 
 - Phase E first polish slice delivered: dashboard health/ops summary cards, quick actions, users-page filtering/sorting, audit filtering + paging, and a local admin ops/recovery runbook (`docs/admin-ops-recovery.md`)
+- Phase E second polish slice delivered: devices-page summary/filter/sort ergonomics, slots-page summary/token filtering/selected-device session visibility, and sessions-page search/filter/sort + filtered/invalidated bulk-close actions
 - capability/mechanism-aware key-management UX: slot-level mechanism probing, pre-submit warnings, and disabled generate/import actions when the selected slot obviously cannot satisfy them
 - object edit affordances are now more object-aware: obvious unsupported toggles are disabled based on object class + `CKA_MODIFIABLE` visibility
 - object copy workflow delivered via `C_CopyObject`, including label/ID/capability override template fields and admin-layer validation

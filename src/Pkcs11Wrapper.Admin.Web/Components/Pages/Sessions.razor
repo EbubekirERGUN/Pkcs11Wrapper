@@ -14,32 +14,121 @@
     <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
 }
 
-<div class="d-flex flex-wrap gap-2 mb-3">
-    <button class="btn btn-primary" @onclick="Refresh">Refresh</button>
-    <button class="btn btn-outline-danger" @onclick="CloseAllTrackedAsync" disabled="@(_sessions.Count == 0 || !_isOperator)">Close All Tracked</button>
-    <select class="form-select w-auto" @bind="_healthFilter">
-        <option value="all">All health states</option>
-        <option value="healthy">Healthy only</option>
-        <option value="invalidated">Invalidated only</option>
-    </select>
-    <select class="form-select w-auto" @bind="_deviceFilter">
-        <option value="">All devices</option>
-        @foreach (string deviceName in _sessions.Select(x => x.DeviceName).Distinct().OrderBy(x => x))
-        {
-            <option value="@deviceName">@deviceName</option>
-        }
-    </select>
+@if (_sessions.Count != 0)
+{
+    <div class="row g-3 mb-4">
+        <div class="col-xl-2 col-md-4 col-sm-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Tracked sessions</div>
+                    <div class="display-6">@_sessions.Count</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-2 col-md-4 col-sm-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Healthy</div>
+                    <div class="display-6">@_sessions.Count(session => session.IsHealthy)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-2 col-md-4 col-sm-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Invalidated</div>
+                    <div class="display-6">@_sessions.Count(session => !session.IsHealthy)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-2 col-md-4 col-sm-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Read-write</div>
+                    <div class="display-6">@_sessions.Count(session => session.IsReadWrite)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-2 col-md-4 col-sm-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Read-only</div>
+                    <div class="display-6">@_sessions.Count(session => !session.IsReadWrite)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-2 col-md-4 col-sm-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Filtered view</div>
+                    <div class="display-6">@FilteredSessions.Count</div>
+                    <div class="small text-muted">Across @AvailableDevices.Count device(s)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body row g-3 align-items-end">
+        <div class="col-xl-2 col-lg-3 col-md-6 d-flex gap-2 flex-wrap">
+            <button class="btn btn-primary" @onclick="Refresh">Refresh</button>
+            <button class="btn btn-outline-danger" @onclick="CloseAllTrackedAsync" disabled="@(_sessions.Count == 0 || !_isOperator)">Close All Tracked</button>
+        </div>
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <label class="form-label">Search</label>
+            <input class="form-control" @bind="_searchText" @bind:event="oninput" placeholder="session id, device, slot, operation..." />
+        </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Health</label>
+            <select class="form-select" @bind="_healthFilter">
+                <option value="all">All health states</option>
+                <option value="healthy">Healthy only</option>
+                <option value="invalidated">Invalidated only</option>
+            </select>
+        </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Device</label>
+            <select class="form-select" @bind="_deviceFilter">
+                <option value="">All devices</option>
+                @foreach (string deviceName in AvailableDevices)
+                {
+                    <option value="@deviceName">@deviceName</option>
+                }
+            </select>
+        </div>
+        <div class="col-xl-3 col-lg-5 col-md-12">
+            <label class="form-label">Sort</label>
+            <select class="form-select" @bind="_sortMode">
+                <option value="lastTouched">Last touched (newest)</option>
+                <option value="opened">Opened (newest)</option>
+                <option value="slot">Device / slot</option>
+                <option value="health">Health first, then newest</option>
+            </select>
+        </div>
+        <div class="col-12 d-flex flex-wrap gap-2">
+            <button class="btn btn-outline-secondary" @onclick="CloseFilteredAsync" disabled="@(FilteredSessions.Count == 0 || !_isOperator)">Close Filtered</button>
+            <button class="btn btn-outline-warning" @onclick="CloseInvalidatedAsync" disabled="@(_sessions.All(session => session.IsHealthy) || !_isOperator)">Close Invalidated</button>
+            <div class="small text-muted align-self-center">Showing @FilteredSessions.Count of @_sessions.Count tracked session(s).</div>
+        </div>
+    </div>
 </div>
 
 @if (_sessions.Count == 0)
 {
     <p class="text-muted">No tracked sessions.</p>
 }
+else if (FilteredSessions.Count == 0)
+{
+    <div class="card shadow-sm">
+        <div class="card-body text-muted">No tracked sessions matched the current filters.</div>
+    </div>
+}
 else
 {
     <div class="row g-4">
         <div class="col-xl-7">
-            @foreach (IGrouping<string, AdminSessionSnapshot> deviceGroup in FilteredSessions.GroupBy(x => x.DeviceName).OrderBy(x => x.Key))
+            @foreach (IGrouping<string, AdminSessionSnapshot> deviceGroup in FilteredSessions.GroupBy(session => session.DeviceName).OrderBy(group => group.Key, StringComparer.Ordinal))
             {
                 <div class="card shadow-sm mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -60,7 +149,7 @@ else
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (AdminSessionSnapshot session in deviceGroup.OrderByDescending(x => x.LastTouchedUtc))
+                                @foreach (AdminSessionSnapshot session in SortSessions(deviceGroup))
                                 {
                                     <tr class="@(_selectedSession?.SessionId == session.SessionId ? "table-active" : null)">
                                         <td><code>@session.SessionId</code></td>
@@ -74,7 +163,7 @@ else
                                         <td class="text-end">
                                             <div class="btn-group btn-group-sm">
                                                 <button class="btn btn-outline-primary" @onclick="() => SelectSession(session.SessionId)">Details</button>
-                                                <button class="btn btn-outline-secondary" @onclick="() => CloseAsync(session.SessionId)" disabled="@(!session.CanCloseTracked)">Close</button>
+                                                <button class="btn btn-outline-secondary" @onclick="() => CloseAsync(session.SessionId)" disabled="@(!session.CanCloseTracked || !_isOperator)">Close</button>
                                             </div>
                                         </td>
                                     </tr>
@@ -166,16 +255,19 @@ else
     private bool _statusIsError;
     private string _healthFilter = "all";
     private string? _deviceFilter;
+    private string _searchText = string.Empty;
+    private string _sortMode = "lastTouched";
     private bool _isOperator;
 
-    private IEnumerable<AdminSessionSnapshot> FilteredSessions => _sessions.Where(session =>
-        (_healthFilter, session.IsHealthy) switch
-        {
-            ("healthy", false) => false,
-            ("invalidated", true) => false,
-            _ => true
-        }
-        && (string.IsNullOrWhiteSpace(_deviceFilter) || string.Equals(_deviceFilter, session.DeviceName, StringComparison.Ordinal)));
+    private IReadOnlyList<string> AvailableDevices => _sessions
+        .Select(session => session.DeviceName)
+        .Distinct(StringComparer.Ordinal)
+        .OrderBy(name => name, StringComparer.Ordinal)
+        .ToArray();
+
+    private IReadOnlyList<AdminSessionSnapshot> FilteredSessions => _sessions
+        .Where(MatchesFilters)
+        .ToArray();
 
     protected override async Task OnInitializedAsync()
     {
@@ -300,6 +392,34 @@ else
         Refresh();
     }
 
+    private async Task CloseFilteredAsync()
+    {
+        foreach (AdminSessionSnapshot session in FilteredSessions.ToArray())
+        {
+            await Admin.CloseSessionAsync(session.SessionId);
+        }
+
+        _selectedSession = null;
+        SetStatus("Filtered tracked sessions closed.", false);
+        Refresh();
+    }
+
+    private async Task CloseInvalidatedAsync()
+    {
+        foreach (AdminSessionSnapshot session in _sessions.Where(session => !session.IsHealthy).ToArray())
+        {
+            await Admin.CloseSessionAsync(session.SessionId);
+        }
+
+        if (_selectedSession is not null && !_selectedSession.IsHealthy)
+        {
+            _selectedSession = null;
+        }
+
+        SetStatus("Invalidated tracked sessions closed.", false);
+        Refresh();
+    }
+
     private void SetStatus(string message, bool isError)
     {
         _statusMessage = message;
@@ -317,6 +437,49 @@ else
             await PinStore.DeleteAsync(Guid.Empty, 0, "sessions");
         }
     }
+
+    private bool MatchesFilters(AdminSessionSnapshot session)
+    {
+        if ((_healthFilter, session.IsHealthy) is ("healthy", false) or ("invalidated", true))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_deviceFilter) && !string.Equals(_deviceFilter, session.DeviceName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            string term = _searchText.Trim();
+            bool matchesSearch = session.SessionId.ToString().Contains(term, StringComparison.OrdinalIgnoreCase)
+                || session.DeviceName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || session.SlotId.ToString().Contains(term, StringComparison.OrdinalIgnoreCase)
+                || session.State.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || session.LastOperation.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || Contains(session.Notes, term)
+                || Contains(session.InvalidationReason, term);
+            if (!matchesSearch)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private IEnumerable<AdminSessionSnapshot> SortSessions(IEnumerable<AdminSessionSnapshot> sessions)
+        => _sortMode switch
+        {
+            "opened" => sessions.OrderByDescending(session => session.OpenedUtc).ThenByDescending(session => session.LastTouchedUtc),
+            "slot" => sessions.OrderBy(session => session.SlotId).ThenByDescending(session => session.LastTouchedUtc),
+            "health" => sessions.OrderByDescending(session => session.IsHealthy).ThenByDescending(session => session.LastTouchedUtc),
+            _ => sessions.OrderByDescending(session => session.LastTouchedUtc).ThenByDescending(session => session.OpenedUtc)
+        };
+
+    private static bool Contains(string? value, string term)
+        => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
 
     private static string AuthSummary(AdminSessionSnapshot session)
     {

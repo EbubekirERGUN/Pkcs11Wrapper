@@ -6,11 +6,50 @@
 <PageTitle>Devices</PageTitle>
 
 <h1>HSM Devices</h1>
-<p class="text-muted">PKCS#11 module path'lerini tanımla, bağlantı testi yap ve admin panelinin hangi cihazlara erişeceğini yönet.</p>
+<p class="text-muted">PKCS#11 module path'lerini tanımla, bağlantı testi yap ve admin panelinin hangi cihazlara erişeceğini yönet. Bu görünüm ikinci polish diliminde özet, arama, filtre ve sıralama ergonomisiyle güçlendirildi.</p>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
     <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+}
+
+@if (_devices.Count != 0)
+{
+    <div class="row g-3 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Configured devices</div>
+                    <div class="display-6">@_devices.Count</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Enabled devices</div>
+                    <div class="display-6">@_devices.Count(device => device.IsEnabled)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Disabled devices</div>
+                    <div class="display-6">@_devices.Count(device => !device.IsEnabled)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Filtered view</div>
+                    <div class="display-6">@FilteredDevices.Count</div>
+                    <div class="small text-muted">@(_editingId is null ? "No device is being edited." : "One device is currently selected for editing.")</div>
+                </div>
+            </div>
+        </div>
+    </div>
 }
 
 <div class="row g-4">
@@ -61,10 +100,38 @@
                 <span>Configured Devices</span>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync">Refresh</button>
             </div>
+            <div class="card-body border-bottom row g-3 align-items-end">
+                <div class="col-lg-5">
+                    <label class="form-label">Search</label>
+                    <input class="form-control" @bind="_searchText" @bind:event="oninput" placeholder="name, path, token, notes..." />
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" @bind="_statusFilter">
+                        <option value="all">All devices</option>
+                        <option value="enabled">Enabled</option>
+                        <option value="disabled">Disabled</option>
+                    </select>
+                </div>
+                <div class="col-lg-4 col-md-6">
+                    <label class="form-label">Sort</label>
+                    <select class="form-select" @bind="_sortMode">
+                        <option value="name">Name (A-Z)</option>
+                        <option value="updated">Recently updated</option>
+                        <option value="created">Recently created</option>
+                        <option value="enabled">Enabled first</option>
+                    </select>
+                </div>
+                <div class="col-12 small text-muted">Showing @FilteredDevices.Count of @_devices.Count configured device(s).</div>
+            </div>
             <div class="card-body">
                 @if (_devices.Count == 0)
                 {
                     <p class="text-muted mb-0">No devices configured yet.</p>
+                }
+                else if (FilteredDevices.Count == 0)
+                {
+                    <p class="text-muted mb-0">No devices matched the current filters.</p>
                 }
                 else
                 {
@@ -76,19 +143,20 @@
                                     <th>Module Path</th>
                                     <th>Token</th>
                                     <th>Status</th>
+                                    <th>Updated</th>
                                     <th class="text-end">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (HsmDeviceProfile device in _devices)
+                                @foreach (HsmDeviceProfile device in FilteredDevices)
                                 {
-                                    <tr>
+                                    <tr class="@(_editingId == device.Id ? "table-active" : null)">
                                         <td>
                                             <div class="fw-semibold">@device.Name</div>
                                             <div class="small text-muted">@device.Notes</div>
                                         </td>
                                         <td><code>@device.ModulePath</code></td>
-                                        <td>@device.DefaultTokenLabel</td>
+                                        <td>@(string.IsNullOrWhiteSpace(device.DefaultTokenLabel) ? "—" : device.DefaultTokenLabel)</td>
                                         <td>
                                             @if (device.IsEnabled)
                                             {
@@ -99,6 +167,7 @@
                                                 <span class="badge text-bg-secondary">Disabled</span>
                                             }
                                         </td>
+                                        <td class="small text-muted">@device.UpdatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                                         <td class="text-end">
                                             <div class="btn-group btn-group-sm">
                                                 <button class="btn btn-outline-primary" @onclick="() => Edit(device)" disabled="@(!_isAdmin)">Edit</button>
@@ -125,6 +194,11 @@
     private bool _statusIsError;
     private bool _isOperator;
     private bool _isAdmin;
+    private string _searchText = string.Empty;
+    private string _statusFilter = "all";
+    private string _sortMode = "name";
+
+    private IReadOnlyList<HsmDeviceProfile> FilteredDevices => ApplyOrdering(_devices.Where(MatchesFilters)).ToArray();
 
     protected override async Task OnInitializedAsync()
     {
@@ -142,6 +216,10 @@
     private async Task LoadAsync()
     {
         _devices = await Admin.GetDevicesAsync();
+        if (_editingId is Guid editingId && !_devices.Any(device => device.Id == editingId))
+        {
+            ResetForm();
+        }
     }
 
     private async Task SaveAsync()
@@ -202,4 +280,39 @@
 
         await LoadAsync();
     }
+
+    private bool MatchesFilters(HsmDeviceProfile device)
+    {
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            string term = _searchText.Trim();
+            bool matchesSearch = Contains(device.Name, term)
+                || Contains(device.ModulePath, term)
+                || Contains(device.DefaultTokenLabel, term)
+                || Contains(device.Notes, term);
+            if (!matchesSearch)
+            {
+                return false;
+            }
+        }
+
+        return _statusFilter switch
+        {
+            "enabled" => device.IsEnabled,
+            "disabled" => !device.IsEnabled,
+            _ => true
+        };
+    }
+
+    private IEnumerable<HsmDeviceProfile> ApplyOrdering(IEnumerable<HsmDeviceProfile> devices)
+        => _sortMode switch
+        {
+            "updated" => devices.OrderByDescending(device => device.UpdatedUtc).ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase),
+            "created" => devices.OrderByDescending(device => device.CreatedUtc).ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase),
+            "enabled" => devices.OrderByDescending(device => device.IsEnabled).ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase),
+            _ => devices.OrderBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
+        };
+
+    private static bool Contains(string? value, string term)
+        => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
 }

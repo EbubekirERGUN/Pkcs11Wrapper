@@ -40,6 +40,10 @@
   - audit sayfasında filtreleme + paging
   - users sayfasında özet kartları, arama, rol filtresi ve sıralama
   - `docs/admin-ops-recovery.md` ile local operations/recovery runbook
+- Admin panel Phase E ikinci polish dilimi teslim edildi:
+  - devices sayfasında özet kartları, arama, status filtresi ve sıralama
+  - slots sayfasında özet kartları, token filtresi, sıralama ve seçili cihaza göre tracked-session görünümü
+  - sessions sayfasında özet kartları, search/device/health filtreleri, sıralama ve filtered/invalidated bulk-close ergonomisi
 - Çözüm doğrulaması temiz:
   - `dotnet build Pkcs11Wrapper.sln -c Release`
   - `dotnet test Pkcs11Wrapper.sln -c Release`
@@ -50,7 +54,7 @@
 - Belgeleme senkronizasyonu yapıldı; README'ler artık admin panelin auth/users/config-transfer/PKCS#11 Lab gerçek durumunu ve benchmark baseline tarihini yansıtıyor.
 
 ## Sıradaki işler
-- Admin panel UX/product polish'in sonraki dilimleri (dashboard/widget genişletmeleri, table ergonomics, paging/sorting/filtering yaygınlaştırmaları).
+- Admin panel UX/product polish'in sonraki dilimleri (Keys ekranı ve diğer yoğun listelerde daha derin table ergonomics, dashboard/widget genişletmeleri, recovery affordance polish).
 - PKCS#11 v3 interface yüzeyini gerçekten export eden vendor/modül ile ek runtime regression.
 - Benchmark suite'i performans hassas değişikliklerden sonra ve release öncesinde tekrar çalıştırıp en güncel baseline'ı tazelemek.
 - GitHub vitrin materyallerini zenginleştirmek (ekran görüntüsü, demo media, release notes).

@@ -7,7 +7,7 @@
 <PageTitle>Slots</PageTitle>
 
 <h1>Slots</h1>
-<p class="text-muted">Seçilen cihaz için slot ve token bilgisini görüntüle. Buradan read-only/read-write session açabilir ve slot seviyesinde CloseAllSessions çağırabilirsin.</p>
+<p class="text-muted">Seçilen cihaz için slot ve token bilgisini görüntüle. Buradan read-only/read-write session açabilir, slot seviyesinde <code>CloseAllSessions</code> çağırabilir ve loaded slot görünümünü filtreleyebilirsin.</p>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -18,7 +18,7 @@
     <div class="card-body row g-3 align-items-end">
         <div class="col-lg-4">
             <label class="form-label">Device</label>
-            <select class="form-select" @bind="_selectedDeviceId">
+            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync">
                 <option value="">Select device...</option>
                 @foreach (HsmDeviceProfile device in _devices)
                 {
@@ -43,82 +43,154 @@
 
 @if (_slots.Count != 0)
 {
-    <div class="table-responsive">
-        <table class="table table-striped align-middle">
-            <thead>
-                <tr>
-                    <th>Slot</th>
-                    <th>Description</th>
-                    <th>Token</th>
-                    <th>Flags</th>
-                    <th>Mechanisms</th>
-                    <th class="text-end">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (HsmSlotSummary slot in _slots)
-                {
-                    <tr>
-                        <td>@slot.SlotId</td>
-                        <td>
-                            <div class="fw-semibold">@slot.SlotDescription</div>
-                            <div class="small text-muted">@slot.SlotManufacturer</div>
-                        </td>
-                        <td>
-                            @if (slot.TokenPresent)
-                            {
-                                <div class="fw-semibold">@slot.TokenLabel</div>
-                                <div class="small text-muted">@slot.TokenModel · @slot.TokenSerialNumber</div>
-                            }
-                            else
-                            {
-                                <span class="text-muted">No token</span>
-                            }
-                        </td>
-                        <td>
-                            <div>@slot.SlotFlags</div>
-                            <div class="small text-muted">@slot.TokenFlags</div>
-                        </td>
-                        <td>@slot.MechanismCount</td>
-                        <td class="text-end">
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" @onclick="() => OpenSessionAsync(slot, false)" disabled="@(!_isOperator)">Open RO</button>
-                                <button class="btn btn-outline-warning" @onclick="() => OpenSessionAsync(slot, true)" disabled="@(!_isOperator)">Open RW</button>
-                                <button class="btn btn-outline-danger" @onclick="() => CloseAllAsync(slot)" disabled="@(!_isOperator)">Close All</button>
-                            </div>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+    <div class="row g-3 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Loaded slots</div>
+                    <div class="display-6">@_slots.Count</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Token present</div>
+                    <div class="display-6">@_slots.Count(slot => slot.TokenPresent)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">No token</div>
+                    <div class="display-6">@_slots.Count(slot => !slot.TokenPresent)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Tracked sessions</div>
+                    <div class="display-6">@CurrentDeviceSessions.Count</div>
+                    <div class="small text-muted">Selected device only</div>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body row g-3 align-items-end">
+            <div class="col-lg-5">
+                <label class="form-label">Search</label>
+                <input class="form-control" @bind="_searchText" @bind:event="oninput" placeholder="slot description, token label, serial..." />
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">Token filter</label>
+                <select class="form-select" @bind="_tokenFilter">
+                    <option value="all">All slots</option>
+                    <option value="present">Token present</option>
+                    <option value="missing">No token</option>
+                </select>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <label class="form-label">Sort</label>
+                <select class="form-select" @bind="_sortMode">
+                    <option value="slot">Slot id</option>
+                    <option value="token">Token label</option>
+                    <option value="mechanisms">Mechanism count</option>
+                </select>
+            </div>
+            <div class="col-12 small text-muted">Showing @FilteredSlots.Count of @_slots.Count loaded slot(s).</div>
+        </div>
+    </div>
+
+    @if (FilteredSlots.Count == 0)
+    {
+        <div class="card shadow-sm mb-4">
+            <div class="card-body text-muted">No slots matched the current filters.</div>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th>Slot</th>
+                        <th>Description</th>
+                        <th>Token</th>
+                        <th>Flags</th>
+                        <th>Mechanisms</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (HsmSlotSummary slot in FilteredSlots)
+                    {
+                        <tr>
+                            <td>
+                                <div class="fw-semibold">@slot.SlotId</div>
+                                <div class="small text-muted">@slot.SlotManufacturer</div>
+                            </td>
+                            <td>@slot.SlotDescription</td>
+                            <td>
+                                @if (slot.TokenPresent)
+                                {
+                                    <div class="fw-semibold">@slot.TokenLabel</div>
+                                    <div class="small text-muted">@slot.TokenModel · @slot.TokenSerialNumber</div>
+                                    <span class="badge text-bg-success mt-1">Token present</span>
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-secondary">No token</span>
+                                }
+                            </td>
+                            <td>
+                                <div>@slot.SlotFlags</div>
+                                <div class="small text-muted">@slot.TokenFlags</div>
+                            </td>
+                            <td>@slot.MechanismCount</td>
+                            <td class="text-end">
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" @onclick="() => OpenSessionAsync(slot, false)" disabled="@(!_isOperator)">Open RO</button>
+                                    <button class="btn btn-outline-warning" @onclick="() => OpenSessionAsync(slot, true)" disabled="@(!_isOperator)">Open RW</button>
+                                    <button class="btn btn-outline-danger" @onclick="() => CloseAllAsync(slot)" disabled="@(!_isOperator)">Close All</button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
 }
 
-@if (_sessions.Count != 0)
+@if (CurrentDeviceSessions.Count != 0)
 {
-    <h2 class="h4 mt-4">Tracked Sessions</h2>
+    <h2 class="h4 mt-4">Tracked Sessions for Selected Device</h2>
     <div class="table-responsive">
         <table class="table table-sm table-bordered align-middle">
             <thead>
                 <tr>
                     <th>Session</th>
-                    <th>Device</th>
                     <th>Slot</th>
                     <th>Mode</th>
                     <th>State</th>
+                    <th>Health</th>
                     <th>Last Operation</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (AdminSessionSnapshot session in _sessions)
+                @foreach (AdminSessionSnapshot session in CurrentDeviceSessions.OrderByDescending(session => session.LastTouchedUtc))
                 {
                     <tr>
                         <td><code>@session.SessionId</code></td>
-                        <td>@session.DeviceName</td>
                         <td>@session.SlotId</td>
                         <td>@(session.IsReadWrite ? "RW" : "RO")</td>
                         <td>@session.State</td>
+                        <td><span class="badge @(session.IsHealthy ? "text-bg-success" : "text-bg-danger")">@session.HealthLabel</span></td>
                         <td>@session.LastOperation</td>
                         <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => CloseSessionAsync(session.SessionId)" disabled="@(!_isOperator)">Close</button></td>
                     </tr>
@@ -138,6 +210,16 @@
     private string? _statusMessage;
     private bool _statusIsError;
     private bool _isOperator;
+    private string _searchText = string.Empty;
+    private string _tokenFilter = "all";
+    private string _sortMode = "slot";
+
+    private IReadOnlyList<HsmSlotSummary> FilteredSlots => ApplyOrdering(_slots.Where(MatchesFilters)).ToArray();
+
+    private IReadOnlyList<AdminSessionSnapshot> CurrentDeviceSessions
+        => Guid.TryParse(_selectedDeviceId, out Guid deviceId)
+            ? _sessions.Where(session => session.DeviceId == deviceId).ToArray()
+            : [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -149,12 +231,23 @@
         await LoadProtectedPinAsync();
     }
 
+    private async Task OnSelectedDeviceChangedAsync()
+    {
+        _slots = [];
+        await LoadProtectedPinAsync();
+    }
+
     private async Task LoadProtectedPinAsync()
     {
         if (Guid.TryParse(_selectedDeviceId, out Guid deviceId))
         {
             _userPin = await PinStore.TryGetAsync(deviceId, 0, "slots");
             _rememberPin = !string.IsNullOrWhiteSpace(_userPin);
+        }
+        else
+        {
+            _userPin = null;
+            _rememberPin = false;
         }
     }
 
@@ -200,6 +293,7 @@
         try
         {
             await Admin.CloseAllSessionsAsync(slot.DeviceId, slot.SlotId);
+            _sessions = Admin.GetSessions();
             _statusMessage = $"CloseAllSessions invoked for slot {slot.SlotId}.";
             _statusIsError = false;
         }
@@ -231,4 +325,40 @@
             await PinStore.DeleteAsync(deviceId, slotId, purpose);
         }
     }
+
+    private bool MatchesFilters(HsmSlotSummary slot)
+    {
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            string term = _searchText.Trim();
+            bool matchesSearch = Contains(slot.SlotDescription, term)
+                || Contains(slot.SlotManufacturer, term)
+                || Contains(slot.TokenLabel, term)
+                || Contains(slot.TokenModel, term)
+                || Contains(slot.TokenSerialNumber, term)
+                || slot.SlotId.ToString().Contains(term, StringComparison.OrdinalIgnoreCase);
+            if (!matchesSearch)
+            {
+                return false;
+            }
+        }
+
+        return _tokenFilter switch
+        {
+            "present" => slot.TokenPresent,
+            "missing" => !slot.TokenPresent,
+            _ => true
+        };
+    }
+
+    private IEnumerable<HsmSlotSummary> ApplyOrdering(IEnumerable<HsmSlotSummary> slots)
+        => _sortMode switch
+        {
+            "token" => slots.OrderBy(slot => slot.TokenLabel ?? string.Empty, StringComparer.OrdinalIgnoreCase).ThenBy(slot => slot.SlotId),
+            "mechanisms" => slots.OrderByDescending(slot => slot.MechanismCount).ThenBy(slot => slot.SlotId),
+            _ => slots.OrderBy(slot => slot.SlotId)
+        };
+
+    private static bool Contains(string? value, string term)
+        => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
 }
