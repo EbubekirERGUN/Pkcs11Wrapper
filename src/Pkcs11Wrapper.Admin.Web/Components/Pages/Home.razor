@@ -1,11 +1,16 @@
 @page "/"
+@using Pkcs11Wrapper.Admin.Web.Lab
+@using Pkcs11Wrapper.Admin.Web.Security
 @attribute [Authorize(Policy = AdminRoles.Viewer)]
 @inject HsmAdminService Admin
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject LocalAdminSecurityService Security
+@inject Pkcs11LabTemplateStore TemplateStore
 
 <PageTitle>Pkcs11Wrapper Admin</PageTitle>
 
 <h1>Pkcs11Wrapper Admin Dashboard</h1>
-<p class="text-muted">Cihaz, session, audit ve recovery görünürlüğünü tek ekranda topla; sonra cihaz yönetimi, PKCS#11 Lab ve güvenlik operasyonlarına hızlı geçiş yap.</p>
+<p class="text-muted">Cihaz, session, audit ve recovery görünürlüğünü tek ekranda topla; sonra cihaz yönetimi, PKCS#11 Lab ve güvenlik operasyonlarına hızlı geçiş yap. Bu dilimde dashboard daha güçlü recovery widget’ları ve operasyon özetleriyle genişletildi.</p>
 
 @if (_error is not null)
 {
@@ -25,22 +30,14 @@ else
         <button class="btn btn-outline-secondary" @onclick="LoadAsync">Refresh dashboard</button>
     </div>
 
-    @if (!_summary.AuditIntegrityValid || _summary.InvalidatedSessionCount > 0 || _summary.RecentAuditFailureCount > 0)
+    @if (AttentionItems.Count != 0)
     {
-        <div class="alert @(!_summary.AuditIntegrityValid ? "alert-danger" : "alert-warning")">
+        <div class="alert @(AttentionLevel == "danger" ? "alert-danger" : "alert-warning")">
             <div class="fw-semibold">Operational attention needed</div>
             <ul class="mb-0 ps-3 small">
-                @if (!_summary.AuditIntegrityValid)
+                @foreach (string item in AttentionItems)
                 {
-                    <li>Audit integrity needs review: @_summary.AuditIntegritySummary</li>
-                }
-                @if (_summary.InvalidatedSessionCount > 0)
-                {
-                    <li>@_summary.InvalidatedSessionCount invalidated tracked session(s) should be reviewed and closed from the Sessions page.</li>
-                }
-                @if (_summary.RecentAuditFailureCount > 0)
-                {
-                    <li>@_summary.RecentAuditFailureCount recent audit event(s) ended in failure. Check the Audit page for the exact operations.</li>
+                    <li>@item</li>
                 }
             </ul>
         </div>
@@ -93,9 +90,9 @@ else
         <div class="col-xl-2 col-md-4 col-sm-6">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
-                    <div class="text-muted small">Device readiness</div>
-                    <div class="display-6">@(_summary.EnabledDeviceCount == 0 ? "0" : "Ready")</div>
-                    <div class="small text-muted">Use Devices / Slots to validate module paths and token visibility.</div>
+                    <div class="text-muted small">Config backup</div>
+                    <div class="display-6">@BackupStatusLabel</div>
+                    <div class="small text-muted">@BackupStatusDescription</div>
                 </div>
             </div>
         </div>
@@ -121,28 +118,26 @@ else
                             <a class="btn btn-primary" href="devices">Devices</a>
                             <a class="btn btn-outline-primary" href="slots">Slots</a>
                             <a class="btn btn-outline-primary" href="keys">Keys / Objects</a>
-                            <AuthorizeView Roles="operator,admin">
-                                <Authorized>
-                                    <a class="btn btn-outline-dark" href="lab">PKCS#11 Lab</a>
-                                </Authorized>
-                            </AuthorizeView>
+                            @if (_isOperator)
+                            {
+                                <a class="btn btn-outline-dark" href="lab">PKCS#11 Lab</a>
+                            }
                             <a class="btn btn-outline-secondary" href="sessions">Sessions</a>
                             <a class="btn btn-outline-secondary" href="audit">Audit Logs</a>
                         </div>
                     </div>
 
-                    <AuthorizeView Roles="admin">
-                        <Authorized>
-                            <div>
-                                <div class="fw-semibold mb-2">Admin recovery / maintenance</div>
-                                <div class="d-flex flex-wrap gap-2">
-                                    <a class="btn btn-outline-warning" href="configuration">Configuration Transfer</a>
-                                    <a class="btn btn-outline-warning" href="users">Users</a>
-                                </div>
-                                <div class="small text-muted mt-2">Use Configuration for backup/migration and Users for bootstrap notice retirement, password rotation, and local role changes.</div>
+                    @if (_isAdmin)
+                    {
+                        <div>
+                            <div class="fw-semibold mb-2">Admin recovery / maintenance</div>
+                            <div class="d-flex flex-wrap gap-2">
+                                <a class="btn btn-outline-warning" href="configuration">Configuration Transfer</a>
+                                <a class="btn btn-outline-warning" href="users">Users</a>
                             </div>
-                        </Authorized>
-                    </AuthorizeView>
+                            <div class="small text-muted mt-2">Use Configuration for backup/migration and Users for bootstrap notice retirement, password rotation, and local role changes.</div>
+                        </div>
+                    }
                 </div>
             </div>
         </div>
@@ -155,17 +150,120 @@ else
                         <li>Before risky changes, export the current device-profile bundle from <a href="configuration">Configuration</a>.</li>
                         <li>If tracked sessions show as invalidated or broken, open <a href="sessions">Sessions</a>, inspect the reason, then close stale tracked entries.</li>
                         <li>If audit integrity shows warning state, open <a href="audit">Audit Logs</a> and review the chain summary before continuing write operations.</li>
-                        <AuthorizeView Roles="admin">
-                            <Authorized>
-                                <li>Rotate local passwords and retire the bootstrap notice from <a href="users">Users</a> after initial setup is complete.</li>
-                            </Authorized>
-                        </AuthorizeView>
-                        <AuthorizeView Roles="operator,admin">
-                            <Authorized>
-                                <li>Use <a href="lab">PKCS#11 Lab</a> for diagnostics and controlled experiments instead of ad-hoc raw PKCS#11 shelling.</li>
-                            </Authorized>
-                        </AuthorizeView>
+                        @if (_isAdmin)
+                        {
+                            <li>Rotate local passwords and retire the bootstrap notice from <a href="users">Users</a> after initial setup is complete.</li>
+                        }
+                        @if (_isOperator)
+                        {
+                            <li>Use <a href="lab">PKCS#11 Lab</a> for diagnostics and controlled experiments instead of ad-hoc raw PKCS#11 shelling.</li>
+                        }
                     </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+        <div class="col-xl-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header">Failure categories</div>
+                <div class="card-body">
+                    @if (FailureCategories.Count == 0)
+                    {
+                        <div class="text-muted small">No non-success audit category appears in the loaded audit window.</div>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2">
+                            @foreach (DashboardFailureCategoryItem item in FailureCategories)
+                            {
+                                <div class="border rounded p-2 small">
+                                    <div class="d-flex justify-content-between align-items-center gap-2">
+                                        <div class="fw-semibold">@item.Category</div>
+                                        <span class="badge text-bg-danger">@item.Count</span>
+                                    </div>
+                                    <div class="text-muted">Latest: @item.LatestAction → @item.LatestTarget</div>
+                                    <div class="text-muted">@item.LatestTimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header">Invalidated sessions by device</div>
+                <div class="card-body">
+                    @if (InvalidatedDevices.Count == 0)
+                    {
+                        <div class="text-muted small">No invalidated tracked session is currently grouped under any device.</div>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2">
+                            @foreach (DashboardInvalidatedDeviceItem item in InvalidatedDevices)
+                            {
+                                <div class="border rounded p-2 small">
+                                    <div class="d-flex justify-content-between align-items-center gap-2">
+                                        <div class="fw-semibold">@item.DeviceName</div>
+                                        <span class="badge text-bg-danger">@item.Count</span>
+                                    </div>
+                                    <div class="text-muted">Latest reason: @item.LatestReason</div>
+                                    <div class="text-muted">Last touched: @item.LatestTouchedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header">Recovery widgets</div>
+                <div class="card-body d-flex flex-column gap-3">
+                    @if (_isAdmin)
+                    {
+                        <div class="border rounded p-2 small">
+                            <div class="fw-semibold">Local admin hardening</div>
+                            <div>Total users: @(_securitySnapshot?.Users.Count ?? 0)</div>
+                            <div>Admin-capable users: @AdminUserCount</div>
+                            <div>Bootstrap notice: @BootstrapStatusLabel</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="border rounded p-2 small text-muted">Local-user hardening widgets are shown to admin accounts only.</div>
+                    }
+
+                    @if (_isOperator)
+                    {
+                        <div class="border rounded p-2 small">
+                            <div class="fw-semibold">Saved Lab templates</div>
+                            <div>Total templates: @_templates.Count</div>
+                            @if (RecentTemplateNames.Count == 0)
+                            {
+                                <div class="text-muted">No saved template yet.</div>
+                            }
+                            else
+                            {
+                                <div class="text-muted">Recent: @string.Join(", ", RecentTemplateNames)</div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="border rounded p-2 small text-muted">Lab template widgets are shown to operator/admin accounts.</div>
+                    }
+
+                    <div class="border rounded p-2 small">
+                        <div class="fw-semibold">Configuration export freshness</div>
+                        <div>@BackupStatusDescription</div>
+                        <div class="text-muted">Keep a recent bundle before large import/replace or host migration work.</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -213,18 +311,103 @@ else
 
 @code {
     private DashboardSummary? _summary;
+    private IReadOnlyList<AdminAuditLogEntry> _auditWindowLogs = [];
     private IReadOnlyList<AdminAuditLogEntry> _recentLogs = [];
+    private IReadOnlyList<AdminSessionSnapshot> _sessions = [];
+    private IReadOnlyList<Pkcs11LabSavedTemplate> _templates = [];
+    private LocalAdminSecuritySnapshot? _securitySnapshot;
     private string? _error;
     private DateTimeOffset? _lastLoadedUtc;
+    private bool _isAdmin;
+    private bool _isOperator;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    private IReadOnlyList<DashboardFailureCategoryItem> FailureCategories => AdminDashboardView.BuildFailureCategories(_auditWindowLogs);
+
+    private IReadOnlyList<DashboardInvalidatedDeviceItem> InvalidatedDevices => AdminDashboardView.BuildInvalidatedDevices(_sessions);
+
+    private IReadOnlyList<string> RecentTemplateNames => AdminDashboardView.GetRecentTemplateNames(_templates);
+
+    private DateTimeOffset? LastConfigurationExportUtc => AdminDashboardView.GetLastSuccessfulConfigurationExportUtc(_auditWindowLogs);
+
+    private int AdminUserCount => _securitySnapshot?.Users.Count(user => user.Roles.Contains(AdminRoles.Admin, StringComparer.OrdinalIgnoreCase)) ?? 0;
+
+    private string BootstrapStatusLabel => _securitySnapshot?.BootstrapStatus.NoticeExists == true ? "Open" : "Retired";
+
+    private string BackupStatusLabel
+        => LastConfigurationExportUtc is null
+            ? "Never"
+            : (DateTimeOffset.UtcNow - LastConfigurationExportUtc.Value) <= TimeSpan.FromDays(7)
+                ? "Fresh"
+                : "Stale";
+
+    private string BackupStatusDescription
+        => LastConfigurationExportUtc is null
+            ? "No successful configuration export was found in the loaded audit window."
+            : $"Last successful export: {LastConfigurationExportUtc.Value.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
+
+    private IReadOnlyList<string> AttentionItems
+    {
+        get
+        {
+            List<string> items = [];
+            if (_summary is null)
+            {
+                return items;
+            }
+
+            if (!_summary.AuditIntegrityValid)
+            {
+                items.Add($"Audit integrity needs review: {_summary.AuditIntegritySummary}");
+            }
+
+            if (_summary.InvalidatedSessionCount > 0)
+            {
+                items.Add($"{_summary.InvalidatedSessionCount} invalidated tracked session(s) should be reviewed and closed from the Sessions page.");
+            }
+
+            if (_summary.RecentAuditFailureCount > 0)
+            {
+                items.Add($"{_summary.RecentAuditFailureCount} recent audit event(s) ended in failure. Check the Audit page for the exact operations.");
+            }
+
+            if (_isAdmin && LastConfigurationExportUtc is null)
+            {
+                items.Add("No recent successful configuration export is visible in the loaded audit window. Export a bundle before risky migration or replace-all work.");
+            }
+            else if (_isAdmin && LastConfigurationExportUtc is DateTimeOffset exportedUtc && (DateTimeOffset.UtcNow - exportedUtc) > TimeSpan.FromDays(7))
+            {
+                items.Add($"Last successful configuration export is older than 7 days ({exportedUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}). Refresh the backup bundle if the environment is still active.");
+            }
+
+            if (_isAdmin && _securitySnapshot?.BootstrapStatus.NoticeExists == true)
+            {
+                items.Add("Bootstrap credential notice is still present. Retire it from Users after the first-run hardening is complete.");
+            }
+
+            return items;
+        }
+    }
+
+    private string AttentionLevel => _summary?.AuditIntegrityValid == false ? "danger" : "warning";
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthenticationState state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = state.User.IsInRole(AdminRoles.Admin);
+        _isOperator = _isAdmin || state.User.IsInRole(AdminRoles.Operator);
+        await LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
         try
         {
             _summary = await Admin.GetDashboardAsync();
-            _recentLogs = await Admin.GetAuditLogsAsync(10);
+            _auditWindowLogs = await Admin.GetAuditLogsAsync(50);
+            _recentLogs = _auditWindowLogs.Take(10).ToArray();
+            _sessions = Admin.GetSessions();
+            _templates = _isOperator ? await TemplateStore.GetAllAsync() : [];
+            _securitySnapshot = _isAdmin ? await Security.GetSnapshotAsync() : null;
             _lastLoadedUtc = DateTimeOffset.UtcNow;
             _error = null;
         }
