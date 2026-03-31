@@ -68,4 +68,29 @@ public sealed class HsmAdminServiceTests
         Assert.Equal("DESTROY 99 important-key", HsmAdminService.BuildDestroyConfirmationText(99, "important-key"));
         Assert.Equal("DESTROY 99", HsmAdminService.BuildDestroyConfirmationText(99, null));
     }
+
+    [Fact]
+    public void ValidateImportAesKeyRequestRejectsInvalidLength()
+    {
+        ImportAesKeyRequest request = new()
+        {
+            Label = "aes-import",
+            ValueHex = "00112233445566778899AABBCCDDEEFF00"
+        };
+
+        ArgumentOutOfRangeException ex = Assert.Throws<ArgumentOutOfRangeException>(() => HsmAdminService.ValidateImportAesKeyRequest(request));
+        Assert.Contains("Imported AES key value", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateUpdateObjectAttributesRequestRejectsMissingHandle()
+    {
+        UpdateObjectAttributesRequest request = new()
+        {
+            Handle = 0,
+            Label = "updated"
+        };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => HsmAdminService.ValidateUpdateObjectAttributesRequest(request));
+    }
 }

@@ -22,7 +22,7 @@ public sealed class AdminSessionRegistry
             .OrderByDescending(x => x.LastTouchedUtc)
             .ToArray();
 
-    public bool Touch(Guid sessionId, string operation)
+    public bool TryTouch(Guid sessionId, string operation)
     {
         if (_sessions.TryGetValue(sessionId, out TrackedSession? tracked))
         {
@@ -31,6 +31,18 @@ public sealed class AdminSessionRegistry
             return true;
         }
 
+        return false;
+    }
+
+    public bool TryGet(Guid sessionId, out AdminTrackedSession? session)
+    {
+        if (_sessions.TryGetValue(sessionId, out TrackedSession? tracked))
+        {
+            session = new AdminTrackedSession(tracked.Module, tracked.Session, tracked.DeviceId, tracked.DeviceName, tracked.IsReadWrite, tracked.Notes);
+            return true;
+        }
+
+        session = null;
         return false;
     }
 
@@ -65,13 +77,21 @@ public sealed class AdminSessionRegistry
         try
         {
             Pkcs11SessionInfo info = tracked.Session.GetInfo();
-            return tracked.ToSnapshot(true, info.State.ToString(), tracked.Notes);
+            return tracked.ToSnapshot(info, true, tracked.Notes);
         }
         catch (Exception ex)
         {
-            return tracked.ToSnapshot(false, "Unavailable", ex.Message);
+            return tracked.ToSnapshot(default, false, ex.Message);
         }
     }
+
+    public sealed record AdminTrackedSession(
+        Pkcs11Module Module,
+        Pkcs11Session Session,
+        Guid DeviceId,
+        string DeviceName,
+        bool IsReadWrite,
+        string Notes);
 
     private sealed class TrackedSession(
         Guid id,
@@ -96,10 +116,14 @@ public sealed class AdminSessionRegistry
         public string LastOperation { get; set; } = lastOperation;
         public string Notes { get; } = notes;
 
-        public AdminSessionSnapshot ToSnapshot(bool isHealthy = true, string? state = null, string? notesOverride = null)
+        public AdminSessionSnapshot ToSnapshot(Pkcs11SessionInfo info = default, bool isHealthy = true, string? notesOverride = null)
         {
-            string effectiveState = state ?? Session.GetInfo().State.ToString();
-            return new AdminSessionSnapshot(Id, DeviceId, DeviceName, Session.SlotId.Value, IsReadWrite, effectiveState, OpenedUtc, LastTouchedUtc, LastOperation, isHealthy, notesOverride ?? Notes);
+            bool isUserAuthenticated = info.State is Pkcs11SessionState.ReadOnlyUser or Pkcs11SessionState.ReadWriteUser;
+            bool isSoAuthenticated = info.State is Pkcs11SessionState.ReadWriteSecurityOfficer;
+            string state = isHealthy ? info.State.ToString() : "Unavailable";
+            string flags = isHealthy ? info.Flags.ToString() : "Unavailable";
+            nuint deviceError = isHealthy ? info.DeviceError : 0;
+            return new AdminSessionSnapshot(Id, DeviceId, DeviceName, Session.SlotId.Value, IsReadWrite, state, flags, deviceError, isUserAuthenticated, isSoAuthenticated, OpenedUtc, LastTouchedUtc, LastOperation, isHealthy, notesOverride ?? Notes);
         }
 
         public ValueTask DisposeAsync()

@@ -40,6 +40,9 @@ Delivered in current slice:
 - practical key-management flows for token operators: AES key generation and RSA key-pair generation
 - stronger destructive flow with typed confirmation text + explicit permanent-deletion acknowledgement
 - admin-layer validation tests covering key-generation request validation and destroy confirmation rules
+- AES raw-value import/create flow via `C_CreateObject` for tokens that allow secret-key object creation
+- object attribute editing panel for writable attributes (`Label`, `Id`, selected capability booleans, and related flags) via `C_SetAttributeValue`
+- safer key/object UX: edit action from table/detail, clearer capability summaries, and explicit warning that token policy still decides what is mutable
 
 Goals:
 - key/object detail drawer
@@ -48,19 +51,23 @@ Goals:
 - safer destructive flows and richer confirmations
 
 Remaining for Phase B:
-- add at least one explicit key create/import flow (for example AES raw-value create) if the UX/security tradeoff is acceptable
-- optional attribute editing/update surface where tokens allow it
 - deeper mechanism-aware affordances (for example conditional wrap/unwrap presets per slot capabilities)
+- consider object copy/template-based flows if a real operator need appears
+- evaluate whether per-token editability hints should be surfaced before submit (today failures are handled cleanly after token enforcement)
 
 ## Phase C - Session operations
 
-Status: planned
+Status: in progress
 
-Goals:
-- richer session detail view
-- login/logout controls in session context
-- operation visibility improvements
-- optional `CloseAllSessions` / session cancel surface per slot/device
+Delivered in current slice:
+- richer tracked-session detail panel with state, flags, device error, auth-state summary, and notes
+- login/logout controls directly against the tracked session context
+- operation visibility improvements through last-operation, auth-state, and slot/session metadata
+- tracked-session `C_SessionCancel` control and slot-level `CloseAllSessions` trigger from the admin panel
+
+Remaining for Phase C:
+- optionally distinguish tracked session invalidated-by-slot-close state even more explicitly in UI
+- consider per-device/per-slot grouping and filters if session volume grows
 
 ## Phase D - Security and ops hardening
 

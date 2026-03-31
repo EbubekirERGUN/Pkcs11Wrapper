@@ -4,7 +4,7 @@
 <PageTitle>Keys</PageTitle>
 
 <h1>Keys / Objects</h1>
-<p class="text-muted">Slot içindeki objeleri listele, ayrıntılarını incele, yaygın AES/RSA üretim akışlarını çalıştır ve destroy işlemlerinde typed confirmation kullan.</p>
+<p class="text-muted">Slot içindeki objeleri listele, üret/import akışlarını çalıştır, düzenlenebilir attribute’ları güncelle ve destroy işlemlerinde typed confirmation kullan.</p>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -38,7 +38,7 @@
             <input class="form-control" @bind="_labelFilter" />
         </div>
         <div class="col-lg-2">
-            <label class="form-label">Optional User PIN</label>
+            <label class="form-label">User PIN</label>
             <input class="form-control" type="password" @bind="_userPin" />
         </div>
         <div class="col-lg-3 d-flex gap-2">
@@ -49,7 +49,7 @@
 </div>
 
 <div class="row g-4 mb-4">
-    <div class="col-xl-6">
+    <div class="col-xl-4">
         <div class="card shadow-sm h-100">
             <div class="card-header">Generate AES key</div>
             <div class="card-body row g-3">
@@ -58,7 +58,7 @@
                     <input class="form-control" @bind="_aesRequest.Label" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">ID (hex, optional)</label>
+                    <label class="form-label">ID (hex)</label>
                     <input class="form-control" @bind="_aesRequest.IdHex" />
                 </div>
                 <div class="col-md-4">
@@ -72,16 +72,16 @@
                     </select>
                 </div>
                 <div class="col-md-8 d-flex flex-wrap gap-3 align-items-center">
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.AllowEncrypt" /><label class="form-check-label">Encrypt</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.AllowDecrypt" /><label class="form-check-label">Decrypt</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.AllowWrap" /><label class="form-check-label">Wrap</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.AllowUnwrap" /><label class="form-check-label">Unwrap</label></div>
+                    @CapabilityCheckbox(() => _aesRequest.AllowEncrypt, value => _aesRequest.AllowEncrypt = value, "Encrypt")
+                    @CapabilityCheckbox(() => _aesRequest.AllowDecrypt, value => _aesRequest.AllowDecrypt = value, "Decrypt")
+                    @CapabilityCheckbox(() => _aesRequest.AllowWrap, value => _aesRequest.AllowWrap = value, "Wrap")
+                    @CapabilityCheckbox(() => _aesRequest.AllowUnwrap, value => _aesRequest.AllowUnwrap = value, "Unwrap")
                 </div>
                 <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.Token" /><label class="form-check-label">Token object</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.Private" /><label class="form-check-label">Private</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.Sensitive" /><label class="form-check-label">Sensitive</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_aesRequest.Extractable" /><label class="form-check-label">Extractable</label></div>
+                    @CapabilityCheckbox(() => _aesRequest.Token, value => _aesRequest.Token = value, "Token object")
+                    @CapabilityCheckbox(() => _aesRequest.Private, value => _aesRequest.Private = value, "Private")
+                    @CapabilityCheckbox(() => _aesRequest.Sensitive, value => _aesRequest.Sensitive = value, "Sensitive")
+                    @CapabilityCheckbox(() => _aesRequest.Extractable, value => _aesRequest.Extractable = value, "Extractable")
                 </div>
                 <div class="col-12">
                     <button class="btn btn-success" @onclick="GenerateAesAsync" disabled="@(!CanManageKeys)">Generate AES Key</button>
@@ -90,7 +90,43 @@
         </div>
     </div>
 
-    <div class="col-xl-6">
+    <div class="col-xl-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Import AES key</div>
+            <div class="card-body row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Label</label>
+                    <input class="form-control" @bind="_importAesRequest.Label" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">ID (hex)</label>
+                    <input class="form-control" @bind="_importAesRequest.IdHex" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Key Value (hex)</label>
+                    <textarea class="form-control font-monospace" rows="4" @bind="_importAesRequest.ValueHex"></textarea>
+                    <div class="form-text">Raw key import uses <code>C_CreateObject</code> with AES secret-key attributes. Keep this field local and short-lived.</div>
+                </div>
+                <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
+                    @CapabilityCheckbox(() => _importAesRequest.AllowEncrypt, value => _importAesRequest.AllowEncrypt = value, "Encrypt")
+                    @CapabilityCheckbox(() => _importAesRequest.AllowDecrypt, value => _importAesRequest.AllowDecrypt = value, "Decrypt")
+                    @CapabilityCheckbox(() => _importAesRequest.AllowWrap, value => _importAesRequest.AllowWrap = value, "Wrap")
+                    @CapabilityCheckbox(() => _importAesRequest.AllowUnwrap, value => _importAesRequest.AllowUnwrap = value, "Unwrap")
+                </div>
+                <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
+                    @CapabilityCheckbox(() => _importAesRequest.Token, value => _importAesRequest.Token = value, "Token object")
+                    @CapabilityCheckbox(() => _importAesRequest.Private, value => _importAesRequest.Private = value, "Private")
+                    @CapabilityCheckbox(() => _importAesRequest.Sensitive, value => _importAesRequest.Sensitive = value, "Sensitive")
+                    @CapabilityCheckbox(() => _importAesRequest.Extractable, value => _importAesRequest.Extractable = value, "Extractable")
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-warning" @onclick="ImportAesAsync" disabled="@(!CanManageKeys)">Import AES Key</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-4">
         <div class="card shadow-sm h-100">
             <div class="card-header">Generate RSA key pair</div>
             <div class="card-body row g-3">
@@ -99,7 +135,7 @@
                     <input class="form-control" @bind="_rsaRequest.Label" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">ID (hex, optional)</label>
+                    <label class="form-label">ID (hex)</label>
                     <input class="form-control" @bind="_rsaRequest.IdHex" />
                 </div>
                 <div class="col-md-4">
@@ -112,19 +148,19 @@
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Public exponent (hex)</label>
+                    <label class="form-label">Public exponent</label>
                     <input class="form-control" @bind="_rsaRequest.PublicExponentHex" />
                 </div>
                 <div class="col-md-4 d-flex align-items-end">
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.Token" /><label class="form-check-label">Token objects</label></div>
+                    @CapabilityCheckbox(() => _rsaRequest.Token, value => _rsaRequest.Token = value, "Token objects")
                 </div>
                 <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.AllowSign" /><label class="form-check-label">Sign</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.AllowVerify" /><label class="form-check-label">Verify</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.AllowEncrypt" /><label class="form-check-label">Encrypt</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.AllowDecrypt" /><label class="form-check-label">Decrypt</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.Sensitive" /><label class="form-check-label">Sensitive private key</label></div>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" @bind="_rsaRequest.Extractable" /><label class="form-check-label">Extractable private key</label></div>
+                    @CapabilityCheckbox(() => _rsaRequest.AllowSign, value => _rsaRequest.AllowSign = value, "Sign")
+                    @CapabilityCheckbox(() => _rsaRequest.AllowVerify, value => _rsaRequest.AllowVerify = value, "Verify")
+                    @CapabilityCheckbox(() => _rsaRequest.AllowEncrypt, value => _rsaRequest.AllowEncrypt = value, "Encrypt")
+                    @CapabilityCheckbox(() => _rsaRequest.AllowDecrypt, value => _rsaRequest.AllowDecrypt = value, "Decrypt")
+                    @CapabilityCheckbox(() => _rsaRequest.Sensitive, value => _rsaRequest.Sensitive = value, "Sensitive private key")
+                    @CapabilityCheckbox(() => _rsaRequest.Extractable, value => _rsaRequest.Extractable = value, "Extractable private key")
                 </div>
                 <div class="col-12">
                     <button class="btn btn-success" @onclick="GenerateRsaAsync" disabled="@(!CanManageKeys)">Generate RSA Key Pair</button>
@@ -138,6 +174,10 @@
 {
     <div class="row g-4">
         <div class="col-xl-7">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="small text-muted">Loaded @_keys.Count object(s)</div>
+                <div class="small text-muted">PIN is only used for protected reads/writes; no session is persisted here.</div>
+            </div>
             <div class="table-responsive">
                 <table class="table table-striped table-hover align-middle">
                     <thead>
@@ -160,17 +200,11 @@
                                 <td><code>@key.IdHex</code></td>
                                 <td>@key.ObjectClass</td>
                                 <td>@key.KeyType</td>
-                                <td class="small">
-                                    @(CapabilityText(key.CanEncrypt, "enc"))
-                                    @(CapabilityText(key.CanDecrypt, "dec"))
-                                    @(CapabilityText(key.CanSign, "sign"))
-                                    @(CapabilityText(key.CanVerify, "verify"))
-                                    @(CapabilityText(key.CanWrap, "wrap"))
-                                    @(CapabilityText(key.CanUnwrap, "unwrap"))
-                                </td>
+                                <td class="small">@CapabilitySummary(key)</td>
                                 <td class="text-end">
                                     <div class="btn-group btn-group-sm">
                                         <button class="btn btn-outline-primary" @onclick="() => ShowDetailAsync(key)">Details</button>
+                                        <button class="btn btn-outline-secondary" @onclick="() => BeginEdit(key)">Edit</button>
                                         <button class="btn btn-outline-danger" @onclick="() => BeginDestroy(key)">Destroy</button>
                                     </div>
                                 </td>
@@ -182,10 +216,10 @@
         </div>
 
         <div class="col-xl-5">
-            @if (_selectedDetail is null && _destroyTarget is null)
+            @if (_selectedDetail is null && _destroyTarget is null && _editRequest is null)
             {
                 <div class="card shadow-sm">
-                    <div class="card-body text-muted">Bir obje seçip detaylarını veya destroy confirmation panelini aç.</div>
+                    <div class="card-body text-muted">Bir obje seçip detaylarını, edit panelini veya destroy confirmation panelini aç.</div>
                 </div>
             }
 
@@ -194,7 +228,10 @@
                 <div class="card shadow-sm mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Object detail</span>
-                        <button class="btn btn-sm btn-outline-secondary" @onclick="ClearDetail">Close</button>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" @onclick="() => BeginEditFromDetail(_selectedDetail)">Edit attributes</button>
+                            <button class="btn btn-outline-secondary" @onclick="ClearDetail">Close</button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <dl class="row mb-0">
@@ -206,8 +243,7 @@
                             <dt class="col-sm-4">Object Size</dt><dd class="col-sm-8">@FormatNullable(_selectedDetail.SizeBytes)</dd>
                             <dt class="col-sm-4">Value Length</dt><dd class="col-sm-8">@FormatNullable(_selectedDetail.ValueLength)</dd>
                             <dt class="col-sm-4">Modulus Bits</dt><dd class="col-sm-8">@FormatNullable(_selectedDetail.ModulusBits)</dd>
-                            <dt class="col-sm-4">Flags</dt>
-                            <dd class="col-sm-8">@string.Join(", ", GetFlags(_selectedDetail))</dd>
+                            <dt class="col-sm-4">Flags</dt><dd class="col-sm-8">@string.Join(", ", GetFlags(_selectedDetail))</dd>
                         </dl>
 
                         <hr />
@@ -221,6 +257,55 @@
                                 </li>
                             }
                         </ul>
+                    </div>
+                </div>
+            }
+
+            @if (_editRequest is not null)
+            {
+                <div class="card border-secondary shadow-sm mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Edit supported attributes</span>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="CancelEdit">Close</button>
+                    </div>
+                    <div class="card-body row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Handle</label>
+                            <input class="form-control" value="@_editRequest.Handle" disabled />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Current Label</label>
+                            <input class="form-control" value="@_editRequest.CurrentLabel" disabled />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">New Label</label>
+                            <input class="form-control" @bind="_editRequest.Label" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">ID (hex)</label>
+                            <input class="form-control" @bind="_editRequest.IdHex" />
+                        </div>
+                        <div class="col-12">
+                            <div class="alert alert-warning small mb-0">Only attributes supported by both PKCS#11 and the token are updated. Typical safe targets: label, ID and selected capability booleans on modifiable objects.</div>
+                        </div>
+                        <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
+                            @NullableCheckbox(() => _editRequest.Token, value => _editRequest.Token = value, "Token")
+                            @NullableCheckbox(() => _editRequest.Private, value => _editRequest.Private = value, "Private")
+                            @NullableCheckbox(() => _editRequest.Extractable, value => _editRequest.Extractable = value, "Extractable")
+                        </div>
+                        <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
+                            @NullableCheckbox(() => _editRequest.AllowEncrypt, value => _editRequest.AllowEncrypt = value, "Encrypt")
+                            @NullableCheckbox(() => _editRequest.AllowDecrypt, value => _editRequest.AllowDecrypt = value, "Decrypt")
+                            @NullableCheckbox(() => _editRequest.AllowSign, value => _editRequest.AllowSign = value, "Sign")
+                            @NullableCheckbox(() => _editRequest.AllowVerify, value => _editRequest.AllowVerify = value, "Verify")
+                            @NullableCheckbox(() => _editRequest.AllowWrap, value => _editRequest.AllowWrap = value, "Wrap")
+                            @NullableCheckbox(() => _editRequest.AllowUnwrap, value => _editRequest.AllowUnwrap = value, "Unwrap")
+                            @NullableCheckbox(() => _editRequest.AllowDerive, value => _editRequest.AllowDerive = value, "Derive")
+                        </div>
+                        <div class="col-12 d-flex gap-2">
+                            <button class="btn btn-primary" @onclick="SaveEditAsync" disabled="@(!CanManageKeys)">Save changes</button>
+                            <button class="btn btn-outline-secondary" @onclick="ResetEditBooleans">Reset toggles to keep existing</button>
+                        </div>
                     </div>
                 </div>
             }
@@ -269,7 +354,9 @@
     private nuint? _selectedDetailHandle;
     private HsmKeyObjectSummary? _destroyTarget;
     private DestroyObjectRequest _destroyRequest = new();
+    private UpdateObjectAttributesRequest? _editRequest;
     private GenerateAesKeyRequest _aesRequest = new() { Label = "aes-admin-" + Guid.NewGuid().ToString("N")[..10] };
+    private ImportAesKeyRequest _importAesRequest = new() { Label = "aes-import-" + Guid.NewGuid().ToString("N")[..10] };
     private GenerateRsaKeyPairRequest _rsaRequest = new() { Label = "rsa-admin-" + Guid.NewGuid().ToString("N")[..10] };
     private string? _statusMessage;
     private bool _statusIsError;
@@ -294,6 +381,7 @@
         _selectedDetailHandle = null;
         _destroyTarget = null;
         _destroyRequest = new();
+        _editRequest = null;
         if (!Guid.TryParse(_selectedDeviceId, out Guid deviceId))
         {
             _slots = [];
@@ -318,6 +406,7 @@
             _destroyRequest = new();
             _selectedDetail = null;
             _selectedDetailHandle = null;
+            _editRequest = null;
             SetStatus($"Loaded {_keys.Count} object(s).", false);
         }
         catch (Exception ex)
@@ -339,6 +428,7 @@
             _selectedDetailHandle = key.Handle;
             _destroyTarget = null;
             _destroyRequest = new();
+            _editRequest = null;
             SetStatus($"Loaded detail for handle {key.Handle}.", false);
         }
         catch (Exception ex)
@@ -353,11 +443,59 @@
         _selectedDetailHandle = null;
     }
 
+    private void BeginEdit(HsmKeyObjectSummary key)
+    {
+        _editRequest = new UpdateObjectAttributesRequest
+        {
+            Handle = key.Handle,
+            CurrentLabel = key.Label,
+            Label = key.Label ?? $"object-{key.Handle}",
+            IdHex = key.IdHex
+        };
+        _destroyTarget = null;
+        _selectedDetail = null;
+        _selectedDetailHandle = key.Handle;
+    }
+
+    private void BeginEditFromDetail(HsmObjectDetail detail)
+    {
+        _editRequest = new UpdateObjectAttributesRequest
+        {
+            Handle = detail.Handle,
+            CurrentLabel = detail.Label,
+            Label = detail.Label ?? $"object-{detail.Handle}",
+            IdHex = detail.IdHex
+        };
+        _destroyTarget = null;
+    }
+
+    private void ResetEditBooleans()
+    {
+        if (_editRequest is null)
+        {
+            return;
+        }
+
+        _editRequest.Token = null;
+        _editRequest.Private = null;
+        _editRequest.Extractable = null;
+        _editRequest.AllowEncrypt = null;
+        _editRequest.AllowDecrypt = null;
+        _editRequest.AllowSign = null;
+        _editRequest.AllowVerify = null;
+        _editRequest.AllowWrap = null;
+        _editRequest.AllowUnwrap = null;
+        _editRequest.AllowDerive = null;
+    }
+
+    private void CancelEdit() => _editRequest = null;
+
     private void BeginDestroy(HsmKeyObjectSummary key)
     {
         _destroyTarget = key;
         _selectedDetail = null;
         _selectedDetailHandle = null;
+        _editRequest = null;
         _destroyRequest = new DestroyObjectRequest { Handle = key.Handle, Label = key.Label, UserPin = _userPin ?? string.Empty };
     }
 
@@ -365,6 +503,27 @@
     {
         _destroyTarget = null;
         _destroyRequest = new();
+    }
+
+    private async Task SaveEditAsync()
+    {
+        try
+        {
+            if (_editRequest is null || !TryGetSelection(out Guid deviceId, out nuint slotId))
+            {
+                return;
+            }
+
+            KeyManagementResult result = await Admin.UpdateObjectAttributesAsync(deviceId, slotId, _editRequest, _userPin ?? string.Empty);
+            SetStatus(result.Summary, false);
+            _labelFilter = result.Label;
+            _editRequest = null;
+            await LoadKeysAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, true);
+        }
     }
 
     private async Task DestroyAsync()
@@ -404,6 +563,27 @@
             SetStatus(result.Summary, false);
             _labelFilter = result.Label;
             _aesRequest = new GenerateAesKeyRequest { Label = "aes-admin-" + Guid.NewGuid().ToString("N")[..10], SizeBytes = _aesRequest.SizeBytes };
+            await LoadKeysAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, true);
+        }
+    }
+
+    private async Task ImportAesAsync()
+    {
+        try
+        {
+            if (!TryGetSelection(out Guid deviceId, out nuint slotId))
+            {
+                return;
+            }
+
+            KeyManagementResult result = await Admin.ImportAesKeyAsync(deviceId, slotId, _importAesRequest, _userPin ?? string.Empty);
+            SetStatus(result.Summary, false);
+            _labelFilter = result.Label;
+            _importAesRequest = new ImportAesKeyRequest { Label = "aes-import-" + Guid.NewGuid().ToString("N")[..10] };
             await LoadKeysAsync();
         }
         catch (Exception ex)
@@ -464,5 +644,50 @@
 
     private static string FormatNullable(nuint? value) => value?.ToString() ?? "n/a";
 
-    private static string CapabilityText(bool? value, string name) => value == true ? $"{name} " : string.Empty;
+    private static string CapabilitySummary(HsmKeyObjectSummary key)
+    {
+        List<string> flags = [];
+        if (key.CanEncrypt == true) flags.Add("enc");
+        if (key.CanDecrypt == true) flags.Add("dec");
+        if (key.CanSign == true) flags.Add("sign");
+        if (key.CanVerify == true) flags.Add("verify");
+        if (key.CanWrap == true) flags.Add("wrap");
+        if (key.CanUnwrap == true) flags.Add("unwrap");
+        return flags.Count == 0 ? "n/a" : string.Join(", ", flags);
+    }
+
+    private RenderFragment CapabilityCheckbox(Func<bool> getValue, Action<bool> setValue, string label) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "form-check");
+        builder.OpenElement(2, "input");
+        builder.AddAttribute(3, "class", "form-check-input");
+        builder.AddAttribute(4, "type", "checkbox");
+        builder.AddAttribute(5, "checked", getValue());
+        builder.AddAttribute(6, "onchange", EventCallback.Factory.CreateBinder<bool>(this, setValue, getValue()));
+        builder.CloseElement();
+        builder.OpenElement(7, "label");
+        builder.AddAttribute(8, "class", "form-check-label");
+        builder.AddContent(9, label);
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private RenderFragment NullableCheckbox(Func<bool?> getValue, Action<bool?> setValue, string label) => builder =>
+    {
+        bool current = getValue() == true;
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "form-check form-switch");
+        builder.OpenElement(2, "input");
+        builder.AddAttribute(3, "class", "form-check-input");
+        builder.AddAttribute(4, "type", "checkbox");
+        builder.AddAttribute(5, "checked", current);
+        builder.AddAttribute(6, "onchange", EventCallback.Factory.CreateBinder<bool>(this, value => setValue(value), current));
+        builder.CloseElement();
+        builder.OpenElement(7, "label");
+        builder.AddAttribute(8, "class", "form-check-label");
+        builder.AddContent(9, getValue() is null ? $"{label} (keep existing)" : label);
+        builder.CloseElement();
+        builder.CloseElement();
+    };
 }

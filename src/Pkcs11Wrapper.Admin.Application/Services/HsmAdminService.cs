@@ -175,6 +175,26 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return result;
     }
 
+    public async Task<KeyManagementResult> ImportAesKeyAsync(Guid deviceId, nuint slotIdValue, ImportAesKeyRequest request, string userPin, CancellationToken cancellationToken = default)
+    {
+        ValidateImportAesKeyRequest(request);
+        byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+        byte[] label = Encoding.UTF8.GetBytes(request.Label.Trim());
+        byte[] value = ParseRequiredHex(request.ValueHex, nameof(request.ValueHex));
+
+        HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
+        using Pkcs11Module module = CreateInitializedModule(device);
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
+        RequireUserPin(userPin, "import AES keys");
+        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+
+        Pkcs11ObjectHandle handle = session.CreateObject(CreateImportedAesTemplate(request, label, id, value));
+        string idHex = id.Length == 0 ? "(empty)" : Convert.ToHexString(id);
+        KeyManagementResult result = new("ImportAesKey", $"Imported AES-{value.Length * 8} key '{request.Label.Trim()}' (handle {handle.Value}).", [handle.Value], request.Label.Trim(), id.Length == 0 ? null : idHex);
+        await auditLog.WriteAsync("Key", "ImportAes", $"{device.Name}/slot-{slotIdValue}/handle-{handle.Value}", "Success", result.Summary, cancellationToken: cancellationToken);
+        return result;
+    }
+
     public async Task<KeyManagementResult> GenerateRsaKeyPairAsync(Guid deviceId, nuint slotIdValue, GenerateRsaKeyPairRequest request, string userPin, CancellationToken cancellationToken = default)
     {
         ValidateGenerateRsaKeyPairRequest(request);
@@ -231,6 +251,37 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return closed;
     }
 
+    public Task<AdminSessionSnapshot?> GetSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
+        => Task.FromResult(sessionRegistry.GetSnapshots().FirstOrDefault(x => x.SessionId == sessionId));
+
+    public async Task<AdminSessionSnapshot> LoginTrackedSessionAsync(Guid sessionId, string userPin, CancellationToken cancellationToken = default)
+    {
+        RequireUserPin(userPin, "log in to a tracked session");
+        AdminSessionRegistry.AdminTrackedSession tracked = GetTrackedSession(sessionId);
+        tracked.Session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+        sessionRegistry.TryTouch(sessionId, "Login(User)");
+        await auditLog.WriteAsync("Session", "Login", sessionId.ToString(), "Success", "Logged in tracked session as CKU_USER.", cancellationToken: cancellationToken);
+        return GetRequiredSessionSnapshot(sessionId);
+    }
+
+    public async Task<AdminSessionSnapshot> LogoutTrackedSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        AdminSessionRegistry.AdminTrackedSession tracked = GetTrackedSession(sessionId);
+        tracked.Session.Logout();
+        sessionRegistry.TryTouch(sessionId, "Logout");
+        await auditLog.WriteAsync("Session", "Logout", sessionId.ToString(), "Success", "Logged out tracked session.", cancellationToken: cancellationToken);
+        return GetRequiredSessionSnapshot(sessionId);
+    }
+
+    public async Task<AdminSessionSnapshot> CancelTrackedSessionOperationsAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        AdminSessionRegistry.AdminTrackedSession tracked = GetTrackedSession(sessionId);
+        tracked.Session.SessionCancel();
+        sessionRegistry.TryTouch(sessionId, "SessionCancel");
+        await auditLog.WriteAsync("Session", "Cancel", sessionId.ToString(), "Success", "Issued C_SessionCancel on tracked session.", cancellationToken: cancellationToken);
+        return GetRequiredSessionSnapshot(sessionId);
+    }
+
     public async Task CloseAllSessionsAsync(Guid deviceId, nuint slotIdValue, CancellationToken cancellationToken = default)
     {
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
@@ -249,6 +300,24 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(request.UserPin));
         session.DestroyObject(new Pkcs11ObjectHandle(request.Handle));
         await auditLog.WriteAsync("Key", "Destroy", $"{device.Name}/slot-{slotIdValue}/handle-{request.Handle}", "Success", "Object destroyed through admin panel after typed confirmation.", cancellationToken: cancellationToken);
+    }
+
+    public async Task<KeyManagementResult> UpdateObjectAttributesAsync(Guid deviceId, nuint slotIdValue, UpdateObjectAttributesRequest request, string userPin, CancellationToken cancellationToken = default)
+    {
+        ValidateUpdateObjectAttributesRequest(request);
+
+        HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
+        using Pkcs11Module module = CreateInitializedModule(device);
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
+        RequireUserPin(userPin, "update object attributes");
+        session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+
+        byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+        session.SetAttributeValue(new Pkcs11ObjectHandle(request.Handle), CreateEditableAttributeTemplate(request, id));
+
+        string summary = $"Updated editable attributes for handle {request.Handle} ({request.Label.Trim()}).";
+        await auditLog.WriteAsync("Key", "UpdateAttributes", $"{device.Name}/slot-{slotIdValue}/handle-{request.Handle}", "Success", summary, cancellationToken: cancellationToken);
+        return new KeyManagementResult("UpdateObjectAttributes", summary, [request.Handle], request.Label.Trim(), id.Length == 0 ? null : Convert.ToHexString(id));
     }
 
     public static void ValidateGenerateAesKeyRequest(GenerateAesKeyRequest request)
@@ -299,6 +368,44 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         if (exponent.Length == 0)
         {
             throw new ArgumentException("Public exponent cannot be empty.", nameof(request));
+        }
+
+        _ = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+    }
+
+    public static void ValidateImportAesKeyRequest(ImportAesKeyRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.Label))
+        {
+            throw new ArgumentException("Label is required.", nameof(request));
+        }
+
+        if (!request.AllowEncrypt && !request.AllowDecrypt && !request.AllowWrap && !request.AllowUnwrap)
+        {
+            throw new ArgumentException("Select at least one AES capability.", nameof(request));
+        }
+
+        byte[] value = ParseRequiredHex(request.ValueHex, nameof(request.ValueHex));
+        if (value.Length is not (16 or 24 or 32 or 48 or 64))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Imported AES key value must be 16, 24, 32, 48, or 64 bytes.");
+        }
+
+        _ = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
+    }
+
+    public static void ValidateUpdateObjectAttributesRequest(UpdateObjectAttributesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Handle == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Handle is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Label))
+        {
+            throw new ArgumentException("Label is required.", nameof(request));
         }
 
         _ = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
@@ -574,6 +681,54 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             Pkcs11ObjectAttribute.Nuint(Pkcs11AttributeTypes.ValueLen, (nuint)request.SizeBytes)
         ];
 
+    private static Pkcs11ObjectAttribute[] CreateImportedAesTemplate(ImportAesKeyRequest request, byte[] label, byte[] id, byte[] value)
+        =>
+        [
+            Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.SecretKey),
+            Pkcs11ObjectAttribute.KeyType(Pkcs11AttributeTypes.KeyType, Pkcs11KeyTypes.Aes),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Token, request.Token),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Private, request.Private),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Encrypt, request.AllowEncrypt),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Decrypt, request.AllowDecrypt),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Wrap, request.AllowWrap),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Unwrap, request.AllowUnwrap),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Sensitive, request.Sensitive),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Extractable, request.Extractable),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, label),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, id),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Value, value),
+            Pkcs11ObjectAttribute.Nuint(Pkcs11AttributeTypes.ValueLen, (nuint)value.Length)
+        ];
+
+    private static Pkcs11ObjectAttribute[] CreateEditableAttributeTemplate(UpdateObjectAttributesRequest request, byte[] id)
+    {
+        List<Pkcs11ObjectAttribute> attributes =
+        [
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, Encoding.UTF8.GetBytes(request.Label.Trim())),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, id)
+        ];
+
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Private, request.Private);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Token, request.Token);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Extractable, request.Extractable);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Encrypt, request.AllowEncrypt);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Decrypt, request.AllowDecrypt);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Sign, request.AllowSign);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Verify, request.AllowVerify);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Wrap, request.AllowWrap);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Unwrap, request.AllowUnwrap);
+        AddOptionalBooleanAttribute(attributes, Pkcs11AttributeTypes.Derive, request.AllowDerive);
+        return [.. attributes];
+    }
+
+    private static void AddOptionalBooleanAttribute(List<Pkcs11ObjectAttribute> attributes, Pkcs11AttributeType type, bool? value)
+    {
+        if (value.HasValue)
+        {
+            attributes.Add(Pkcs11ObjectAttribute.Boolean(type, value.Value));
+        }
+    }
+
     private static Pkcs11ObjectAttribute[] CreateRsaPublicTemplate(GenerateRsaKeyPairRequest request, byte[] label, byte[] id, byte[] exponent)
         =>
         [
@@ -616,6 +771,15 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         HsmDeviceProfile? device = await deviceProfiles.GetAsync(deviceId, cancellationToken);
         return device ?? throw new InvalidOperationException($"Device profile '{deviceId}' was not found.");
     }
+
+    private AdminSessionRegistry.AdminTrackedSession GetTrackedSession(Guid sessionId)
+        => sessionRegistry.TryGet(sessionId, out AdminSessionRegistry.AdminTrackedSession? tracked)
+            ? tracked!
+            : throw new InvalidOperationException($"Tracked session '{sessionId}' was not found.");
+
+    private AdminSessionSnapshot GetRequiredSessionSnapshot(Guid sessionId)
+        => sessionRegistry.GetSnapshots().FirstOrDefault(x => x.SessionId == sessionId)
+            ?? throw new InvalidOperationException($"Tracked session '{sessionId}' was not found after the operation.");
 
     private enum AttributeValueKind
     {

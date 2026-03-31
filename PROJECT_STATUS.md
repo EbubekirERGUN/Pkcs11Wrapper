@@ -18,14 +18,15 @@
 - Admin panelin ilk iskeleti kuruldu: device profile CRUD, connection test, slot listeleme, key/object listeleme + explicit destroy akışı, uygulama-owned session registry, audit log görünümü ve dashboard ekranı eklendi.
 - Admin panel için başlangıç yol haritası `docs/admin-panel-roadmap.md` içinde oluşturuldu.
 - Admin panel Phase B için ilk anlamlı genişleme tamamlandı: key/object detail paneli, AES key generate akışı, RSA keypair generate akışı ve typed confirmation + kalıcı silme onayı isteyen daha güvenli destroy UX'i eklendi.
+- Admin panel Phase B/C devamı işlendi: AES raw-value import/create akışı, desteklenen alanlar için object attribute editing paneli, daha güvenli key/object UX iyileştirmeleri, richer tracked-session detail görünümü, tracked session üzerinde login/logout kontrolleri, `C_SessionCancel` yüzeyi ve slot bazlı `CloseAllSessions` tetikleme eklendi.
 - Admin panel uygulama katmanı için yeni doğrulama testleri eklendi; çözüm testleri ve hedefli admin web build doğrulaması temiz geçti.
 
 ## Şu an üzerinde çalışılan
-- Blazor Server admin panelinde Phase B kısmi olarak ilerletildi; kalan başlıklar attribute editing ve olası explicit key create/import akışları.
+- Admin panelde yeni eklenen Phase B/C slice'ının son gözden geçirmesi ve sonraki dilimin planlanması.
 
 ## Sıradaki işler
-- Admin panel Phase B'yi tamamlamak için supported token'larda attribute editing ve güvenli bir AES create/import akışı değerlendirmek.
-- Admin panel Phase C: daha zengin session operasyonları ve login/logout görünürlüğü.
+- Admin panelde token capability/mechanism bilgisini kullanarak edit/import formlarını daha öngörülü hale getirmek.
+- Session ekranında grouped/filterable görünüm ve invalidated tracked session'lar için daha belirgin UX düşünmek.
 - PKCS#11 v3 message API'lerini gerçekten expose eden bir vendor/modül ile runtime regression eklemek.
 - Gerekirse Windows runtime lane'ini GitHub üzerinde ilk gerçek koşusunda gözleyip paket/araç yolu ince ayarı yapmak.
 
