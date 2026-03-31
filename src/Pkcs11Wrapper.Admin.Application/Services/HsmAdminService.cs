@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
 
@@ -8,6 +10,22 @@ namespace Pkcs11Wrapper.Admin.Application.Services;
 public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization)
 {
     private const string DestroyConfirmationPrefix = "DESTROY ";
+    private const string ConfigurationFormat = "Pkcs11Wrapper.Admin.Configuration";
+    private const int ConfigurationSchemaVersion = 1;
+
+    private static readonly string[] ConfigurationIncludedSections =
+    [
+        "DeviceProfiles"
+    ];
+
+    private static readonly string[] ConfigurationExcludedSections =
+    [
+        "AdminUsers",
+        "BootstrapCredentials",
+        "AuditLog",
+        "ProtectedPinCache",
+        "DataProtectionKeys"
+    ];
 
     private static readonly (Pkcs11MechanismType Type, string Name)[] KeyMechanisms =
     [
@@ -87,6 +105,96 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         IReadOnlyList<HsmDeviceProfile> devices = await deviceProfiles.GetAllAsync(cancellationToken);
         IReadOnlyList<AdminAuditLogEntry> logs = await auditLog.GetRecentAsync(25, cancellationToken);
         return new DashboardSummary(devices.Count, devices.Count(x => x.IsEnabled), sessionRegistry.GetSnapshots().Count, logs.Count);
+    }
+
+    public async Task<AdminConfigurationExportBundle> ExportConfigurationAsync(CancellationToken cancellationToken = default)
+    {
+        authorization.DemandAdmin();
+
+        try
+        {
+            IReadOnlyList<HsmDeviceProfile> devices = await deviceProfiles.GetAllAsync(cancellationToken);
+            AdminConfigurationExportBundle bundle = new()
+            {
+                Format = ConfigurationFormat,
+                SchemaVersion = ConfigurationSchemaVersion,
+                ProductName = "Pkcs11Wrapper Admin",
+                ProductVersion = GetCurrentProductVersion(),
+                ExportedUtc = DateTimeOffset.UtcNow,
+                IncludedSections = [.. ConfigurationIncludedSections],
+                ExcludedSections = [.. ConfigurationExcludedSections],
+                DeviceProfiles = [.. devices]
+            };
+
+            await auditLog.WriteAsync(
+                "Configuration",
+                "Export",
+                "DeviceProfiles",
+                "Success",
+                $"Exported {devices.Count} device profile(s). Excluded sections: {string.Join(", ", ConfigurationExcludedSections)}.",
+                cancellationToken: cancellationToken);
+
+            return bundle;
+        }
+        catch (Exception ex)
+        {
+            await auditLog.WriteAsync("Configuration", "Export", "DeviceProfiles", "Failure", ex.Message, cancellationToken: cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task<AdminConfigurationImportResult> ImportConfigurationAsync(Stream stream, string? sourceName, AdminConfigurationImportMode mode, bool acknowledgeReplaceAll, CancellationToken cancellationToken = default)
+    {
+        authorization.DemandAdmin();
+        ArgumentNullException.ThrowIfNull(stream);
+
+        if (mode == AdminConfigurationImportMode.ReplaceAll && !acknowledgeReplaceAll)
+        {
+            throw new InvalidOperationException("Replace-all import requires explicit acknowledgement before existing configuration is overwritten.");
+        }
+
+        string importTarget = string.IsNullOrWhiteSpace(sourceName) ? "uploaded bundle" : sourceName;
+
+        try
+        {
+            AdminConfigurationExportBundle? bundle = await JsonSerializer.DeserializeAsync(stream, AdminApplicationJsonContext.Default.AdminConfigurationExportBundle, cancellationToken);
+            if (bundle is null)
+            {
+                throw new InvalidOperationException("Configuration file was empty or unreadable.");
+            }
+
+            ValidateConfigurationBundle(bundle);
+            AdminConfigurationImportResult importResult = await deviceProfiles.ImportAsync(bundle.DeviceProfiles, mode, cancellationToken);
+
+            List<string> warnings = [.. importResult.Warnings];
+            string currentVersion = GetCurrentProductVersion();
+            if (!string.IsNullOrWhiteSpace(bundle.ProductVersion) && !string.Equals(bundle.ProductVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                warnings.Add($"Bundle was exported from admin version {bundle.ProductVersion}; current version is {currentVersion}.");
+            }
+
+            AdminConfigurationImportResult result = warnings.Count == importResult.Warnings.Count
+                ? importResult
+                : importResult with { Warnings = warnings };
+
+            string warningSuffix = result.Warnings.Count == 0
+                ? string.Empty
+                : $" Warnings: {string.Join(" | ", result.Warnings)}";
+            await auditLog.WriteAsync(
+                "Configuration",
+                "Import",
+                importTarget,
+                "Success",
+                $"{result.Summary}{warningSuffix}",
+                cancellationToken: cancellationToken);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            await auditLog.WriteAsync("Configuration", "Import", importTarget, "Failure", ex.Message, cancellationToken: cancellationToken);
+            throw;
+        }
     }
 
     public async Task<HsmConnectionTestResult> TestConnectionAsync(Guid deviceId, CancellationToken cancellationToken = default)
@@ -600,6 +708,29 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         => string.IsNullOrWhiteSpace(label)
             ? $"{DestroyConfirmationPrefix}{handle}"
             : $"{DestroyConfirmationPrefix}{handle} {label.Trim()}";
+
+    private static void ValidateConfigurationBundle(AdminConfigurationExportBundle bundle)
+    {
+        if (!string.Equals(bundle.Format, ConfigurationFormat, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Unsupported configuration format '{bundle.Format}'.");
+        }
+
+        if (bundle.SchemaVersion != ConfigurationSchemaVersion)
+        {
+            throw new InvalidOperationException($"Unsupported configuration schema version '{bundle.SchemaVersion}'.");
+        }
+
+        if (bundle.DeviceProfiles is null)
+        {
+            throw new InvalidOperationException("Configuration bundle does not contain a device profile section.");
+        }
+    }
+
+    private static string GetCurrentProductVersion()
+        => typeof(HsmAdminService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+           ?? typeof(HsmAdminService).Assembly.GetName().Version?.ToString()
+           ?? "unknown";
 
     private static HsmKeyObjectSummary ReadObjectSummary(Guid deviceId, nuint slotIdValue, Pkcs11Session session, Pkcs11ObjectHandle handle)
     {

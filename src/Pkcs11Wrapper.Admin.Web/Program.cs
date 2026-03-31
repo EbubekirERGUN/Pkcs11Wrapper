@@ -3,6 +3,7 @@ using Pkcs11Wrapper.Admin.Application.Models;
 using Pkcs11Wrapper.Admin.Application.Services;
 using Pkcs11Wrapper.Admin.Infrastructure;
 using Pkcs11Wrapper.Admin.Web.Components;
+using Pkcs11Wrapper.Admin.Web.Configuration;
 using Pkcs11Wrapper.Admin.Web.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -64,6 +65,8 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapPost("/account/login", (Delegate)AccountEndpoints.LoginAsync);
 app.MapPost("/account/logout", (Delegate)AccountEndpoints.LogoutAsync);
+app.MapGet("/configuration/export", (Delegate)ConfigurationEndpoints.ExportAsync)
+    .RequireAuthorization(AdminRoles.Admin);
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

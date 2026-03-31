@@ -1,0 +1,204 @@
+@page "/configuration"
+@attribute [Authorize(Policy = AdminRoles.Admin)]
+@inject HsmAdminService Admin
+
+<PageTitle>Configuration</PageTitle>
+
+<h1>Configuration Transfer</h1>
+<p class="text-muted">Export or import admin-panel device configuration for backup and migration. Sensitive local state is intentionally excluded from this bundle.</p>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Export</div>
+            <div class="card-body d-flex flex-column gap-3">
+                <div>
+                    <div class="fw-semibold">Current bundle scope</div>
+                    <div class="text-muted small">@_deviceCount configured device profile(s) will be included.</div>
+                </div>
+
+                <div>
+                    <div class="fw-semibold small text-uppercase text-muted">Included</div>
+                    <ul class="small mb-0">
+                        <li>Device profiles</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <div class="fw-semibold small text-uppercase text-muted">Excluded</div>
+                    <ul class="small mb-0">
+                        <li>Admin users</li>
+                        <li>Bootstrap credentials</li>
+                        <li>Audit log entries</li>
+                        <li>Protected PIN cache</li>
+                        <li>Data Protection keys</li>
+                    </ul>
+                </div>
+
+                <div class="mt-auto">
+                    <a class="btn btn-primary" href="/configuration/export">Download configuration JSON</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Import</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Configuration file</label>
+                    <InputFile @key="_filePickerKey" class="form-control" OnChange="OnFileChanged" accept=".json,application/json" />
+                    @if (_selectedFile is not null)
+                    {
+                        <div class="form-text">Selected: @_selectedFile.Name (@FormatSize(_selectedFile.Size))</div>
+                    }
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Import mode</label>
+                    <InputSelect class="form-select" @bind-Value="_importMode">
+                        <option value="@AdminConfigurationImportMode.Merge">Merge existing configuration</option>
+                        <option value="@AdminConfigurationImportMode.ReplaceAll">Replace all existing configuration</option>
+                    </InputSelect>
+                    <div class="form-text">
+                        Merge updates matching device IDs and adds new profiles. Replace All overwrites the current device-profile set with the imported bundle.
+                    </div>
+                </div>
+
+                @if (_importMode == AdminConfigurationImportMode.ReplaceAll)
+                {
+                    <div class="alert alert-warning small">
+                        Replace All will remove every currently configured device profile before the imported bundle is applied.
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <InputCheckbox class="form-check-input" @bind-Value="_acknowledgeReplaceAll" />
+                        <label class="form-check-label">I understand that Replace All overwrites the current device configuration.</label>
+                    </div>
+                }
+
+                <div class="d-flex gap-2 align-items-center">
+                    <button class="btn btn-warning" @onclick="ImportAsync" disabled="@(_selectedFile is null || _isImporting)">
+                        @(_isImporting ? "Importing..." : "Import configuration")
+                    </button>
+                    <button class="btn btn-outline-secondary" @onclick="ResetImportForm" disabled="@_isImporting">Reset</button>
+                </div>
+
+                @if (_lastImportResult is not null)
+                {
+                    <div class="alert alert-info mt-3 mb-0">
+                        <div class="fw-semibold">Latest import result</div>
+                        <div>@_lastImportResult.Summary</div>
+                        <div class="small mt-2">
+                            Imported: @_lastImportResult.ImportedDeviceProfileCount,
+                            Added: @_lastImportResult.AddedDeviceProfileCount,
+                            Updated: @_lastImportResult.UpdatedDeviceProfileCount,
+                            Removed: @_lastImportResult.RemovedDeviceProfileCount
+                        </div>
+                        @if (_lastImportResult.Warnings.Count > 0)
+                        {
+                            <ul class="small mt-2 mb-0">
+                                @foreach (string warning in _lastImportResult.Warnings)
+                                {
+                                    <li>@warning</li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private const long MaxImportBytes = 1024 * 1024;
+
+    private IBrowserFile? _selectedFile;
+    private AdminConfigurationImportMode _importMode = AdminConfigurationImportMode.Merge;
+    private AdminConfigurationImportResult? _lastImportResult;
+    private string? _statusMessage;
+    private bool _statusIsError;
+    private bool _acknowledgeReplaceAll;
+    private bool _isImporting;
+    private Guid _filePickerKey = Guid.NewGuid();
+    private int _deviceCount;
+
+    protected override Task OnInitializedAsync() => LoadSummaryAsync();
+
+    private async Task LoadSummaryAsync()
+    {
+        _deviceCount = (await Admin.GetDevicesAsync()).Count;
+    }
+
+    private void OnFileChanged(InputFileChangeEventArgs args)
+    {
+        _selectedFile = args.FileCount == 0 ? null : args.File;
+        _lastImportResult = null;
+        _statusMessage = null;
+    }
+
+    private async Task ImportAsync()
+    {
+        if (_selectedFile is null)
+        {
+            _statusMessage = "Select a configuration file first.";
+            _statusIsError = true;
+            return;
+        }
+
+        _isImporting = true;
+        try
+        {
+            await using Stream stream = _selectedFile.OpenReadStream(MaxImportBytes);
+            _lastImportResult = await Admin.ImportConfigurationAsync(stream, _selectedFile.Name, _importMode, _acknowledgeReplaceAll);
+            _statusMessage = _lastImportResult.Summary;
+            _statusIsError = false;
+            await LoadSummaryAsync();
+            ResetImportForm(clearStatus: false, keepResult: true);
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+        finally
+        {
+            _isImporting = false;
+        }
+    }
+
+    private void ResetImportForm()
+        => ResetImportForm(clearStatus: true, keepResult: false);
+
+    private void ResetImportForm(bool clearStatus, bool keepResult)
+    {
+        _selectedFile = null;
+        _acknowledgeReplaceAll = false;
+        _importMode = AdminConfigurationImportMode.Merge;
+        _filePickerKey = Guid.NewGuid();
+        if (clearStatus)
+        {
+            _statusMessage = null;
+            _statusIsError = false;
+        }
+
+        if (!keepResult)
+        {
+            _lastImportResult = null;
+        }
+    }
+
+    private static string FormatSize(long bytes)
+        => bytes < 1024
+            ? $"{bytes} B"
+            : bytes < 1024 * 1024
+                ? $"{bytes / 1024d:F1} KB"
+                : $"{bytes / 1024d / 1024d:F1} MB";
+}
