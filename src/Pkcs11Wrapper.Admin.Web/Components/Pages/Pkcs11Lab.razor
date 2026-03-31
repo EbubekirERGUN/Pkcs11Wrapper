@@ -119,12 +119,32 @@
                     or Pkcs11LabOperation.DecryptData
                     or Pkcs11LabOperation.InspectObject
                     or Pkcs11LabOperation.WrapKey
-                    or Pkcs11LabOperation.UnwrapAesKey)
+                    or Pkcs11LabOperation.UnwrapAesKey
+                    or Pkcs11LabOperation.ReadAttribute)
                 {
                     <div class="col-md-6">
                         <label class="form-label">@GetPrimaryHandleLabel(_request.Operation)</label>
                         <input class="form-control font-monospace" @bind="_request.KeyHandleText" placeholder="123" />
                         <div class="form-text">Handle değerini Keys ekranından veya Find Objects çıktısından alabilirsin.</div>
+                    </div>
+                }
+
+                @if (_request.Operation == Pkcs11LabOperation.ReadAttribute)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label">Attribute Type (hex or decimal)</label>
+                        <input class="form-control font-monospace" @bind="_request.AttributeTypeText" placeholder="0x3" />
+                        <div class="form-text">Örnek: <code>0x3</code> = CKA_LABEL, <code>0x102</code> = CKA_ID, <code>0x11</code> = CKA_VALUE.</div>
+                    </div>
+
+                    <div class="col-12 d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x3")'>CKA_LABEL</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x102")'>CKA_ID</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x0")'>CKA_CLASS</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x100")'>CKA_KEY_TYPE</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x161")'>CKA_VALUE_LEN</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x121")'>CKA_MODULUS_BITS</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x122")'>CKA_PUBLIC_EXPONENT</button>
                     </div>
                 }
 
@@ -347,6 +367,27 @@
 </div>
 
 @code {
+    [SupplyParameterFromQuery(Name = "device")]
+    public Guid? QueryDevice { get; set; }
+
+    [SupplyParameterFromQuery(Name = "slot")]
+    public ulong? QuerySlot { get; set; }
+
+    [SupplyParameterFromQuery(Name = "op")]
+    public string? QueryOperation { get; set; }
+
+    [SupplyParameterFromQuery(Name = "handle")]
+    public string? QueryHandle { get; set; }
+
+    [SupplyParameterFromQuery(Name = "wrapHandle")]
+    public string? QuerySecondaryHandle { get; set; }
+
+    [SupplyParameterFromQuery(Name = "mechanism")]
+    public string? QueryMechanism { get; set; }
+
+    [SupplyParameterFromQuery(Name = "attr")]
+    public string? QueryAttributeType { get; set; }
+
     private IReadOnlyList<HsmDeviceProfile> _devices = [];
     private IReadOnlyList<HsmSlotSummary> _slots = [];
     private string? _selectedDeviceId;
@@ -357,6 +398,7 @@
     private bool _statusIsError;
     private bool _rememberPin;
     private bool _isRunning;
+    private string? _lastAppliedQuerySignature;
 
     private bool RequiresSlot => _request.Operation is Pkcs11LabOperation.MechanismList
         or Pkcs11LabOperation.MechanismInfo
@@ -370,7 +412,8 @@
         or Pkcs11LabOperation.DecryptData
         or Pkcs11LabOperation.InspectObject
         or Pkcs11LabOperation.WrapKey
-        or Pkcs11LabOperation.UnwrapAesKey;
+        or Pkcs11LabOperation.UnwrapAesKey
+        or Pkcs11LabOperation.ReadAttribute;
 
     private bool CanRun => Guid.TryParse(_selectedDeviceId, out _) && (!RequiresSlot || ulong.TryParse(_selectedSlotId, out _));
 
@@ -379,6 +422,59 @@
         _devices = await Admin.GetDevicesAsync();
         _selectedDeviceId = _devices.FirstOrDefault()?.Id.ToString();
         await LoadSlotsForSelectedDeviceAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_devices.Count == 0)
+        {
+            return;
+        }
+
+        string signature = $"{QueryDevice}|{QuerySlot}|{QueryOperation}|{QueryHandle}|{QuerySecondaryHandle}|{QueryMechanism}|{QueryAttributeType}";
+        if (signature == _lastAppliedQuerySignature)
+        {
+            return;
+        }
+
+        _lastAppliedQuerySignature = signature;
+
+        if (QueryDevice is Guid deviceId && _devices.Any(device => device.Id == deviceId))
+        {
+            _selectedDeviceId = deviceId.ToString();
+            await LoadSlotsForSelectedDeviceAsync();
+        }
+
+        if (QuerySlot is ulong slotId && _slots.Any(slot => slot.SlotId == (nuint)slotId))
+        {
+            _selectedSlotId = slotId.ToString();
+            await LoadProtectedPinAsync();
+        }
+
+        if (Enum.TryParse<Pkcs11LabOperation>(QueryOperation, ignoreCase: true, out Pkcs11LabOperation operation))
+        {
+            _request.Operation = operation;
+        }
+
+        if (!string.IsNullOrWhiteSpace(QueryHandle))
+        {
+            _request.KeyHandleText = QueryHandle;
+        }
+
+        if (!string.IsNullOrWhiteSpace(QuerySecondaryHandle))
+        {
+            _request.SecondaryKeyHandleText = QuerySecondaryHandle;
+        }
+
+        if (!string.IsNullOrWhiteSpace(QueryMechanism))
+        {
+            _request.MechanismTypeText = QueryMechanism;
+        }
+
+        if (!string.IsNullOrWhiteSpace(QueryAttributeType))
+        {
+            _request.AttributeTypeText = QueryAttributeType;
+        }
     }
 
     private async Task OnSelectedDeviceChangedAsync()
@@ -465,6 +561,7 @@
             LoginUserIfPinProvided = _request.LoginUserIfPinProvided,
             UserPin = _request.UserPin,
             MechanismTypeText = _request.MechanismTypeText,
+            AttributeTypeText = _request.AttributeTypeText,
             KeyHandleText = _request.KeyHandleText,
             SecondaryKeyHandleText = _request.SecondaryKeyHandleText,
             DigestAlgorithm = _request.DigestAlgorithm,
@@ -547,6 +644,7 @@
             Pkcs11LabOperation.InspectObject => "Inspect Object",
             Pkcs11LabOperation.WrapKey => "Wrap Key",
             Pkcs11LabOperation.UnwrapAesKey => "Unwrap AES Key",
+            Pkcs11LabOperation.ReadAttribute => "Read Attribute",
             _ => operation.ToString()
         };
 
@@ -569,6 +667,7 @@
             Pkcs11LabOperation.InspectObject => "Seçilen handle için common attribute snapshot ve capability görünümünü göster.",
             Pkcs11LabOperation.WrapKey => "Bir wrapping key handle ile başka bir key handle’ı `C_WrapKey` üzerinden sarıp blob üret.",
             Pkcs11LabOperation.UnwrapAesKey => "Wrapped blob’u kontrollü AES secret-key template ile `C_UnwrapKey` üzerinden aç.",
+            Pkcs11LabOperation.ReadAttribute => "Seçilen handle üzerinde ham attribute code okuyup status/length/raw hex görünümü al.",
             _ => operation.ToString()
         };
 
@@ -577,6 +676,10 @@
         {
             Pkcs11LabOperation.WrapKey => "Wrapped Target Handle",
             Pkcs11LabOperation.UnwrapAesKey => "Unwrapping Key Handle",
+            Pkcs11LabOperation.ReadAttribute => "Key/Object Handle",
             _ => "Key/Object Handle"
         };
+
+    private void SetAttributePreset(string value)
+        => _request.AttributeTypeText = value;
 }

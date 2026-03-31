@@ -231,6 +231,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 Pkcs11LabOperation.InspectObject => ExecuteInspectObjectLab(device.Id, module, request),
                 Pkcs11LabOperation.WrapKey => ExecuteWrapKeyLab(module, request),
                 Pkcs11LabOperation.UnwrapAesKey => ExecuteUnwrapAesKeyLab(device.Id, module, request),
+                Pkcs11LabOperation.ReadAttribute => ExecuteReadAttributeLab(module, request),
                 _ => throw new ArgumentOutOfRangeException(nameof(request.Operation), request.Operation, "Unsupported PKCS#11 lab operation.")
             };
 
@@ -665,6 +666,18 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             _ = ParseLabObjectHandleText(request.KeyHandleText);
         }
 
+        if (request.Operation == Pkcs11LabOperation.ReadAttribute)
+        {
+            _ = ParseLabObjectHandleText(request.KeyHandleText);
+
+            if (string.IsNullOrWhiteSpace(request.AttributeTypeText))
+            {
+                throw new ArgumentException("Attribute type is required for raw attribute reads.", nameof(request));
+            }
+
+            _ = ParseAttributeTypeText(request.AttributeTypeText);
+        }
+
         if (request.Operation == Pkcs11LabOperation.WrapKey)
         {
             _ = ParseLabObjectHandleText(request.SecondaryKeyHandleText, "Wrapping key handle");
@@ -889,7 +902,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             or Pkcs11LabOperation.DecryptData
             or Pkcs11LabOperation.InspectObject
             or Pkcs11LabOperation.WrapKey
-            or Pkcs11LabOperation.UnwrapAesKey;
+            or Pkcs11LabOperation.UnwrapAesKey
+            or Pkcs11LabOperation.ReadAttribute;
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteModuleInfoLab(Pkcs11Module module)
     {
@@ -1327,6 +1341,73 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return ($"Unwrapped an AES secret key into handle {unwrappedHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes);
     }
 
+    private static (string Summary, string OutputText, List<string> Notes) ExecuteReadAttributeLab(Pkcs11Module module, Pkcs11LabRequest request)
+    {
+        List<string> notes = [];
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        string authMode = LoginLabSessionIfRequested(session, request, notes);
+        Pkcs11ObjectHandle handle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11AttributeType attributeType = ParseAttributeTypeText(request.AttributeTypeText!);
+        Pkcs11AttributeReadResult info = session.GetAttributeValueInfo(handle, attributeType);
+
+        StringBuilder output = new();
+        output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Auth mode: {authMode}");
+        output.AppendLine($"Handle: {handle.Value}");
+        output.AppendLine($"Attribute: {DescribeAttributeType(attributeType)}");
+        output.AppendLine($"Read status: {info.Status}");
+        output.AppendLine($"Reported length: {(info.Length == nuint.MaxValue ? "unavailable" : info.Length.ToString(CultureInfo.InvariantCulture))}");
+
+        switch (info.Status)
+        {
+            case Pkcs11AttributeReadStatus.Sensitive:
+                notes.Add("Token marked this attribute as sensitive; the lab will not attempt to read raw bytes.");
+                break;
+            case Pkcs11AttributeReadStatus.UnavailableInformation:
+                notes.Add("The module reported unavailable information for this attribute type/handle combination.");
+                break;
+            case Pkcs11AttributeReadStatus.TypeInvalid:
+                notes.Add("The attribute code is not valid for this object or not recognized by the module.");
+                break;
+        }
+
+        if (!info.IsReadable)
+        {
+            return ($"Read attribute metadata for {DescribeAttributeType(attributeType)}; raw value was not readable.", output.ToString(), notes);
+        }
+
+        if (info.Length > 4096)
+        {
+            notes.Add($"Attribute length is {info.Length} bytes, so the lab skipped raw byte dumping to avoid flooding the page.");
+            return ($"Attribute {DescribeAttributeType(attributeType)} is readable but too large for inline dump.", output.ToString(), notes);
+        }
+
+        byte[] buffer = new byte[(int)info.Length];
+        if (!session.TryGetAttributeValue(handle, attributeType, buffer, out int written, out Pkcs11AttributeReadResult readResult))
+        {
+            output.AppendLine($"Read attempt status: {readResult.Status}");
+            output.AppendLine($"Bytes written: {written}");
+            return ($"Raw attribute read for {DescribeAttributeType(attributeType)} did not return a buffer.", output.ToString(), notes);
+        }
+
+        ReadOnlySpan<byte> value = buffer.AsSpan(0, written);
+        output.AppendLine($"Read attempt status: {readResult.Status}");
+        output.AppendLine($"Bytes written: {written}");
+        output.AppendLine($"Hex: {(written == 0 ? "<empty>" : Convert.ToHexString(value))}");
+        output.AppendLine($"UTF-8: {TryDecodeUtf8OrPlaceholder(value)}");
+        if (written == 1)
+        {
+            output.AppendLine($"Boolean guess: {(value[0] != 0)}");
+        }
+
+        if (written == IntPtr.Size)
+        {
+            output.AppendLine($"nuint guess: {ReadNuintGuess(value)}");
+        }
+
+        return ($"Read raw attribute value for {DescribeAttributeType(attributeType)}.", output.ToString(), notes);
+    }
+
     private static (string Summary, string OutputText, List<string> Notes) ExecuteFindObjectsLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
@@ -1425,6 +1506,24 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
 
         return new Pkcs11MechanismType(parsed);
+    }
+
+    private static Pkcs11AttributeType ParseAttributeTypeText(string value)
+    {
+        string trimmed = value.Trim();
+        NumberStyles styles = NumberStyles.Integer;
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[2..];
+            styles = NumberStyles.AllowHexSpecifier;
+        }
+
+        if (!nuint.TryParse(trimmed, styles, CultureInfo.InvariantCulture, out nuint parsed))
+        {
+            throw new ArgumentException($"Attribute type '{value}' is not a valid hex/decimal number.", nameof(value));
+        }
+
+        return new Pkcs11AttributeType(parsed);
     }
 
     private static Pkcs11ObjectHandle ParseLabObjectHandleText(string? value)
@@ -1532,6 +1631,61 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             return "<not valid UTF-8>";
         }
     }
+
+    private static string TryDecodeUtf8OrPlaceholder(ReadOnlySpan<byte> data)
+    {
+        if (data.Length == 0)
+        {
+            return "<empty>";
+        }
+
+        try
+        {
+            string text = Encoding.UTF8.GetString(data);
+            return text.Any(ch => char.IsControl(ch) && ch is not ('\r' or '\n' or '\t'))
+                ? "<contains control bytes>"
+                : text;
+        }
+        catch
+        {
+            return "<not valid UTF-8>";
+        }
+    }
+
+    private static nuint ReadNuintGuess(ReadOnlySpan<byte> data)
+        => IntPtr.Size == 4
+            ? (nuint)BitConverter.ToUInt32(data)
+            : (nuint)BitConverter.ToUInt64(data);
+
+    private static string DescribeAttributeType(Pkcs11AttributeType type)
+        => type.Value switch
+        {
+            0x00000000u => "CKA_CLASS (0x0)",
+            0x00000001u => "CKA_TOKEN (0x1)",
+            0x00000002u => "CKA_PRIVATE (0x2)",
+            0x00000003u => "CKA_LABEL (0x3)",
+            0x00000010u => "CKA_APPLICATION (0x10)",
+            0x00000011u => "CKA_VALUE (0x11)",
+            0x00000080u => "CKA_CERTIFICATE_TYPE (0x80)",
+            0x00000100u => "CKA_KEY_TYPE (0x100)",
+            0x00000102u => "CKA_ID (0x102)",
+            0x00000103u => "CKA_SENSITIVE (0x103)",
+            0x00000104u => "CKA_ENCRYPT (0x104)",
+            0x00000105u => "CKA_DECRYPT (0x105)",
+            0x00000106u => "CKA_WRAP (0x106)",
+            0x00000107u => "CKA_UNWRAP (0x107)",
+            0x00000108u => "CKA_SIGN (0x108)",
+            0x0000010au => "CKA_VERIFY (0x10a)",
+            0x0000010cu => "CKA_DERIVE (0x10c)",
+            0x00000121u => "CKA_MODULUS_BITS (0x121)",
+            0x00000122u => "CKA_PUBLIC_EXPONENT (0x122)",
+            0x00000161u => "CKA_VALUE_LEN (0x161)",
+            0x00000162u => "CKA_EXTRACTABLE (0x162)",
+            0x00000170u => "CKA_MODIFIABLE (0x170)",
+            0x00000180u => "CKA_EC_PARAMS (0x180)",
+            0x00000181u => "CKA_EC_POINT (0x181)",
+            _ => $"0x{type.Value:x}"
+        };
 
     private static string DescribeMechanismType(Pkcs11MechanismType type)
         => type.Value switch

@@ -3,6 +3,7 @@
 @inject HsmAdminService Admin
 @inject ProtectedPinStore PinStore
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
 
 <PageTitle>Keys</PageTitle>
 
@@ -257,6 +258,7 @@
                                 <td class="text-end">
                                     <div class="btn-group btn-group-sm">
                                         <button class="btn btn-outline-primary" @onclick="() => ShowDetailAsync(key)">Details</button>
+                                        <button class="btn btn-outline-dark" @onclick="() => OpenLabInspect(key)" disabled="@(!_isOperator)">Lab</button>
                                         <button class="btn btn-outline-secondary" @onclick="() => BeginEdit(key)" disabled="@(!_isOperator)">Edit</button>
                                         <button class="btn btn-outline-info" @onclick="() => BeginCopy(key)" disabled="@(!_isOperator)">Copy</button>
                                         <button class="btn btn-outline-danger" @onclick="() => BeginDestroy(key)" disabled="@(!_isOperator)">Destroy</button>
@@ -283,6 +285,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Object detail</span>
                         <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-dark" @onclick="() => OpenLabInspect(_selectedDetail)" disabled="@(!_isOperator)">Lab inspect</button>
                             <button class="btn btn-outline-secondary" @onclick="() => BeginEditFromDetail(_selectedDetail)">Edit attributes</button>
                             <button class="btn btn-outline-info" @onclick="() => BeginCopyFromDetail(_selectedDetail)">Copy object</button>
                             <button class="btn btn-outline-secondary" @onclick="ClearDetail">Close</button>
@@ -310,6 +313,41 @@
                                         <li>@warning</li>
                                     }
                                 </ul>
+                            </div>
+                        }
+
+                        @if (_isOperator)
+                        {
+                            <hr />
+                            <h2 class="h6">Lab presets</h2>
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <button class="btn btn-sm btn-outline-dark" @onclick="() => OpenLabInspect(_selectedDetail)">Inspect</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick='() => OpenLabAttributePreset(_selectedDetail, "0x3")'>Raw Label</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick='() => OpenLabAttributePreset(_selectedDetail, "0x102")'>Raw ID</button>
+                                @if (TryGetSignPreset(_selectedDetail, out string? signMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenLabCryptoPreset(_selectedDetail, Pkcs11LabOperation.SignData, signMechanism!)">Sign preset</button>
+                                }
+                                @if (TryGetVerifyPreset(_selectedDetail, out string? verifyMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenLabCryptoPreset(_selectedDetail, Pkcs11LabOperation.VerifySignature, verifyMechanism!)">Verify preset</button>
+                                }
+                                @if (TryGetEncryptPreset(_selectedDetail, out string? encryptMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => OpenLabCryptoPreset(_selectedDetail, Pkcs11LabOperation.EncryptData, encryptMechanism!)">Encrypt preset</button>
+                                }
+                                @if (TryGetDecryptPreset(_selectedDetail, out string? decryptMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => OpenLabCryptoPreset(_selectedDetail, Pkcs11LabOperation.DecryptData, decryptMechanism!)">Decrypt preset</button>
+                                }
+                                @if (TryGetWrapPreset(_selectedDetail, out string? wrapMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-warning" @onclick="() => OpenLabWrapPreset(_selectedDetail, wrapMechanism!)">Wrap preset</button>
+                                }
+                                @if (TryGetUnwrapPreset(_selectedDetail, out string? unwrapMechanism))
+                                {
+                                    <button class="btn btn-sm btn-outline-warning" @onclick="() => OpenLabUnwrapPreset(_selectedDetail, unwrapMechanism!)">Unwrap preset</button>
+                                }
                             </div>
                         }
 
@@ -607,6 +645,24 @@
         _selectedDetail = null;
         _selectedDetailHandle = null;
     }
+
+    private void OpenLabInspect(HsmKeyObjectSummary key)
+        => Navigation.NavigateTo(BuildLabUri(key.DeviceId, key.SlotId, Pkcs11LabOperation.InspectObject, primaryHandle: key.Handle));
+
+    private void OpenLabInspect(HsmObjectDetail detail)
+        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.InspectObject, primaryHandle: detail.Handle));
+
+    private void OpenLabAttributePreset(HsmObjectDetail detail, string attributeType)
+        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.ReadAttribute, primaryHandle: detail.Handle, attributeType: attributeType));
+
+    private void OpenLabCryptoPreset(HsmObjectDetail detail, Pkcs11LabOperation operation, string mechanism)
+        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, operation, primaryHandle: detail.Handle, mechanism: mechanism));
+
+    private void OpenLabWrapPreset(HsmObjectDetail detail, string mechanism)
+        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.WrapKey, secondaryHandle: detail.Handle, mechanism: mechanism));
+
+    private void OpenLabUnwrapPreset(HsmObjectDetail detail, string mechanism)
+        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.UnwrapAesKey, primaryHandle: detail.Handle, mechanism: mechanism));
 
     private void BeginEdit(HsmKeyObjectSummary key)
     {
@@ -937,6 +993,96 @@
         if (key.CanWrap == true) flags.Add("wrap");
         if (key.CanUnwrap == true) flags.Add("unwrap");
         return flags.Count == 0 ? "n/a" : string.Join(", ", flags);
+    }
+
+    private static bool TryGetSignPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanSign == true && string.Equals(detail.KeyType, "RSA", StringComparison.OrdinalIgnoreCase)
+            ? "0x1"
+            : null;
+        return mechanism is not null;
+    }
+
+    private static bool TryGetVerifyPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanVerify == true && string.Equals(detail.KeyType, "RSA", StringComparison.OrdinalIgnoreCase)
+            ? "0x1"
+            : null;
+        return mechanism is not null;
+    }
+
+    private static bool TryGetEncryptPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanEncrypt == true
+            ? detail.KeyType switch
+            {
+                "RSA" => "0x1",
+                "AES" => "0x1082",
+                _ => null
+            }
+            : null;
+        return mechanism is not null;
+    }
+
+    private static bool TryGetDecryptPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanDecrypt == true
+            ? detail.KeyType switch
+            {
+                "RSA" => "0x1",
+                "AES" => "0x1082",
+                _ => null
+            }
+            : null;
+        return mechanism is not null;
+    }
+
+    private static bool TryGetWrapPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanWrap == true && string.Equals(detail.KeyType, "AES", StringComparison.OrdinalIgnoreCase)
+            ? "0x2109"
+            : null;
+        return mechanism is not null;
+    }
+
+    private static bool TryGetUnwrapPreset(HsmObjectDetail detail, out string? mechanism)
+    {
+        mechanism = detail.CanUnwrap == true && string.Equals(detail.KeyType, "AES", StringComparison.OrdinalIgnoreCase)
+            ? "0x2109"
+            : null;
+        return mechanism is not null;
+    }
+
+    private static string BuildLabUri(Guid deviceId, nuint slotId, Pkcs11LabOperation operation, nuint? primaryHandle = null, string? mechanism = null, nuint? secondaryHandle = null, string? attributeType = null)
+    {
+        List<string> query =
+        [
+            $"device={Uri.EscapeDataString(deviceId.ToString())}",
+            $"slot={Uri.EscapeDataString(slotId.ToString())}",
+            $"op={Uri.EscapeDataString(operation.ToString())}"
+        ];
+
+        if (primaryHandle is not null)
+        {
+            query.Add($"handle={primaryHandle.Value}");
+        }
+
+        if (secondaryHandle is not null)
+        {
+            query.Add($"wrapHandle={secondaryHandle.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(mechanism))
+        {
+            query.Add($"mechanism={Uri.EscapeDataString(mechanism)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(attributeType))
+        {
+            query.Add($"attr={Uri.EscapeDataString(attributeType)}");
+        }
+
+        return $"/lab?{string.Join("&", query)}";
     }
 
     private RenderFragment CapabilityCheckbox(Func<bool> getValue, Action<bool> setValue, string label) => builder =>

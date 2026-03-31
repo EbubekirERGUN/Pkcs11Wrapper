@@ -193,6 +193,36 @@ public sealed class Pkcs11LabValidationTests
         HsmAdminService.ValidateLabRequest(request);
     }
 
+    [Fact]
+    public void ValidateLabRequestRequiresAttributeTypeForReadAttribute()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.ReadAttribute,
+            KeyHandleText = "42"
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Attribute type", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestAcceptsReadAttributeWithHexCode()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.ReadAttribute,
+            KeyHandleText = "42",
+            AttributeTypeText = "0x3"
+        };
+
+        HsmAdminService.ValidateLabRequest(request);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(4097)]

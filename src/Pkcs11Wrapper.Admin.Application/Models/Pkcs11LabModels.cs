@@ -17,7 +17,8 @@ public enum Pkcs11LabOperation
     DecryptData = 12,
     InspectObject = 13,
     WrapKey = 14,
-    UnwrapAesKey = 15
+    UnwrapAesKey = 15,
+    ReadAttribute = 16
 }
 
 public enum Pkcs11LabDigestAlgorithm
@@ -59,6 +60,8 @@ public sealed class Pkcs11LabRequest
     public string? UserPin { get; set; }
 
     public string? MechanismTypeText { get; set; }
+
+    public string? AttributeTypeText { get; set; }
 
     public string? KeyHandleText { get; set; }
 
