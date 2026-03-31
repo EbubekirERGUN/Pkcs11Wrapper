@@ -33,8 +33,8 @@ public sealed class JsonStoresTests
         try
         {
             JsonLineAuditLogStore store = new(new AdminStorageOptions { DataRoot = root });
-            await store.AppendAsync(new AdminAuditLogEntry(Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(-1), "a", "Device", "Add", "one", "Success", "first"));
-            await store.AppendAsync(new AdminAuditLogEntry(Guid.NewGuid(), DateTimeOffset.UtcNow, "a", "Device", "Add", "two", "Success", "second"));
+            await store.AppendAsync(CreateAudit("one", "first", DateTimeOffset.UtcNow.AddMinutes(-1)));
+            await store.AppendAsync(CreateAudit("two", "second", DateTimeOffset.UtcNow));
 
             IReadOnlyList<AdminAuditLogEntry> logs = await store.ReadRecentAsync(10);
             Assert.Equal(2, logs.Count);
@@ -46,6 +46,30 @@ public sealed class JsonStoresTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task JsonAuditStoreVerifiesHashChain()
+    {
+        string root = CreateTempDirectory();
+        try
+        {
+            JsonLineAuditLogStore store = new(new AdminStorageOptions { DataRoot = root });
+            await store.AppendAsync(CreateAudit("one", "first", DateTimeOffset.UtcNow.AddMinutes(-1)));
+            await store.AppendAsync(CreateAudit("two", "second", DateTimeOffset.UtcNow));
+
+            AuditIntegrityStatus integrity = await store.VerifyIntegrityAsync();
+
+            Assert.True(integrity.IsValid);
+            Assert.Equal(2, integrity.CheckedEntries);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static AdminAuditLogEntry CreateAudit(string target, string details, DateTimeOffset timestamp)
+        => new(Guid.NewGuid(), timestamp, "tester", ["admin"], "cookie", "Device", "Add", target, "Success", details, 0, null, string.Empty, "127.0.0.1", "trace-1", "test-agent", Environment.MachineName);
 
     private static string CreateTempDirectory()
     {

@@ -1,5 +1,8 @@
 @page "/slots"
+@attribute [Authorize(Policy = AdminRoles.Viewer)]
 @inject HsmAdminService Admin
+@inject ProtectedPinStore PinStore
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Slots</PageTitle>
 
@@ -26,6 +29,10 @@
         <div class="col-lg-4">
             <label class="form-label">Optional User PIN</label>
             <input class="form-control" type="password" @bind="_userPin" />
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" @bind="_rememberPin" />
+                <label class="form-check-label">Remember this PIN in protected local storage</label>
+            </div>
         </div>
         <div class="col-lg-4 d-flex gap-2">
             <button class="btn btn-primary" @onclick="LoadSlotsAsync" disabled="@string.IsNullOrWhiteSpace(_selectedDeviceId)">Load Slots</button>
@@ -75,9 +82,9 @@
                         <td>@slot.MechanismCount</td>
                         <td class="text-end">
                             <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" @onclick="() => OpenSessionAsync(slot, false)">Open RO</button>
-                                <button class="btn btn-outline-warning" @onclick="() => OpenSessionAsync(slot, true)">Open RW</button>
-                                <button class="btn btn-outline-danger" @onclick="() => CloseAllAsync(slot)">Close All</button>
+                                <button class="btn btn-outline-primary" @onclick="() => OpenSessionAsync(slot, false)" disabled="@(!_isOperator)">Open RO</button>
+                                <button class="btn btn-outline-warning" @onclick="() => OpenSessionAsync(slot, true)" disabled="@(!_isOperator)">Open RW</button>
+                                <button class="btn btn-outline-danger" @onclick="() => CloseAllAsync(slot)" disabled="@(!_isOperator)">Close All</button>
                             </div>
                         </td>
                     </tr>
@@ -113,7 +120,7 @@
                         <td>@(session.IsReadWrite ? "RW" : "RO")</td>
                         <td>@session.State</td>
                         <td>@session.LastOperation</td>
-                        <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => CloseSessionAsync(session.SessionId)">Close</button></td>
+                        <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => CloseSessionAsync(session.SessionId)" disabled="@(!_isOperator)">Close</button></td>
                     </tr>
                 }
             </tbody>
@@ -127,14 +134,28 @@
     private IReadOnlyList<AdminSessionSnapshot> _sessions = [];
     private string? _selectedDeviceId;
     private string? _userPin;
+    private bool _rememberPin;
     private string? _statusMessage;
     private bool _statusIsError;
+    private bool _isOperator;
 
     protected override async Task OnInitializedAsync()
     {
+        AuthenticationState state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _isOperator = state.User.IsInRole(AdminRoles.Operator) || state.User.IsInRole(AdminRoles.Admin);
         _devices = await Admin.GetDevicesAsync();
         _sessions = Admin.GetSessions();
         _selectedDeviceId = _devices.FirstOrDefault()?.Id.ToString();
+        await LoadProtectedPinAsync();
+    }
+
+    private async Task LoadProtectedPinAsync()
+    {
+        if (Guid.TryParse(_selectedDeviceId, out Guid deviceId))
+        {
+            _userPin = await PinStore.TryGetAsync(deviceId, 0, "slots");
+            _rememberPin = !string.IsNullOrWhiteSpace(_userPin);
+        }
     }
 
     private async Task LoadSlotsAsync()
@@ -147,6 +168,7 @@
             }
 
             _slots = await Admin.GetSlotsAsync(deviceId);
+            await PersistPinAsync(deviceId, 0, "slots");
             _statusMessage = $"Loaded {_slots.Count} slot(s).";
             _statusIsError = false;
         }
@@ -197,4 +219,16 @@
     }
 
     private void RefreshSessions() => _sessions = Admin.GetSessions();
+
+    private async Task PersistPinAsync(Guid deviceId, nuint slotId, string purpose)
+    {
+        if (_rememberPin && !string.IsNullOrWhiteSpace(_userPin))
+        {
+            await PinStore.SaveAsync(deviceId, slotId, purpose, _userPin);
+        }
+        else
+        {
+            await PinStore.DeleteAsync(deviceId, slotId, purpose);
+        }
+    }
 }

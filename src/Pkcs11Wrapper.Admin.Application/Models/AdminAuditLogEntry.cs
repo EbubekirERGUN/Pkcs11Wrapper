@@ -4,8 +4,17 @@ public sealed record AdminAuditLogEntry(
     Guid Id,
     DateTimeOffset TimestampUtc,
     string Actor,
+    string[] ActorRoles,
+    string AuthenticationType,
     string Category,
     string Action,
     string Target,
     string Outcome,
-    string Details);
+    string Details,
+    long Sequence,
+    string? PreviousHash,
+    string EntryHash,
+    string? RemoteIp,
+    string? SessionId,
+    string? UserAgent,
+    string MachineName);

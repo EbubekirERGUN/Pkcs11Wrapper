@@ -1,5 +1,8 @@
 @page "/sessions"
+@attribute [Authorize(Policy = AdminRoles.Viewer)]
 @inject HsmAdminService Admin
+@inject ProtectedPinStore PinStore
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Sessions</PageTitle>
 
@@ -13,7 +16,7 @@
 
 <div class="d-flex flex-wrap gap-2 mb-3">
     <button class="btn btn-primary" @onclick="Refresh">Refresh</button>
-    <button class="btn btn-outline-danger" @onclick="CloseAllTrackedAsync" disabled="@(_sessions.Count == 0)">Close All Tracked</button>
+    <button class="btn btn-outline-danger" @onclick="CloseAllTrackedAsync" disabled="@(_sessions.Count == 0 || !_isOperator)">Close All Tracked</button>
     <select class="form-select w-auto" @bind="_healthFilter">
         <option value="all">All health states</option>
         <option value="healthy">Healthy only</option>
@@ -133,14 +136,18 @@ else
                             <div class="col-12">
                                 <label class="form-label">User PIN</label>
                                 <input class="form-control" type="password" @bind="_userPin" />
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" @bind="_rememberPin" />
+                                    <label class="form-check-label">Remember PIN in protected local storage</label>
+                                </div>
                                 <div class="form-text">Login/logout operates on the tracked session itself so you can watch state transitions immediately. Once invalidated, only close/refresh remain meaningful.</div>
                             </div>
                             <div class="col-12 d-flex flex-wrap gap-2">
-                                <button class="btn btn-success" @onclick="LoginAsync" disabled="@(!_selectedSession.CanLogin)">Login User</button>
-                                <button class="btn btn-outline-warning" @onclick="LogoutAsync" disabled="@(!_selectedSession.CanLogout)">Logout</button>
-                                <button class="btn btn-outline-secondary" @onclick="CancelAsync" disabled="@(!_selectedSession.CanCancel)">Cancel Active Ops</button>
-                                <button class="btn btn-outline-danger" @onclick="CloseSelectedSlotSessionsAsync" disabled="@(!_selectedSession.CanCloseSlot)">Close Slot Sessions (module)</button>
-                                <button class="btn btn-danger" @onclick="CloseSelectedAsync" disabled="@(!_selectedSession.CanCloseTracked)">Close Tracked Session</button>
+                                <button class="btn btn-success" @onclick="LoginAsync" disabled="@(!_isOperator || !_selectedSession.CanLogin)">Login User</button>
+                                <button class="btn btn-outline-warning" @onclick="LogoutAsync" disabled="@(!_isOperator || !_selectedSession.CanLogout)">Logout</button>
+                                <button class="btn btn-outline-secondary" @onclick="CancelAsync" disabled="@(!_isOperator || !_selectedSession.CanCancel)">Cancel Active Ops</button>
+                                <button class="btn btn-outline-danger" @onclick="CloseSelectedSlotSessionsAsync" disabled="@(!_isOperator || !_selectedSession.CanCloseSlot)">Close Slot Sessions (module)</button>
+                                <button class="btn btn-danger" @onclick="CloseSelectedAsync" disabled="@(!_isOperator || !_selectedSession.CanCloseTracked)">Close Tracked Session</button>
                             </div>
                         </div>
                     </div>
@@ -154,10 +161,12 @@ else
     private IReadOnlyList<AdminSessionSnapshot> _sessions = [];
     private AdminSessionSnapshot? _selectedSession;
     private string? _userPin;
+    private bool _rememberPin;
     private string? _statusMessage;
     private bool _statusIsError;
     private string _healthFilter = "all";
     private string? _deviceFilter;
+    private bool _isOperator;
 
     private IEnumerable<AdminSessionSnapshot> FilteredSessions => _sessions.Where(session =>
         (_healthFilter, session.IsHealthy) switch
@@ -168,7 +177,14 @@ else
         }
         && (string.IsNullOrWhiteSpace(_deviceFilter) || string.Equals(_deviceFilter, session.DeviceName, StringComparison.Ordinal)));
 
-    protected override void OnInitialized() => Refresh();
+    protected override async Task OnInitializedAsync()
+    {
+        AuthenticationState state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _isOperator = state.User.IsInRole(AdminRoles.Operator) || state.User.IsInRole(AdminRoles.Admin);
+        _userPin = await PinStore.TryGetAsync(Guid.Empty, 0, "sessions");
+        _rememberPin = !string.IsNullOrWhiteSpace(_userPin);
+        Refresh();
+    }
 
     private void Refresh()
     {
@@ -193,6 +209,7 @@ else
         try
         {
             _selectedSession = await Admin.LoginTrackedSessionAsync(_selectedSession.SessionId, _userPin ?? string.Empty);
+            await PersistPinAsync();
             SetStatus("Tracked session logged in as CKU_USER.", false);
             Refresh();
             SelectSession(_selectedSession.SessionId);
@@ -287,6 +304,18 @@ else
     {
         _statusMessage = message;
         _statusIsError = isError;
+    }
+
+    private async Task PersistPinAsync()
+    {
+        if (_rememberPin && !string.IsNullOrWhiteSpace(_userPin))
+        {
+            await PinStore.SaveAsync(Guid.Empty, 0, "sessions", _userPin);
+        }
+        else
+        {
+            await PinStore.DeleteAsync(Guid.Empty, 0, "sessions");
+        }
     }
 
     private static string AuthSummary(AdminSessionSnapshot session)

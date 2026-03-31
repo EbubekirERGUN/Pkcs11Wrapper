@@ -1,5 +1,7 @@
 @page "/devices"
+@attribute [Authorize(Policy = AdminRoles.Viewer)]
 @inject HsmAdminService Admin
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Devices</PageTitle>
 
@@ -41,9 +43,13 @@
                         <label class="form-check-label">Enabled</label>
                     </div>
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-primary">Save</button>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="ResetForm">Reset</button>
+                        <button type="submit" class="btn btn-primary" disabled="@(!_isAdmin)">Save</button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="ResetForm" disabled="@(!_isAdmin)">Reset</button>
                     </div>
+                    @if (!_isAdmin)
+                    {
+                        <div class="form-text mt-2">Viewer/operator can inspect devices; only admin can create, edit, or delete profiles.</div>
+                    }
                 </EditForm>
             </div>
         </div>
@@ -95,9 +101,9 @@
                                         </td>
                                         <td class="text-end">
                                             <div class="btn-group btn-group-sm">
-                                                <button class="btn btn-outline-primary" @onclick="() => Edit(device)">Edit</button>
-                                                <button class="btn btn-outline-success" @onclick="() => TestAsync(device.Id)">Test</button>
-                                                <button class="btn btn-outline-danger" @onclick="() => DeleteAsync(device.Id)">Delete</button>
+                                                <button class="btn btn-outline-primary" @onclick="() => Edit(device)" disabled="@(!_isAdmin)">Edit</button>
+                                                <button class="btn btn-outline-success" @onclick="() => TestAsync(device.Id)" disabled="@(!_isOperator)">Test</button>
+                                                <button class="btn btn-outline-danger" @onclick="() => DeleteAsync(device.Id)" disabled="@(!_isAdmin)">Delete</button>
                                             </div>
                                         </td>
                                     </tr>
@@ -117,8 +123,21 @@
     private Guid? _editingId;
     private string? _statusMessage;
     private bool _statusIsError;
+    private bool _isOperator;
+    private bool _isAdmin;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolveRolesAsync();
+        await LoadAsync();
+    }
+
+    private async Task ResolveRolesAsync()
+    {
+        AuthenticationState state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = state.User.IsInRole(AdminRoles.Admin);
+        _isOperator = _isAdmin || state.User.IsInRole(AdminRoles.Operator);
+    }
 
     private async Task LoadAsync()
     {

@@ -1,0 +1,42 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject NavigationManager Navigation
+
+<PageTitle>Admin Login</PageTitle>
+
+<h1>Admin Panel Login</h1>
+<p class="text-muted">Local cookie auth with role-based access. On first run, bootstrap credentials are written to <code>App_Data/bootstrap-admin.txt</code>.</p>
+
+@if (_showError)
+{
+    <div class="alert alert-danger">Login failed. Check username/password and try again.</div>
+}
+
+<form method="post" action="/account/login" class="card shadow-sm p-4" style="max-width: 28rem;">
+    <AntiforgeryToken />
+    <input type="hidden" name="returnUrl" value="@_returnUrl" />
+
+    <div class="mb-3">
+        <label class="form-label">Username</label>
+        <input class="form-control" name="username" autocomplete="username" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Password</label>
+        <input class="form-control" type="password" name="password" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary" type="submit">Sign in</button>
+</form>
+
+@code {
+    private bool _showError;
+    private string _returnUrl = "/";
+
+    protected override void OnInitialized()
+    {
+        Uri uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        Dictionary<string, string> query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query)
+            .ToDictionary(x => x.Key, x => x.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+        _showError = string.Equals(query.GetValueOrDefault("error"), "1", StringComparison.Ordinal);
+        _returnUrl = string.IsNullOrWhiteSpace(query.GetValueOrDefault("returnUrl")) ? "/" : query["returnUrl"]!;
+    }
+}

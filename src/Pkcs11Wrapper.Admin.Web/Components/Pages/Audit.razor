@@ -1,10 +1,23 @@
 @page "/audit"
+@attribute [Authorize(Policy = AdminRoles.Viewer)]
 @inject HsmAdminService Admin
 
 <PageTitle>Audit Logs</PageTitle>
 
 <h1>Audit Logs</h1>
 <p class="text-muted">Panel üstünden yapılan temel yönetim işlemlerinin uygulama audit kaydı.</p>
+
+@if (_integrity is not null)
+{
+    <div class="alert @(_integrity.IsValid ? "alert-success" : "alert-danger")">
+        <div class="fw-semibold">Audit integrity</div>
+        <div>@_integrity.Summary</div>
+        @if (!string.IsNullOrWhiteSpace(_integrity.FailureReason))
+        {
+            <div class="small">@_integrity.FailureReason</div>
+        }
+    </div>
+}
 
 <div class="d-flex gap-2 mb-3">
     <button class="btn btn-primary" @onclick="LoadAsync">Refresh</button>
@@ -22,6 +35,7 @@ else
                 <tr>
                     <th>When</th>
                     <th>Actor</th>
+                    <th>Roles</th>
                     <th>Category</th>
                     <th>Action</th>
                     <th>Target</th>
@@ -35,6 +49,7 @@ else
                     <tr>
                         <td>@log.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
                         <td>@log.Actor</td>
+                        <td>@string.Join(", ", log.ActorRoles)</td>
                         <td>@log.Category</td>
                         <td>@log.Action</td>
                         <td>@log.Target</td>
@@ -49,9 +64,13 @@ else
 
 @code {
     private IReadOnlyList<AdminAuditLogEntry> _logs = [];
+    private AuditIntegrityStatus? _integrity;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
-        => _logs = await Admin.GetAuditLogsAsync();
+    {
+        _logs = await Admin.GetAuditLogsAsync();
+        _integrity = await Admin.GetAuditIntegrityAsync();
+    }
 }

@@ -1,10 +1,11 @@
 using System.Globalization;
 using System.Text;
+using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
 
 namespace Pkcs11Wrapper.Admin.Application.Services;
 
-public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry)
+public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization)
 {
     private const string DestroyConfirmationPrefix = "DESTROY ";
 
@@ -43,25 +44,46 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     ];
 
     public Task<IReadOnlyList<HsmDeviceProfile>> GetDevicesAsync(CancellationToken cancellationToken = default)
-        => deviceProfiles.GetAllAsync(cancellationToken);
+    {
+        authorization.DemandViewer();
+        return deviceProfiles.GetAllAsync(cancellationToken);
+    }
 
     public Task<HsmDeviceProfile> SaveDeviceAsync(Guid? id, HsmDeviceProfileInput input, CancellationToken cancellationToken = default)
-        => deviceProfiles.UpsertAsync(id, input, cancellationToken);
+    {
+        authorization.DemandAdmin();
+        return deviceProfiles.UpsertAsync(id, input, cancellationToken);
+    }
 
     public async Task DeleteDeviceAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        authorization.DemandAdmin();
         HsmDeviceProfile? existing = await deviceProfiles.GetAsync(id, cancellationToken);
         await deviceProfiles.DeleteAsync(id, cancellationToken);
         await auditLog.WriteAsync("Device", "Delete", existing?.Name ?? id.ToString(), "Success", "Device profile removed.", cancellationToken: cancellationToken);
     }
 
-    public IReadOnlyList<AdminSessionSnapshot> GetSessions() => sessionRegistry.GetSnapshots();
+    public IReadOnlyList<AdminSessionSnapshot> GetSessions()
+    {
+        authorization.DemandViewer();
+        return sessionRegistry.GetSnapshots();
+    }
 
     public Task<IReadOnlyList<AdminAuditLogEntry>> GetAuditLogsAsync(int take = 200, CancellationToken cancellationToken = default)
-        => auditLog.GetRecentAsync(take, cancellationToken);
+    {
+        authorization.DemandViewer();
+        return auditLog.GetRecentAsync(take, cancellationToken);
+    }
+
+    public Task<AuditIntegrityStatus> GetAuditIntegrityAsync(CancellationToken cancellationToken = default)
+    {
+        authorization.DemandViewer();
+        return auditLog.VerifyIntegrityAsync(cancellationToken);
+    }
 
     public async Task<DashboardSummary> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
+        authorization.DemandViewer();
         IReadOnlyList<HsmDeviceProfile> devices = await deviceProfiles.GetAllAsync(cancellationToken);
         IReadOnlyList<AdminAuditLogEntry> logs = await auditLog.GetRecentAsync(25, cancellationToken);
         return new DashboardSummary(devices.Count, devices.Count(x => x.IsEnabled), sessionRegistry.GetSnapshots().Count, logs.Count);
@@ -69,6 +91,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<HsmConnectionTestResult> TestConnectionAsync(Guid deviceId, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
 
         try
@@ -89,6 +112,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<IReadOnlyList<HsmSlotSummary>> GetSlotsAsync(Guid deviceId, CancellationToken cancellationToken = default)
     {
+        authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
 
@@ -141,6 +165,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<IReadOnlyList<HsmKeyObjectSummary>> GetKeysAsync(Guid deviceId, nuint slotIdValue, string? userPin, string? labelFilter, CancellationToken cancellationToken = default)
     {
+        authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
@@ -155,6 +180,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<HsmObjectDetail> GetObjectDetailAsync(Guid deviceId, nuint slotIdValue, nuint handleValue, string? userPin, CancellationToken cancellationToken = default)
     {
+        authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
@@ -167,6 +193,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<KeyManagementSlotCapabilities> GetKeyManagementCapabilitiesAsync(Guid deviceId, nuint slotIdValue, CancellationToken cancellationToken = default)
     {
+        authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
 
@@ -250,6 +277,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<KeyManagementResult> GenerateAesKeyAsync(Guid deviceId, nuint slotIdValue, GenerateAesKeyRequest request, string userPin, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         ValidateGenerateAesKeyRequest(request);
         byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
         byte[] label = Encoding.UTF8.GetBytes(request.Label.Trim());
@@ -269,6 +297,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<KeyManagementResult> ImportAesKeyAsync(Guid deviceId, nuint slotIdValue, ImportAesKeyRequest request, string userPin, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         ValidateImportAesKeyRequest(request);
         byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
         byte[] label = Encoding.UTF8.GetBytes(request.Label.Trim());
@@ -289,6 +318,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<KeyManagementResult> GenerateRsaKeyPairAsync(Guid deviceId, nuint slotIdValue, GenerateRsaKeyPairRequest request, string userPin, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         ValidateGenerateRsaKeyPairRequest(request);
         byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
         byte[] label = Encoding.UTF8.GetBytes(request.Label.Trim());
@@ -313,6 +343,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<AdminSessionSnapshot> OpenSessionAsync(Guid deviceId, nuint slotIdValue, bool readWrite, string? userPin, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         Pkcs11Module module = CreateInitializedModule(device);
         try
@@ -338,16 +369,21 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<bool> CloseSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         bool closed = await sessionRegistry.CloseAsync(sessionId);
         await auditLog.WriteAsync("Session", "Close", sessionId.ToString(), closed ? "Success" : "NotFound", closed ? "Session closed." : "Session was not found.", cancellationToken: cancellationToken);
         return closed;
     }
 
     public Task<AdminSessionSnapshot?> GetSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
-        => Task.FromResult(sessionRegistry.GetSnapshots().FirstOrDefault(x => x.SessionId == sessionId));
+    {
+        authorization.DemandViewer();
+        return Task.FromResult(sessionRegistry.GetSnapshots().FirstOrDefault(x => x.SessionId == sessionId));
+    }
 
     public async Task<AdminSessionSnapshot> LoginTrackedSessionAsync(Guid sessionId, string userPin, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         RequireUserPin(userPin, "log in to a tracked session");
         AdminSessionRegistry.AdminTrackedSession tracked = GetTrackedSession(sessionId);
         tracked.Session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
@@ -358,6 +394,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<AdminSessionSnapshot> LogoutTrackedSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         AdminSessionRegistry.AdminTrackedSession tracked = GetTrackedSession(sessionId);
         tracked.Session.Logout();
         sessionRegistry.TryTouch(sessionId, "Logout");
@@ -367,6 +404,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<AdminSessionSnapshot> CancelTrackedSessionOperationsAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         AdminSessionRegistry.AdminTrackedSession tracked = GetTrackedSession(sessionId);
         tracked.Session.SessionCancel();
         sessionRegistry.TryTouch(sessionId, "SessionCancel");
@@ -376,6 +414,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task CloseAllSessionsAsync(Guid deviceId, nuint slotIdValue, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
         module.CloseAllSessions(new Pkcs11SlotId(slotIdValue));
@@ -385,6 +424,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task DestroyObjectAsync(Guid deviceId, nuint slotIdValue, DestroyObjectRequest request, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         ValidateDestroyRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
@@ -397,6 +437,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<KeyManagementResult> UpdateObjectAttributesAsync(Guid deviceId, nuint slotIdValue, UpdateObjectAttributesRequest request, string userPin, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         ValidateUpdateObjectAttributesRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
@@ -415,6 +456,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     public async Task<KeyManagementResult> CopyObjectAsync(Guid deviceId, nuint slotIdValue, CopyObjectRequest request, string userPin, CancellationToken cancellationToken = default)
     {
+        authorization.DemandOperator();
         ValidateCopyObjectRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);

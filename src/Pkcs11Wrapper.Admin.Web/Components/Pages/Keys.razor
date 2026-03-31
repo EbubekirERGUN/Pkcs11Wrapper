@@ -1,5 +1,8 @@
 @page "/keys"
+@attribute [Authorize(Policy = AdminRoles.Viewer)]
 @inject HsmAdminService Admin
+@inject ProtectedPinStore PinStore
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Keys</PageTitle>
 
@@ -40,6 +43,10 @@
         <div class="col-lg-2">
             <label class="form-label">User PIN</label>
             <input class="form-control" type="password" @bind="_userPin" />
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" @bind="_rememberPin" />
+                <label class="form-check-label">Remember in protected local storage</label>
+            </div>
         </div>
         <div class="col-lg-3 d-flex gap-2">
             <button class="btn btn-primary" @onclick="LoadKeysAsync" disabled="@(!CanLoadKeys)">Load Keys</button>
@@ -128,7 +135,7 @@
                     @CapabilityCheckbox(() => _aesRequest.Extractable, value => _aesRequest.Extractable = value, "Extractable")
                 </div>
                 <div class="col-12">
-                    <button class="btn btn-success" @onclick="GenerateAesAsync" disabled="@(!CanGenerateAes)">Generate AES Key</button>
+                    <button class="btn btn-success" @onclick="GenerateAesAsync" disabled="@(!_isOperator || !CanGenerateAes)">Generate AES Key</button>
                 </div>
             </div>
         </div>
@@ -165,7 +172,7 @@
                     @CapabilityCheckbox(() => _importAesRequest.Extractable, value => _importAesRequest.Extractable = value, "Extractable")
                 </div>
                 <div class="col-12">
-                    <button class="btn btn-warning" @onclick="ImportAesAsync" disabled="@(!CanImportAes)">Import AES Key</button>
+                    <button class="btn btn-warning" @onclick="ImportAesAsync" disabled="@(!_isOperator || !CanImportAes)">Import AES Key</button>
                 </div>
             </div>
         </div>
@@ -209,7 +216,7 @@
                     @CapabilityCheckbox(() => _rsaRequest.Extractable, value => _rsaRequest.Extractable = value, "Extractable private key")
                 </div>
                 <div class="col-12">
-                    <button class="btn btn-success" @onclick="GenerateRsaAsync" disabled="@(!CanGenerateRsa)">Generate RSA Key Pair</button>
+                    <button class="btn btn-success" @onclick="GenerateRsaAsync" disabled="@(!_isOperator || !CanGenerateRsa)">Generate RSA Key Pair</button>
                 </div>
             </div>
         </div>
@@ -250,9 +257,9 @@
                                 <td class="text-end">
                                     <div class="btn-group btn-group-sm">
                                         <button class="btn btn-outline-primary" @onclick="() => ShowDetailAsync(key)">Details</button>
-                                        <button class="btn btn-outline-secondary" @onclick="() => BeginEdit(key)">Edit</button>
-                                        <button class="btn btn-outline-info" @onclick="() => BeginCopy(key)">Copy</button>
-                                        <button class="btn btn-outline-danger" @onclick="() => BeginDestroy(key)">Destroy</button>
+                                        <button class="btn btn-outline-secondary" @onclick="() => BeginEdit(key)" disabled="@(!_isOperator)">Edit</button>
+                                        <button class="btn btn-outline-info" @onclick="() => BeginCopy(key)" disabled="@(!_isOperator)">Copy</button>
+                                        <button class="btn btn-outline-danger" @onclick="() => BeginDestroy(key)" disabled="@(!_isOperator)">Destroy</button>
                                     </div>
                                 </td>
                             </tr>
@@ -364,7 +371,7 @@
                             @NullableCheckbox(() => _editRequest.AllowDerive, value => _editRequest.AllowDerive = value, "Derive", CanEdit(x => x.CanEditDerive))
                         </div>
                         <div class="col-12 d-flex gap-2">
-                            <button class="btn btn-primary" @onclick="SaveEditAsync" disabled="@(!CanSaveEdit)">Save changes</button>
+                            <button class="btn btn-primary" @onclick="SaveEditAsync" disabled="@(!_isOperator || !CanSaveEdit)">Save changes</button>
                             <button class="btn btn-outline-secondary" @onclick="ResetEditBooleans">Reset toggles to keep existing</button>
                         </div>
                     </div>
@@ -414,7 +421,7 @@
                             @NullableCheckbox(() => _copyRequest.AllowDerive, value => _copyRequest.AllowDerive = value, "Derive", true)
                         </div>
                         <div class="col-12 d-flex gap-2">
-                            <button class="btn btn-info" @onclick="CopyAsync" disabled="@(!CanCopyObject)">Copy object</button>
+                            <button class="btn btn-info" @onclick="CopyAsync" disabled="@(!_isOperator || !CanCopyObject)">Copy object</button>
                             <button class="btn btn-outline-secondary" @onclick="ResetCopyBooleans">Reset overrides</button>
                         </div>
                     </div>
@@ -443,7 +450,7 @@
                             <label class="form-check-label">I understand this deletion is permanent.</label>
                         </div>
                         <div class="d-flex gap-2">
-                            <button class="btn btn-danger" @onclick="DestroyAsync">Destroy Now</button>
+                            <button class="btn btn-danger" @onclick="DestroyAsync" disabled="@(!_isOperator)">Destroy Now</button>
                             <button class="btn btn-outline-secondary" @onclick="CancelDestroy">Cancel</button>
                         </div>
                     </div>
@@ -461,6 +468,7 @@
     private string? _selectedSlotId;
     private string? _labelFilter;
     private string? _userPin;
+    private bool _rememberPin;
     private HsmObjectDetail? _selectedDetail;
     private nuint? _selectedDetailHandle;
     private HsmKeyObjectSummary? _destroyTarget;
@@ -473,6 +481,7 @@
     private GenerateRsaKeyPairRequest _rsaRequest = new() { Label = "rsa-admin-" + Guid.NewGuid().ToString("N")[..10] };
     private string? _statusMessage;
     private bool _statusIsError;
+    private bool _isOperator;
 
     private bool CanLoadKeys => Guid.TryParse(_selectedDeviceId, out _) && nuint.TryParse(_selectedSlotId, out _);
     private bool CanManageKeys => CanLoadKeys && !string.IsNullOrWhiteSpace(_userPin);
@@ -485,6 +494,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        AuthenticationState state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _isOperator = state.User.IsInRole(AdminRoles.Operator) || state.User.IsInRole(AdminRoles.Admin);
         _devices = await Admin.GetDevicesAsync();
         _selectedDeviceId = _devices.FirstOrDefault()?.Id.ToString();
         await ReloadSlotsAsync();
@@ -512,7 +523,17 @@
 
         _slots = await Admin.GetSlotsAsync(deviceId);
         _selectedSlotId = _slots.FirstOrDefault()?.SlotId.ToString();
+        await LoadProtectedPinAsync();
         await ReloadSlotCapabilitiesAsync();
+    }
+
+    private async Task LoadProtectedPinAsync()
+    {
+        if (TryGetSelection(out Guid deviceId, out nuint slotId))
+        {
+            _userPin = await PinStore.TryGetAsync(deviceId, slotId, "keys");
+            _rememberPin = !string.IsNullOrWhiteSpace(_userPin);
+        }
     }
 
     private async Task ReloadSlotCapabilitiesAsync()
@@ -543,6 +564,7 @@
             }
 
             _keys = await Admin.GetKeysAsync(deviceId, slotId, _userPin, _labelFilter);
+            await PersistPinAsync(deviceId, slotId);
             _destroyTarget = null;
             _destroyRequest = new();
             _selectedDetail = null;
@@ -672,6 +694,7 @@
         try
         {
             if (_editRequest is null || !TryGetSelection(out Guid deviceId, out nuint slotId)) return;
+            await PersistPinAsync(deviceId, slotId);
             KeyManagementResult result = await Admin.UpdateObjectAttributesAsync(deviceId, slotId, _editRequest, _userPin ?? string.Empty);
             SetStatus(result.Summary, false);
             _labelFilter = result.Label;
@@ -689,6 +712,7 @@
         try
         {
             if (_copyRequest is null || !TryGetSelection(out Guid deviceId, out nuint slotId)) return;
+            await PersistPinAsync(deviceId, slotId);
             KeyManagementResult result = await Admin.CopyObjectAsync(deviceId, slotId, _copyRequest, _userPin ?? string.Empty);
             SetStatus(result.Summary, false);
             _labelFilter = result.Label;
@@ -706,6 +730,7 @@
         try
         {
             if (_destroyTarget is null || !TryGetSelection(out Guid deviceId, out nuint slotId)) return;
+            await PersistPinAsync(deviceId, slotId);
             _destroyRequest.Handle = _destroyTarget.Handle;
             _destroyRequest.Label = _destroyTarget.Label;
             _destroyRequest.UserPin = _userPin ?? string.Empty;
@@ -732,6 +757,7 @@
             }
 
             KeyManagementResult result = await Admin.GenerateAesKeyAsync(deviceId, slotId, _aesRequest, _userPin ?? string.Empty);
+            await PersistPinAsync(deviceId, slotId);
             SetStatus(result.Summary, false);
             _labelFilter = result.Label;
             _aesRequest = new GenerateAesKeyRequest { Label = "aes-admin-" + Guid.NewGuid().ToString("N")[..10], SizeBytes = _aesRequest.SizeBytes };
@@ -754,6 +780,7 @@
             }
 
             KeyManagementResult result = await Admin.ImportAesKeyAsync(deviceId, slotId, _importAesRequest, _userPin ?? string.Empty);
+            await PersistPinAsync(deviceId, slotId);
             SetStatus(result.Summary, false);
             _labelFilter = result.Label;
             _importAesRequest = new ImportAesKeyRequest { Label = "aes-import-" + Guid.NewGuid().ToString("N")[..10] };
@@ -776,6 +803,7 @@
             }
 
             KeyManagementResult result = await Admin.GenerateRsaKeyPairAsync(deviceId, slotId, _rsaRequest, _userPin ?? string.Empty);
+            await PersistPinAsync(deviceId, slotId);
             SetStatus(result.Summary, false);
             _labelFilter = result.Label;
             _rsaRequest = new GenerateRsaKeyPairRequest { Label = "rsa-admin-" + Guid.NewGuid().ToString("N")[..10], ModulusBits = _rsaRequest.ModulusBits, PublicExponentHex = _rsaRequest.PublicExponentHex };
@@ -867,6 +895,18 @@
     {
         _statusMessage = message;
         _statusIsError = isError;
+    }
+
+    private async Task PersistPinAsync(Guid deviceId, nuint slotId)
+    {
+        if (_rememberPin && !string.IsNullOrWhiteSpace(_userPin))
+        {
+            await PinStore.SaveAsync(deviceId, slotId, "keys", _userPin);
+        }
+        else
+        {
+            await PinStore.DeleteAsync(deviceId, slotId, "keys");
+        }
     }
 
     private static IEnumerable<string> GetFlags(HsmObjectDetail detail)

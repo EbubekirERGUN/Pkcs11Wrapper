@@ -20,19 +20,22 @@
 - Admin panel Phase B için ilk anlamlı genişleme tamamlandı: key/object detail paneli, AES key generate akışı, RSA keypair generate akışı ve typed confirmation + kalıcı silme onayı isteyen daha güvenli destroy UX'i eklendi.
 - Admin panel Phase B/C devamı işlendi: AES raw-value import/create akışı, desteklenen alanlar için object attribute editing paneli, daha güvenli key/object UX iyileştirmeleri, richer tracked-session detail görünümü, tracked session üzerinde login/logout kontrolleri, `C_SessionCancel` yüzeyi ve slot bazlı `CloseAllSessions` tetikleme eklendi.
 - Admin panel için sıradaki üç UX iyileştirme slice'ı tamamlandı: slot capability/mechanism keşfi ile generate/import aksiyonları pre-submit gated hale getirildi, object edit ekranı obje sınıfı + `CKA_MODIFIABLE` görünürlüğüne göre obvious unsupported toggle'ları kapatacak şekilde güçlendirildi, tracked session'larda invalidation reason/health labeling/grouped filtering eklendi ve `C_CopyObject` tabanlı yeni object copy akışı teslim edildi.
+- Admin panel Phase D güvenlik hardening'i başlatıldı ve ilk üç öncelik teslim edildi: local cookie auth + viewer/operator/admin rol modeli, servis katmanında yetki doğrulaması, PIN'ler için Data Protection-backed protected local storage ve hash-chained/metadata-rich audit log bütünlük doğrulaması eklendi.
 - Admin panel uygulama katmanı için yeni doğrulama testleri eklendi; çözüm testleri ve hedefli admin web build doğrulaması temiz geçti.
 
 ## Şu an üzerinde çalışılan
-- Admin panelde capability-aware/copy/session invalidation slice'ının son gözden geçirmesi tamamlandı; sonraki dilim Phase D güvenlik/rol yetkilendirme eksenine kayıyor.
+- Admin panelde Phase D hardening slice'ının ilk bölümü tamamlandı; kalan iş Phase D içinde config export/import, bootstrap credential rotation UX'i ve auth/ops dokümantasyonunun biraz daha ürünleştirilmesi.
 
 ## Sıradaki işler
-- Admin panel için role-based authorization ve protected secret/PIN handling hardening başlatmak.
+- Admin panel için config export/import dilimini eklemek ve Phase D'yi kapatmak.
+- Bootstrap admin credential rotation / local user management UX'ini panel içine almak veya en azından kontrollü bir CLI/maintenance akışı tanımlamak.
 - Object copy akışına vendor-specific failure rehberi veya optional preset/template library katmanı düşünmek.
 - PKCS#11 v3 message API'lerini gerçekten expose eden bir vendor/modül ile runtime regression eklemek.
 - Gerekirse Windows runtime lane'ini GitHub üzerinde ilk gerçek koşusunda gözleyip paket/araç yolu ince ayarı yapmak.
 
 ## Riskler / blocker'lar
 - Mevcut SoftHSM build'leri `C_GetInterface*` export etmediği için yeni v3 yüzeyin runtime pozitif doğrulaması henüz SoftHSM ile yapılamıyor; şimdilik ABI/layout + capability-gated davranış testleri var.
+- Admin panel auth/secret yaklaşımı bu aşamada bilinçli olarak yerel dosya + Data Protection tabanlı tutuldu; harici IdP/KMS entegrasyonu yok. Bu, tek hostlu gömülü yönetim paneli için pratik ama tam production IAM/secret-vault çözümü değil.
 
 ## Commit / push durumu
-- Yeni admin panel UX slice'ı yerelde commitlenecek; push yapılmadı.
+- Phase D hardening slice'ı yerelde commitlenecek; push yapılmadı.
