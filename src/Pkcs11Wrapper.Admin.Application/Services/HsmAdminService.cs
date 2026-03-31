@@ -117,7 +117,20 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         authorization.DemandViewer();
         IReadOnlyList<HsmDeviceProfile> devices = await deviceProfiles.GetAllAsync(cancellationToken);
         IReadOnlyList<AdminAuditLogEntry> logs = await auditLog.GetRecentAsync(25, cancellationToken);
-        return new DashboardSummary(devices.Count, devices.Count(x => x.IsEnabled), sessionRegistry.GetSnapshots().Count, logs.Count);
+        IReadOnlyList<AdminSessionSnapshot> sessions = sessionRegistry.GetSnapshots();
+        AuditIntegrityStatus integrity = await auditLog.VerifyIntegrityAsync(cancellationToken);
+
+        return new DashboardSummary(
+            devices.Count,
+            devices.Count(x => x.IsEnabled),
+            devices.Count(x => !x.IsEnabled),
+            sessions.Count,
+            sessions.Count(x => x.IsHealthy),
+            sessions.Count(x => !x.IsHealthy),
+            logs.Count,
+            logs.Count(x => !string.Equals(x.Outcome, "Success", StringComparison.OrdinalIgnoreCase)),
+            integrity.IsValid,
+            integrity.Summary);
     }
 
     public async Task<AdminConfigurationExportBundle> ExportConfigurationAsync(CancellationToken cancellationToken = default)

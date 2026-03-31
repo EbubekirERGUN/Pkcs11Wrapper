@@ -35,6 +35,11 @@
   - haftalık + manuel benchmark workflow'u
   - `docs/benchmarks.md`
   - commitlenmiş son Linux + SoftHSM baseline: `docs/benchmarks/latest-linux-softhsm.md`
+- Admin panel Phase E ilk polish dilimi teslim edildi:
+  - dashboard health/ops summary kartları ve quick-action yüzeyi
+  - audit sayfasında filtreleme + paging
+  - users sayfasında özet kartları, arama, rol filtresi ve sıralama
+  - `docs/admin-ops-recovery.md` ile local operations/recovery runbook
 - Çözüm doğrulaması temiz:
   - `dotnet build Pkcs11Wrapper.sln -c Release`
   - `dotnet test Pkcs11Wrapper.sln -c Release`
@@ -45,7 +50,7 @@
 - Belgeleme senkronizasyonu yapıldı; README'ler artık admin panelin auth/users/config-transfer/PKCS#11 Lab gerçek durumunu ve benchmark baseline tarihini yansıtıyor.
 
 ## Sıradaki işler
-- Admin panel UX/product polish ve ops/recovery dokümantasyonu.
+- Admin panel UX/product polish'in sonraki dilimleri (dashboard/widget genişletmeleri, table ergonomics, paging/sorting/filtering yaygınlaştırmaları).
 - PKCS#11 v3 interface yüzeyini gerçekten export eden vendor/modül ile ek runtime regression.
 - Benchmark suite'i performans hassas değişikliklerden sonra ve release öncesinde tekrar çalıştırıp en güncel baseline'ı tazelemek.
 - GitHub vitrin materyallerini zenginleştirmek (ekran görüntüsü, demo media, release notes).

@@ -181,6 +181,7 @@ Current capabilities include:
 - [docs/windows-local-setup.md](docs/windows-local-setup.md) - local Windows fixture/bootstrap path
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark scope, rerun flow, periodic tracking model
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - latest committed Linux benchmark baseline
+- [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - local admin-panel operations and recovery runbook
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract
 - [docs/smoke.md](docs/smoke.md) - smoke sample behavior and troubleshooting
 - [docs/release.md](docs/release.md) - release checklist and packaging discipline
@@ -208,7 +209,7 @@ If you want to improve the wrapper, validation matrix, Windows/Linux support, or
 
 Near-term focus areas:
 
-- admin panel UX/product polish and ops/recovery documentation
+- next admin panel polish slices (dashboard/widget expansion, table ergonomics, wider filtering/sorting/paging coverage)
 - stronger vendor-backed runtime validation for PKCS#11 v3-capable modules
 - recurring benchmark reruns with latest published baseline refreshes
 - more polished GitHub showcase assets (screenshots / demo media / release notes)

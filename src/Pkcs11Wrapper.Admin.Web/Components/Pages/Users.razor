@@ -6,7 +6,7 @@
 <PageTitle>Users</PageTitle>
 
 <h1>Local Users</h1>
-<p class="text-muted">Manage local admin-panel users, rotate passwords, and retire the bootstrap credential notice after initial setup is complete.</p>
+<p class="text-muted">Manage local admin-panel users, rotate passwords, retire the bootstrap notice after initial setup, and keep a clear view of local role assignments.</p>
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -36,6 +36,42 @@ else
             <button class="btn btn-sm btn-outline-danger mt-3" @onclick="RetireBootstrapNoticeAsync">Retire bootstrap notice</button>
         </div>
     }
+
+    <div class="row g-3 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Total local users</div>
+                    <div class="display-6">@_snapshot.Users.Count</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Admins</div>
+                    <div class="display-6">@CountUsersWithRole(AdminRoles.Admin)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Operators</div>
+                    <div class="display-6">@CountUsersWithRole(AdminRoles.Operator)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Bootstrap notice</div>
+                    <div class="display-6">@(_snapshot.BootstrapStatus.NoticeExists ? "Open" : "Retired")</div>
+                    <div class="small text-muted">Current session: @_snapshot.CurrentUserName</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div class="row g-4">
         <div class="col-xl-5">
@@ -130,51 +166,83 @@ else
                     <span>Local user list</span>
                     <span class="small text-muted">Current session: @_snapshot.CurrentUserName</span>
                 </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0">
-                            <thead>
-                                <tr>
-                                    <th>User</th>
-                                    <th>Roles</th>
-                                    <th>Created</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (LocalAdminUserSummary user in _snapshot.Users)
-                                {
-                                    <tr class="@(ReferenceEquals(user, _selectedUser) ? "table-active" : null)">
-                                        <td>
-                                            <div class="fw-semibold">@user.Username</div>
-                                            <div class="d-flex flex-wrap gap-1 mt-1">
-                                                @if (user.IsCurrentUser)
-                                                {
-                                                    <span class="badge text-bg-info">Current</span>
-                                                }
-                                                @if (user.IsBootstrapNoticeUser)
-                                                {
-                                                    <span class="badge text-bg-warning">Bootstrap notice</span>
-                                                }
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="d-flex flex-wrap gap-1">
-                                                @foreach (string role in user.Roles)
-                                                {
-                                                    <span class="badge text-bg-secondary">@role</span>
-                                                }
-                                            </div>
-                                        </td>
-                                        <td class="small text-muted">@user.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-                                        <td class="text-end">
-                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => SelectUser(user)">Manage</button>
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
+                <div class="card-body border-bottom row g-3 align-items-end">
+                    <div class="col-lg-5">
+                        <label class="form-label">Search</label>
+                        <input class="form-control" @bind="_userSearchText" @bind:event="oninput" placeholder="username or role..." />
                     </div>
+                    <div class="col-lg-3 col-md-6">
+                        <label class="form-label">Role filter</label>
+                        <select class="form-select" @bind="_roleFilter">
+                            <option value="all">All users</option>
+                            <option value="admin">Admin</option>
+                            <option value="operator">Operator</option>
+                            <option value="viewer">Viewer</option>
+                            <option value="bootstrap">Bootstrap notice</option>
+                        </select>
+                    </div>
+                    <div class="col-lg-4 col-md-6">
+                        <label class="form-label">Sort</label>
+                        <select class="form-select" @bind="_sortMode">
+                            <option value="username">Username (A-Z)</option>
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                        </select>
+                    </div>
+                    <div class="col-12 small text-muted">Showing @FilteredUsers.Count of @_snapshot.Users.Count local user(s).</div>
+                </div>
+                <div class="card-body p-0">
+                    @if (FilteredUsers.Count == 0)
+                    {
+                        <div class="p-3 text-muted">No local users matched the current filters.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>User</th>
+                                        <th>Roles</th>
+                                        <th>Created</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (LocalAdminUserSummary user in FilteredUsers)
+                                    {
+                                        <tr class="@(ReferenceEquals(user, _selectedUser) ? "table-active" : null)">
+                                            <td>
+                                                <div class="fw-semibold">@user.Username</div>
+                                                <div class="d-flex flex-wrap gap-1 mt-1">
+                                                    @if (user.IsCurrentUser)
+                                                    {
+                                                        <span class="badge text-bg-info">Current</span>
+                                                    }
+                                                    @if (user.IsBootstrapNoticeUser)
+                                                    {
+                                                        <span class="badge text-bg-warning">Bootstrap notice</span>
+                                                    }
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="d-flex flex-wrap gap-1">
+                                                    @foreach (string role in user.Roles)
+                                                    {
+                                                        <span class="badge text-bg-secondary">@role</span>
+                                                    }
+                                                </div>
+                                            </td>
+                                            <td class="small text-muted">@user.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                                            <td class="text-end">
+                                                <button class="btn btn-sm btn-outline-primary" @onclick="() => SelectUser(user)">Manage</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
                 </div>
             </div>
         </div>
@@ -198,6 +266,14 @@ else
     private bool _editAdmin;
     private string _rotatePassword = string.Empty;
     private string _deleteConfirmation = string.Empty;
+
+    private string _userSearchText = string.Empty;
+    private string _roleFilter = "all";
+    private string _sortMode = "username";
+
+    private IReadOnlyList<LocalAdminUserSummary> FilteredUsers => _snapshot is null
+        ? []
+        : ApplyOrdering(_snapshot.Users.Where(MatchesUserFilter)).ToArray();
 
     protected override Task OnInitializedAsync() => ReloadAsync();
 
@@ -349,6 +425,40 @@ else
         _rotatePassword = string.Empty;
         _deleteConfirmation = string.Empty;
     }
+
+    private int CountUsersWithRole(string role)
+        => _snapshot?.Users.Count(user => user.Roles.Contains(role, StringComparer.OrdinalIgnoreCase)) ?? 0;
+
+    private bool MatchesUserFilter(LocalAdminUserSummary user)
+    {
+        if (!string.IsNullOrWhiteSpace(_userSearchText))
+        {
+            string term = _userSearchText.Trim();
+            bool matchesSearch = user.Username.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || user.Roles.Any(role => role.Contains(term, StringComparison.OrdinalIgnoreCase));
+            if (!matchesSearch)
+            {
+                return false;
+            }
+        }
+
+        return _roleFilter switch
+        {
+            "admin" => user.Roles.Contains(AdminRoles.Admin, StringComparer.OrdinalIgnoreCase),
+            "operator" => user.Roles.Contains(AdminRoles.Operator, StringComparer.OrdinalIgnoreCase),
+            "viewer" => user.Roles.Contains(AdminRoles.Viewer, StringComparer.OrdinalIgnoreCase),
+            "bootstrap" => user.IsBootstrapNoticeUser,
+            _ => true
+        };
+    }
+
+    private IEnumerable<LocalAdminUserSummary> ApplyOrdering(IEnumerable<LocalAdminUserSummary> users)
+        => _sortMode switch
+        {
+            "newest" => users.OrderByDescending(user => user.CreatedUtc).ThenBy(user => user.Username, StringComparer.OrdinalIgnoreCase),
+            "oldest" => users.OrderBy(user => user.CreatedUtc).ThenBy(user => user.Username, StringComparer.OrdinalIgnoreCase),
+            _ => users.OrderBy(user => user.Username, StringComparer.OrdinalIgnoreCase)
+        };
 
     private static List<string> GetRoles(bool viewer, bool @operator, bool admin)
     {

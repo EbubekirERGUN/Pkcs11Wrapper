@@ -181,6 +181,7 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/windows-local-setup.md](docs/windows-local-setup.md) - yerel Windows fixture/bootstrap akışı
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark kapsamı, tekrar çalıştırma akışı, periyodik takip modeli
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - güncel commitlenmiş Linux benchmark baseline'ı
+- [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - lokal admin-panel operasyon ve recovery rehberi
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor uyumluluk profili ve env sözleşmesi
 - [docs/smoke.md](docs/smoke.md) - smoke sample davranışı ve troubleshooting
 - [docs/release.md](docs/release.md) - release checklist ve packaging disiplini
@@ -208,7 +209,7 @@ Wrapper, validation matrix, Windows/Linux desteği veya admin panel UX tarafınd
 
 Yakın dönem odak alanları:
 
-- admin panel UX/product polish ve ops/recovery dokümantasyonu
+- admin panel için sonraki polish dilimleri (dashboard/widget genişletmeleri, tablo ergonomisi, daha yaygın filtering/sorting/paging)
 - PKCS#11 v3-capable modüller için daha güçlü vendor-backed runtime doğrulama
 - periyodik benchmark tekrarları ve en güncel yayınlanan baseline'ın tazelenmesi
 - daha iyi GitHub vitrin materyalleri (ekran görüntüsü / demo media / release notes)
