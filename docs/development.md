@@ -19,6 +19,7 @@ dotnet restore Pkcs11Wrapper.sln
 dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 ./eng/run-regression-tests.sh
 ./eng/run-smoke-aot.sh
+./eng/run-benchmarks.sh
 ```
 
 Notes:
@@ -26,8 +27,11 @@ Notes:
 - `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
 - `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation and now defaults to the `baseline-rsa-aes` vendor compatibility profile documented in `docs/vendor-regression.md`.
 - `eng/run-smoke-aot.sh` provisions its own temporary fixture, publishes `samples/Pkcs11Wrapper.Smoke` with `/p:PublishAot=true`, then executes the produced binary.
+- `eng/run-benchmarks.sh` provisions its own temporary fixture, runs the `BenchmarkDotNet` suite, and writes the latest benchmark summary under `artifacts/benchmarks/latest/summary.md`.
+- `eng/run-benchmarks.sh --update-docs` additionally refreshes the committed Linux baseline file at `docs/benchmarks/latest-linux-softhsm.md` after a trustworthy rerun.
 - If you want to inspect behavior interactively, create a fixture with `eng/setup-softhsm-fixture.sh`, `source` the generated env file, and run the smoke sample or targeted `dotnet test` commands manually.
 - Windows local development is supported for restore/build/test flows. The repository now also includes PowerShell helpers (`eng/setup-softhsm-fixture.ps1`, `eng/run-regression-tests.ps1`, `eng/run-smoke.ps1`) so Windows runtime checks can run against SoftHSM-for-Windows without relying on the Bash-only fixture path.
+- Windows also has a matching benchmark entry point through `eng/run-benchmarks.ps1`.
 
 ## Test layers
 
@@ -94,3 +98,4 @@ Notable current assumptions:
 - Smoke sample usage: `docs/smoke.md`
 - Compatibility matrix: `docs/compatibility-matrix.md`
 - Release discipline: `docs/release.md`
+- Performance baselines: `docs/benchmarks.md`

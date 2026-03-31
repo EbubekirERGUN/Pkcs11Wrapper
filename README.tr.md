@@ -1,6 +1,7 @@
 # Pkcs11Wrapper
 
 [![CI](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/ci.yml)
+[![Benchmarks](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/benchmarks.yml)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Linux](https://img.shields.io/badge/Linux-supported-2ea043)](#platform--dogrulama-durumu)
 [![Windows](https://img.shields.io/badge/Windows-supported-0078D4)](#platform--dogrulama-durumu)
@@ -38,6 +39,7 @@ PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanım
 - Fixture-backed SoftHSM regression suite
 - SoftHSM-for-Windows ile Windows runtime regression yolu
 - Linux üzerinde NativeAOT smoke doğrulaması
+- BenchmarkDotNet tabanlı performans baseline'ı ve periyodik benchmark workflow'u
 - Opsiyonel vendor regression lane
 - Release verification script'i ve pack metadata
 
@@ -107,6 +109,7 @@ Linux:
 ```bash
 ./eng/run-regression-tests.sh
 ./eng/run-smoke-aot.sh
+./eng/run-benchmarks.sh
 ```
 
 Windows PowerShell:
@@ -115,7 +118,37 @@ Windows PowerShell:
 .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 .\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-benchmarks.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 ```
+
+## Performans benchmark'ları
+
+Depoda artık performans işlerini tahminle değil ölçümle takip etmek için özel bir `BenchmarkDotNet` suite'i var.
+
+Şu an benchmark kapsamı şunları içeriyor:
+
+- managed template/provisioning helper'ları
+- module lifecycle + mechanism discovery
+- session open/login/info akışları
+- object lookup, attribute read, create/update/destroy
+- AES key generate ve RSA keypair generate
+- random, digest, encrypt, decrypt, sign, verify
+
+Güncel commitlenmiş Linux + SoftHSM baseline (`docs/benchmarks/latest-linux-softhsm.md`):
+
+| Benchmark | Baseline |
+| --- | ---: |
+| `LoadInitializeGetInfoFinalizeDispose` | `1.904 μs` |
+| `OpenReadOnlySessionAndGetInfo` | `232.799 ns` |
+| `GenerateRandom32` | `149.407 ns` |
+| `EncryptAesCbcPad_1KiB` | `6.249 μs` |
+| `VerifySha256RsaPkcs_1KiB` | `19.652 μs` |
+| `GenerateDestroyRsaKeyPair` | `26.19 ms` |
+
+Detaylı benchmark rehberi ve tekrar çalıştırma akışı:
+
+- [docs/benchmarks.md](docs/benchmarks.md)
+- [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md)
 
 ## Blazor Server admin panel
 
@@ -136,6 +169,8 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/development.md](docs/development.md) - repo yapısı, geliştirme akışı, doğrulama yapısı
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md) - desteklenen capability alanları ve mevcut sınırlar
 - [docs/windows-local-setup.md](docs/windows-local-setup.md) - yerel Windows fixture/bootstrap akışı
+- [docs/benchmarks.md](docs/benchmarks.md) - benchmark kapsamı, tekrar çalıştırma akışı, periyodik takip modeli
+- [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - güncel commitlenmiş Linux benchmark baseline'ı
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor uyumluluk profili ve env sözleşmesi
 - [docs/smoke.md](docs/smoke.md) - smoke sample davranışı ve troubleshooting
 - [docs/release.md](docs/release.md) - release checklist ve packaging disiplini

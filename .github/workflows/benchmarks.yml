@@ -1,0 +1,46 @@
+name: benchmarks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 5 * * 1'
+
+jobs:
+  linux-softhsm-benchmarks:
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y softhsm2 opensc file
+
+      - name: Make engineering scripts executable
+        run: chmod +x eng/setup-softhsm-fixture.sh eng/run-benchmarks.sh
+
+      - name: Run benchmark suite
+        run: ./eng/run-benchmarks.sh
+
+      - name: Publish benchmark summary to job summary
+        if: always()
+        run: |
+          if [ -f artifacts/benchmarks/latest/summary.md ]; then
+            cat artifacts/benchmarks/latest/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkcs11wrapper-benchmarks-linux-softhsm
+          path: artifacts/benchmarks/latest
+          if-no-files-found: error

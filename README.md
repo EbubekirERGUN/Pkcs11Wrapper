@@ -1,6 +1,7 @@
 # Pkcs11Wrapper
 
 [![CI](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/ci.yml)
+[![Benchmarks](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/benchmarks.yml)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Linux](https://img.shields.io/badge/Linux-supported-2ea043)](#platform--validation-status)
 [![Windows](https://img.shields.io/badge/Windows-supported-0078D4)](#platform--validation-status)
@@ -38,6 +39,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - Fixture-backed SoftHSM regression suite
 - Windows runtime regression path with SoftHSM-for-Windows
 - NativeAOT smoke validation on Linux
+- BenchmarkDotNet performance baseline + periodic benchmark workflow
 - Optional vendor regression lane
 - Release verification script and pack metadata
 
@@ -107,6 +109,7 @@ Linux:
 ```bash
 ./eng/run-regression-tests.sh
 ./eng/run-smoke-aot.sh
+./eng/run-benchmarks.sh
 ```
 
 Windows PowerShell:
@@ -115,7 +118,37 @@ Windows PowerShell:
 .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 .\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-benchmarks.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 ```
+
+## Performance benchmarks
+
+The repository now ships with a dedicated `BenchmarkDotNet` suite so performance work is measured instead of guessed.
+
+Current benchmark coverage includes:
+
+- managed template/provisioning helpers
+- module lifecycle + mechanism discovery
+- session open/login/info paths
+- object lookup, attribute reads, create/update/destroy
+- AES key generation and RSA keypair generation
+- random, digest, encrypt, decrypt, sign, verify
+
+Latest committed Linux + SoftHSM baseline (`docs/benchmarks/latest-linux-softhsm.md`):
+
+| Benchmark | Baseline |
+| --- | ---: |
+| `LoadInitializeGetInfoFinalizeDispose` | `1.904 μs` |
+| `OpenReadOnlySessionAndGetInfo` | `232.799 ns` |
+| `GenerateRandom32` | `149.407 ns` |
+| `EncryptAesCbcPad_1KiB` | `6.249 μs` |
+| `VerifySha256RsaPkcs_1KiB` | `19.652 μs` |
+| `GenerateDestroyRsaKeyPair` | `26.19 ms` |
+
+Full benchmark guidance and rerun flow:
+
+- [docs/benchmarks.md](docs/benchmarks.md)
+- [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md)
 
 ## Blazor Server admin panel
 
@@ -136,6 +169,8 @@ Current capabilities include:
 - [docs/development.md](docs/development.md) - repo layout, development workflow, validation structure
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md) - supported capability areas and current limits
 - [docs/windows-local-setup.md](docs/windows-local-setup.md) - local Windows fixture/bootstrap path
+- [docs/benchmarks.md](docs/benchmarks.md) - benchmark scope, rerun flow, periodic tracking model
+- [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - latest committed Linux benchmark baseline
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract
 - [docs/smoke.md](docs/smoke.md) - smoke sample behavior and troubleshooting
 - [docs/release.md](docs/release.md) - release checklist and packaging discipline

@@ -12,3 +12,4 @@ TestResults/
 *.cache
 *.tmp
 *.log
+BenchmarkDotNet.Artifacts/

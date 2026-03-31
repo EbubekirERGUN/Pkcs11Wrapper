@@ -8,11 +8,20 @@
 - `build-test-windows` (Windows SoftHSM runtime lane)
 - `vendor-regression` (optional non-SoftHSM lane, manual dispatch only)
 
+`.github/workflows/benchmarks.yml` defines:
+
+- `linux-softhsm-benchmarks` (manual + weekly benchmark baseline lane)
+
 Triggers:
 
 - push to `main` and `master`
 - all pull requests
 - `workflow_dispatch` with optional vendor-lane inputs
+
+Benchmark workflow triggers:
+
+- weekly schedule (`cron`)
+- `workflow_dispatch`
 
 Ordered steps:
 
@@ -59,6 +68,13 @@ Windows runtime coverage from `build-test-windows` guarantees that:
 - a real SoftHSM-for-Windows fixture can be provisioned in CI
 - the full regression suite still runs on Windows against a PKCS#11 module
 - the smoke sample still executes successfully on Windows with the fixture env
+
+Benchmark coverage from `benchmarks.yml` guarantees that, when the scheduled or manual workflow runs:
+
+- the benchmark project still restores and executes on the pinned SDK
+- a real SoftHSM fixture can still be provisioned for performance measurement
+- the latest benchmark summary is published as an Actions artifact and copied into the job summary
+- performance tracking stays repeatable instead of ad-hoc
 
 ## Fixture behavior in CI
 
@@ -147,12 +163,25 @@ export PKCS11_SIGN_FIND_LABEL='existing-rsa-label'
 
 See `docs/vendor-regression.md` for the defaulted search contract and the optional provisioning/admin path.
 
+Local benchmark equivalent:
+
+```bash
+./eng/run-benchmarks.sh
+```
+
+If you want to refresh the committed Linux baseline after reviewing the new numbers:
+
+```bash
+./eng/run-benchmarks.sh --update-docs
+```
+
 Windows local equivalent:
 
 ```powershell
 .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 .\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-benchmarks.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 ```
 
 See `docs/windows-local-setup.md` for the full local Windows walkthrough.
