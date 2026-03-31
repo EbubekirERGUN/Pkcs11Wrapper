@@ -68,7 +68,7 @@ public sealed class NativeTypeLayoutTests
     }
 
     [Fact]
-    public void CkMechanismLayoutMatchesLinuxAbi()
+    public void CkMechanismLayoutMatchesPlatformAbi()
     {
         Assert.Equal(0, Marshal.OffsetOf<CK_MECHANISM>(nameof(CK_MECHANISM.Mechanism)).ToInt32());
         Assert.Equal(IntPtr.Size, Marshal.OffsetOf<CK_MECHANISM>(nameof(CK_MECHANISM.Parameter)).ToInt32());
@@ -76,7 +76,7 @@ public sealed class NativeTypeLayoutTests
     }
 
     [Fact]
-    public void CkMechanismInfoLayoutMatchesLinuxAbi()
+    public void CkMechanismInfoLayoutMatchesPlatformAbi()
     {
         Assert.Equal(0, Marshal.OffsetOf<CK_MECHANISM_INFO>(nameof(CK_MECHANISM_INFO.MinKeySize)).ToInt32());
         Assert.Equal(IntPtr.Size, Marshal.OffsetOf<CK_MECHANISM_INFO>(nameof(CK_MECHANISM_INFO.MaxKeySize)).ToInt32());
@@ -84,7 +84,7 @@ public sealed class NativeTypeLayoutTests
     }
 
     [Fact]
-    public void CkSessionInfoLayoutMatchesLinuxAbi()
+    public void CkSessionInfoLayoutMatchesPlatformAbi()
     {
         Assert.Equal(0, Marshal.OffsetOf<CK_SESSION_INFO>(nameof(CK_SESSION_INFO.SlotId)).ToInt32());
         Assert.Equal(IntPtr.Size, Marshal.OffsetOf<CK_SESSION_INFO>(nameof(CK_SESSION_INFO.State)).ToInt32());
@@ -102,7 +102,7 @@ public sealed class NativeTypeLayoutTests
     }
 
     [Fact]
-    public void CkInfoLayoutMatchesLinuxAbi()
+    public void CkInfoLayoutMatchesPlatformAbi()
     {
         int expectedFlagsOffset = IntPtr.Size == 8 ? 40 : 36;
         int expectedLibraryDescriptionOffset = IntPtr.Size == 8 ? 48 : 40;
@@ -118,7 +118,7 @@ public sealed class NativeTypeLayoutTests
     }
 
     [Fact]
-    public void CkSlotInfoLayoutMatchesLinuxAbi()
+    public void CkSlotInfoLayoutMatchesPlatformAbi()
     {
         int expectedFlagsOffset = 96;
         int expectedHardwareVersionOffset = IntPtr.Size == 8 ? 104 : 100;
@@ -134,7 +134,7 @@ public sealed class NativeTypeLayoutTests
     }
 
     [Fact]
-    public void CkTokenInfoLayoutMatchesLinuxAbi()
+    public void CkTokenInfoLayoutMatchesPlatformAbi()
     {
         int expectedFlagsOffset = 96;
         int pointerSize = IntPtr.Size;
@@ -155,7 +155,7 @@ public sealed class NativeTypeLayoutTests
     }
 
     [Fact]
-    public void CkInitializeArgsLayoutMatchesLinuxAbi()
+    public void CkInitializeArgsLayoutMatchesPlatformAbi()
     {
         Assert.Equal(0, Marshal.OffsetOf<CK_C_INITIALIZE_ARGS>(nameof(CK_C_INITIALIZE_ARGS.CreateMutex)).ToInt32());
         Assert.Equal(IntPtr.Size, Marshal.OffsetOf<CK_C_INITIALIZE_ARGS>(nameof(CK_C_INITIALIZE_ARGS.DestroyMutex)).ToInt32());

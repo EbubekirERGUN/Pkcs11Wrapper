@@ -16,7 +16,13 @@ source /tmp/path-from-script/pkcs11-fixture.env
 dotnet run --project samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c Release
 ```
 
-You can also pass the module path as the first argument. If no argument or env value is set, Linux falls back to `libsofthsm2.so`.
+You can also pass the module path as the first argument. If no argument or env value is set, the sample falls back to a platform-specific SoftHSM module name when one is known:
+
+- Linux: `libsofthsm2.so`
+- Windows: `softhsm2-x64.dll`, then `softhsm2.dll`
+- macOS: `libsofthsm2.dylib`, then `softhsm2.dylib`
+
+If the current platform has no built-in fallback, provide `PKCS11_MODULE_PATH` explicitly.
 
 ## Token selection
 
@@ -92,6 +98,7 @@ You will also usually see module info, slot count, mechanism listings, selected 
 ## Common failure causes
 
 - module path cannot be loaded or resolves to the wrong architecture
+- on Windows, the installed module name may differ from the default SoftHSM-for-Windows fallback; set `PKCS11_MODULE_PATH` explicitly if needed
 - token selection variables point at a token that is not present
 - `PKCS11_USER_PIN` is missing, which skips the authenticated portion of the smoke
 - search filters do not match a usable key, so encrypt/decrypt or sign/verify gets skipped

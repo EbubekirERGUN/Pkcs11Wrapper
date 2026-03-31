@@ -121,12 +121,7 @@ static string? ResolveModulePath(string[] args)
         return envPath;
     }
 
-    if (OperatingSystem.IsLinux())
-    {
-        return "libsofthsm2.so";
-    }
-
-    return null;
+    return Pkcs11ModulePathDefaults.GetDefaultSoftHsmModulePath();
 }
 
 static bool TrySelectSessionSlot(List<SlotCandidate> candidates, out Pkcs11SlotId slotId, out string reason)

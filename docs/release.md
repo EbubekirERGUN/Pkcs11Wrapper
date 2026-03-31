@@ -19,7 +19,8 @@ This executes restore, Release build, tests, NativeAOT smoke, and NuGet pack val
 
 3. Review generated artifacts under `artifacts/packages/<version>/`.
 4. Update release notes / changelog text in the platform where the release will be published.
-5. Tag and publish only after the maintainer confirms the package contents and validation output.
+5. Optional cross-platform sanity: confirm the Windows lane still builds, either via GitHub Actions or with a local `dotnet build samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c Release -r win-x64 --self-contained false` check.
+6. Tag and publish only after the maintainer confirms the package contents and validation output.
 
 ## Versioning guidance
 

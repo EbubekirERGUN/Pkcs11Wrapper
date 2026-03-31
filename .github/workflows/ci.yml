@@ -54,6 +54,34 @@ jobs:
       - name: Native AOT smoke
         run: ./eng/run-smoke-aot.sh
 
+  build-test-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_vendor_lane }}
+    runs-on: windows-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Pkcs11Wrapper.sln
+
+      - name: Build
+        run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore
+
+      - name: Managed + ABI tests
+        run: dotnet test tests/Pkcs11Wrapper.Native.Tests/Pkcs11Wrapper.Native.Tests.csproj -c Release --no-build --filter "FullyQualifiedName!~SoftHsmCryptRegressionTests"
+
+      - name: Smoke sample Windows build sanity
+        run: dotnet build samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c Release -r win-x64 --self-contained false
+
   vendor-regression:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vendor_lane && vars.VENDOR_PKCS11_MODULE_PATH != '' && vars.VENDOR_PKCS11_TOKEN_LABEL != '' && vars.VENDOR_PKCS11_FIND_LABEL != '' && vars.VENDOR_PKCS11_SIGN_FIND_LABEL != '' && secrets.VENDOR_PKCS11_USER_PIN != '' }}
     runs-on: ubuntu-latest

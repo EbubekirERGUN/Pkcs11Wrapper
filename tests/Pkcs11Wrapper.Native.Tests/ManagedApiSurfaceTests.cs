@@ -27,6 +27,13 @@ public sealed class ManagedApiSurfaceTests
     }
 
     [Fact]
+    public void ModulePathDefaultsExposeSoftHsmCandidates()
+    {
+        Assert.NotNull(typeof(Pkcs11ModulePathDefaults).GetMethod(nameof(Pkcs11ModulePathDefaults.GetSoftHsmModuleCandidates), Type.EmptyTypes));
+        Assert.NotNull(typeof(Pkcs11ModulePathDefaults).GetMethod(nameof(Pkcs11ModulePathDefaults.GetDefaultSoftHsmModulePath), Type.EmptyTypes));
+    }
+
+    [Fact]
     public void SlotIdExposesPointerSizedValue()
     {
         nuint nativeValue = (nuint)IntPtr.Size;

@@ -2,7 +2,7 @@
 
 English | [Turkce](README.tr.md)
 
-`Pkcs11Wrapper` is a .NET 10 PKCS#11 wrapper built around a small, explicit managed API over a native Cryptoki module. The project is Linux-first, validated with SoftHSM, compatible with NativeAOT, and structured for GitHub-friendly restore/build/test/smoke workflows.
+`Pkcs11Wrapper` is a .NET 10 PKCS#11 wrapper built around a small, explicit managed API over a native Cryptoki module. The project targets cross-platform .NET usage, is deeply validated on Linux with SoftHSM, includes Windows build/test coverage, remains compatible with NativeAOT, and is structured for GitHub-friendly restore/build/test/smoke workflows.
 
 This README stays at the repository workflow level. For implementation details and contributor-oriented notes, use the docs in `docs/`.
 
@@ -26,7 +26,7 @@ The current wrapper and validation surface covers:
 - Error reporting with taxonomy metadata (including retryability hints) while preserving raw `CK_RV`
 - Validation assets: SoftHSM fixture provisioning, regression scripts, NativeAOT smoke, GitHub Actions CI, release verification script, NuGet pack metadata
 
-GitHub Actions keeps SoftHSM as the default push/PR path and also provides an optional manual vendor PKCS#11 regression lane for maintainers. Setup details are in `docs/ci.md`, vendor-lane contract details are in `docs/vendor-regression.md`, and release verification is described in `docs/release.md`.
+GitHub Actions keeps SoftHSM as the default Linux push/PR path, adds a Windows build/API/layout lane, and also provides an optional manual vendor PKCS#11 regression lane for maintainers. Setup details are in `docs/ci.md`, vendor-lane contract details are in `docs/vendor-regression.md`, and release verification is described in `docs/release.md`.
 
 `InitToken` regression coverage exists, but provisioning-style validation remains opt-in rather than part of every generic runtime scenario.
 
@@ -34,13 +34,14 @@ GitHub Actions keeps SoftHSM as the default push/PR path and also provides an op
 
 - Current automated runtime validation does **not** yet include a module that positively exposes PKCS#11 v3 message APIs; those paths are currently covered by ABI/layout tests and capability-gated runtime behavior.
 - Typed mechanism parameter helpers/marshalling cover ECDH, AES-GCM/CTR/CCM, and RSA-OAEP/PSS paths; less common mechanisms may still use raw byte payloads.
-- The repository is Linux-first; other operating systems may work but are not part of the documented baseline yet.
+- Linux still has the deepest runtime validation today (fixture-backed regression + NativeAOT smoke); Windows currently has build/API/layout validation and runtime support when a compatible PKCS#11 module path is provided.
 - Package publication is still a maintainer-controlled action rather than an automated publish step.
 
 ## Requirements
 
 - .NET SDK `10.0.104` pinned by `global.json`
-- Linux environment for the documented local and CI flows
+- Linux environment for the documented full fixture-backed smoke/regression flows
+- Windows is supported for build/test usage and for runtime usage with an explicit PKCS#11 module path or a known SoftHSM-for-Windows module name
 - SoftHSM v2 library and tooling
 - OpenSC `pkcs11-tool`
 - `file` for the NativeAOT smoke script

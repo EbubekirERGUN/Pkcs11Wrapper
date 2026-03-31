@@ -2,7 +2,7 @@
 
 [English](README.md) | Turkce
 
-`Pkcs11Wrapper`, yerel bir Cryptoki modulu uzerinde kucuk ve acik bir yonetilen API sunan .NET 10 tabanli bir PKCS#11 wrapper projesidir. Proje Linux-first yaklasimla ilerler, SoftHSM ile dogrulanir, NativeAOT ile uyumludur ve GitHub odakli restore/build/test/smoke akislarina gore duzenlenmistir.
+`Pkcs11Wrapper`, yerel bir Cryptoki modulu uzerinde kucuk ve acik bir yonetilen API sunan .NET 10 tabanli bir PKCS#11 wrapper projesidir. Proje cross-platform .NET kullanimini hedefler; Linux tarafinda SoftHSM ile daha derin dogrulanir, Windows tarafinda build/test kapsami saglar, NativeAOT ile uyumludur ve GitHub odakli restore/build/test/smoke akislarina gore duzenlenmistir.
 
 Bu README depo seviyesi is akislarini ozetler. Uygulama ayrintilari ve gelistirici notlari icin `docs/` altindaki dokumanlara bakin.
 
@@ -26,7 +26,7 @@ Mevcut wrapper ve dogrulama kapsaminda sunlar bulunur:
 - Hata raporlama yuzeyi: taxonomy metadata (retryability ipucu dahil) ve ham `CK_RV` korunumu
 - Dogrulama varliklari: SoftHSM fixture provisioning, regression script'leri, NativeAOT smoke, GitHub Actions CI, release verification script'i, NuGet pack metadata
 
-GitHub Actions tarafinda push/PR icin varsayilan yol SoftHSM olarak kalir; bakimcilar icin manuel tetiklenen opsiyonel bir vendor PKCS#11 regression lane de bulunur. Kurulum ayrintilari `docs/ci.md`, vendor lane sozlesmesi `docs/vendor-regression.md`, release dogrulama akisi ise `docs/release.md` icindedir.
+GitHub Actions tarafinda push/PR icin varsayilan Linux yolu SoftHSM olarak kalir; buna ek olarak Windows build/API/layout lane'i ve bakimcilar icin manuel tetiklenen opsiyonel vendor PKCS#11 regression lane de bulunur. Kurulum ayrintilari `docs/ci.md`, vendor lane sozlesmesi `docs/vendor-regression.md`, release dogrulama akisi ise `docs/release.md` icindedir.
 
 `InitToken` regression kapsami vardir; ancak provisioning odakli bu dogrulama, her genel calistirma senaryosunun zorunlu parcasi degil, opt-in bir yoldur.
 
@@ -34,13 +34,14 @@ GitHub Actions tarafinda push/PR icin varsayilan yol SoftHSM olarak kalir; bakim
 
 - Otomatik runtime dogrulama henuz PKCS#11 v3 message API'lerini pozitif olarak expose eden bir modul icermiyor; bu yollar su an ABI/layout testleri ve capability-gated runtime davranisi ile korunuyor.
 - Typed mechanism parameter helper/marshalling ECDH, AES-GCM/CTR/CCM ve RSA-OAEP/PSS yollarini kapsar; daha az yaygin bazi mechanism'ler halen ham byte payload kullanabilir.
-- Depo Linux-first olarak ele alinmistir; diger isletim sistemleri calisabilir ama dokumante edilen baseline'in parcasi degildir.
+- Linux halen en derin runtime dogrulamaya sahiptir (fixture-backed regression + NativeAOT smoke); Windows ise su anda build/API/layout dogrulamasi ve uyumlu bir PKCS#11 modul yolu verildiginde runtime destegi sunar.
 - Paket yayini halen maintainer kontrollu bir aksiyondur; otomatik publish adimi tanimli degildir.
 
 ## Gereksinimler
 
 - `global.json` ile sabitlenen .NET SDK `10.0.104`
-- Dokumante edilen yerel ve CI akislar icin Linux ortami
+- Dokumante edilen tam fixture-backed smoke/regression akislar icin Linux ortami
+- Windows, build/test kullanimi ve acik bir PKCS#11 modul yolu veya bilinen SoftHSM-for-Windows modul adi ile runtime kullanimi icin desteklenir
 - SoftHSM v2 kutuphanesi ve araclari
 - OpenSC `pkcs11-tool`
 - NativeAOT smoke script'i icin `file`
