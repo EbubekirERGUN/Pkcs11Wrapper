@@ -16,6 +16,14 @@ source /tmp/path-from-script/pkcs11-fixture.env
 dotnet run --project samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c Release
 ```
 
+On Windows PowerShell:
+
+```powershell
+.\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+. "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+```
+
 You can also pass the module path as the first argument. If no argument or env value is set, the sample falls back to a platform-specific SoftHSM module name when one is known:
 
 - Linux: `libsofthsm2.so`

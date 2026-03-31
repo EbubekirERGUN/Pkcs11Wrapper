@@ -27,7 +27,7 @@ Notes:
 - `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation and now defaults to the `baseline-rsa-aes` vendor compatibility profile documented in `docs/vendor-regression.md`.
 - `eng/run-smoke-aot.sh` provisions its own temporary fixture, publishes `samples/Pkcs11Wrapper.Smoke` with `/p:PublishAot=true`, then executes the produced binary.
 - If you want to inspect behavior interactively, create a fixture with `eng/setup-softhsm-fixture.sh`, `source` the generated env file, and run the smoke sample or targeted `dotnet test` commands manually.
-- Windows local development is supported for restore/build/test flows. The repository's scripted fixture/smoke automation is still Bash/Linux-oriented, so Windows runtime checks currently rely on providing a compatible PKCS#11 module path directly (for example through `PKCS11_MODULE_PATH`).
+- Windows local development is supported for restore/build/test flows. The repository now also includes PowerShell helpers (`eng/setup-softhsm-fixture.ps1`, `eng/run-regression-tests.ps1`, `eng/run-smoke.ps1`) so Windows runtime checks can run against SoftHSM-for-Windows without relying on the Bash-only fixture path.
 
 ## Test layers
 
@@ -65,9 +65,9 @@ The wrapper surface implemented through the current phase set includes:
 
 Notable current assumptions:
 
-- documented full fixture/smoke validation flow is Linux-oriented
+- documented full fixture/smoke validation flow exists on Linux, and a parallel Windows runtime regression path exists through the PowerShell SoftHSM-for-Windows helpers
 - SoftHSM is the reference module used by scripts, tests, and CI
-- GitHub Actions also runs a Windows build/API/layout lane to keep cross-platform support from regressing
+- GitHub Actions also runs a Windows SoftHSM runtime regression lane to keep cross-platform support from regressing
 - a separate optional CI lane can run regression tests against a configured non-SoftHSM vendor module
 - vendor validation distinguishes capability-gated skips from broken env/object-contract failures
 - provisioning regression for `InitToken` is intentionally opt-in and only runs when `PKCS11_PROVISIONING_REGRESSION=1` and `PKCS11_SO_PIN` are available

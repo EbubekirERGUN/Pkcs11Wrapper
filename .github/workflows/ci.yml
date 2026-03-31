@@ -70,17 +70,27 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Install native dependencies
+        shell: pwsh
+        run: choco install opensc -y --no-progress
+
+      - name: Setup Windows SoftHSM fixture
+        shell: pwsh
+        run: .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1"
+
       - name: Restore
         run: dotnet restore Pkcs11Wrapper.sln
 
       - name: Build
         run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 
-      - name: Managed + ABI tests
-        run: dotnet test tests/Pkcs11Wrapper.Native.Tests/Pkcs11Wrapper.Native.Tests.csproj -c Release --no-build --filter "FullyQualifiedName!~SoftHsmCryptRegressionTests"
+      - name: Windows runtime regression tests
+        shell: pwsh
+        run: .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoRestore -NoBuild
 
-      - name: Smoke sample Windows build sanity
-        run: dotnet build samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c Release -r win-x64 --self-contained false
+      - name: Windows smoke runtime
+        shell: pwsh
+        run: .\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoBuild
 
   vendor-regression:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vendor_lane && vars.VENDOR_PKCS11_MODULE_PATH != '' && vars.VENDOR_PKCS11_TOKEN_LABEL != '' && vars.VENDOR_PKCS11_FIND_LABEL != '' && vars.VENDOR_PKCS11_SIGN_FIND_LABEL != '' && secrets.VENDOR_PKCS11_USER_PIN != '' }}

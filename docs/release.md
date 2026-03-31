@@ -22,6 +22,8 @@ This executes restore, Release build, tests, NativeAOT smoke, and NuGet pack val
 5. Optional cross-platform sanity: confirm the Windows lane still builds, either via GitHub Actions or with a local `dotnet build samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj -c Release -r win-x64 --self-contained false` check.
 6. Tag and publish only after the maintainer confirms the package contents and validation output.
 
+If you want a starting point for the GitHub release text after the Windows support work, reuse or adapt `docs/release-notes/windows-compatibility.md`.
+
 ## Versioning guidance
 
 - Use SemVer (`major.minor.patch`).

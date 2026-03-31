@@ -5,7 +5,7 @@
 | Area | Status | Notes |
 | --- | --- | --- |
 | OS | Linux | Primary runtime validation target (fixture-backed regression + NativeAOT smoke) |
-| OS | Windows | Supported for build/API/layout validation; runtime works with an explicit PKCS#11 module path or a known SoftHSM-for-Windows module name |
+| OS | Windows | Supported for build/API/layout validation and fixture-backed runtime regression through SoftHSM-for-Windows |
 | Runtime | .NET 10 | Pinned via `global.json` |
 | NativeAOT | Supported | Validated by `eng/run-smoke-aot.sh` |
 | Reference module | SoftHSM v2 | Default local + CI regression target |
@@ -31,6 +31,6 @@
 ## Known limitations
 
 - Current automated runtime validation does **not** include a module that exposes PKCS#11 v3 message APIs; those paths are validated by ABI/layout tests and capability-gated behavior today.
-- Windows does not yet have the same fixture-backed regression + NativeAOT smoke depth as Linux in this repository; current Windows coverage is build/API/layout oriented plus runtime support with a supplied module path.
+- Windows does not yet have the same NativeAOT smoke depth as Linux; current Windows coverage includes fixture-backed runtime regression through SoftHSM-for-Windows plus the standard build/API/layout checks.
 - Mechanism parameter helpers are intentionally selective; uncommon mechanisms may still require raw parameter bytes.
 - Packaging discipline is defined in `docs/release.md`, but external package publication is still a maintainer action rather than an automated CI publish step.

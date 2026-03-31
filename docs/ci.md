@@ -5,6 +5,7 @@
 `.github/workflows/ci.yml` defines:
 
 - `build-test-aot` (default SoftHSM lane)
+- `build-test-windows` (Windows SoftHSM runtime lane)
 - `vendor-regression` (optional non-SoftHSM lane, manual dispatch only)
 
 Triggers:
@@ -51,6 +52,13 @@ Optional vendor regression coverage from `vendor-regression` guarantees that, wh
 - solution restore/build/test still works with a non-SoftHSM PKCS#11 backend
 - regression tests can run against pre-provisioned vendor token material
 - required runtime env contract is validated before tests start
+
+Windows runtime coverage from `build-test-windows` guarantees that:
+
+- the solution still restores/builds on `windows-latest`
+- a real SoftHSM-for-Windows fixture can be provisioned in CI
+- the full regression suite still runs on Windows against a PKCS#11 module
+- the smoke sample still executes successfully on Windows with the fixture env
 
 ## Fixture behavior in CI
 
@@ -138,3 +146,13 @@ export PKCS11_SIGN_FIND_LABEL='existing-rsa-label'
 ```
 
 See `docs/vendor-regression.md` for the defaulted search contract and the optional provisioning/admin path.
+
+Windows local equivalent:
+
+```powershell
+.\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+```
+
+See `docs/windows-local-setup.md` for the full local Windows walkthrough.
