@@ -109,8 +109,47 @@
                     <div class="col-12">
                         <label class="form-label">Mechanism Type (hex or decimal)</label>
                         <input class="form-control font-monospace" @bind="_request.MechanismTypeText" placeholder="0x250" />
-                        <div class="form-text">Örnek: <code>0x250</code> (CKM_SHA256), <code>0x1</code> (CKM_RSA_PKCS), <code>0x1082</code> (CKM_AES_ECB), <code>0x2109</code> (CKM_AES_KEY_WRAP_PAD). Not: OAEP/PSS/AES-CBC/CTR/GCM gibi parameter isteyen mekanizmalar bu turda desteklenmiyor.</div>
+                        <div class="form-text">Örnek: <code>0x250</code> (CKM_SHA256), <code>0x1</code> (CKM_RSA_PKCS), <code>0x1081</code> (CKM_AES_ECB), <code>0x1082</code> (CKM_AES_CBC), <code>0x1086</code> (CKM_AES_CTR), <code>0x1087</code> (CKM_AES_GCM), <code>0x2109</code> (CKM_AES_KEY_WRAP_PAD).</div>
                     </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">Mechanism Parameter Profile</label>
+                        <InputSelect class="form-select" @bind-Value="_request.MechanismParameterProfile">
+                            @foreach (Pkcs11LabMechanismParameterProfile profile in Enum.GetValues<Pkcs11LabMechanismParameterProfile>())
+                            {
+                                <option value="@profile">@profile</option>
+                            }
+                        </InputSelect>
+                        <div class="form-text">Bu turda parameter editor AES-CBC / AES-CTR / AES-GCM için aktif. OAEP/PSS gibi RSA parametreleri daha sonra eklenebilir.</div>
+                    </div>
+
+                    @if (_request.MechanismParameterProfile != Pkcs11LabMechanismParameterProfile.None)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">IV / Counter Block Hex</label>
+                            <input class="form-control font-monospace" @bind="_request.MechanismIvHex" placeholder="00112233445566778899AABBCCDDEEFF" />
+                        </div>
+                    }
+
+                    @if (_request.MechanismParameterProfile == Pkcs11LabMechanismParameterProfile.AesCtr)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">Counter Bits</label>
+                            <InputNumber class="form-control" @bind-Value="_request.MechanismCounterBits" />
+                        </div>
+                    }
+
+                    @if (_request.MechanismParameterProfile == Pkcs11LabMechanismParameterProfile.AesGcm)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">AAD Hex (optional)</label>
+                            <input class="form-control font-monospace" @bind="_request.MechanismAdditionalDataHex" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Tag Bits</label>
+                            <InputNumber class="form-control" @bind-Value="_request.MechanismTagBits" />
+                        </div>
+                    }
                 }
 
                 @if (_request.Operation is Pkcs11LabOperation.SignData
@@ -131,20 +170,21 @@
 
                 @if (_request.Operation == Pkcs11LabOperation.ReadAttribute)
                 {
-                    <div class="col-md-6">
-                        <label class="form-label">Attribute Type (hex or decimal)</label>
-                        <input class="form-control font-monospace" @bind="_request.AttributeTypeText" placeholder="0x3" />
-                        <div class="form-text">Örnek: <code>0x3</code> = CKA_LABEL, <code>0x102</code> = CKA_ID, <code>0x11</code> = CKA_VALUE.</div>
+                    <div class="col-12">
+                        <label class="form-label">Attribute Type(s) (hex or decimal)</label>
+                        <textarea class="form-control font-monospace" rows="4" @bind="_request.AttributeTypeText" placeholder="0x3, 0x102, 0x100"></textarea>
+                        <div class="form-text">Birden fazla attribute code girebilirsin. Ayraç olarak virgül, boşluk veya yeni satır kullan.</div>
                     </div>
 
                     <div class="col-12 d-flex flex-wrap gap-2">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x3")'>CKA_LABEL</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x102")'>CKA_ID</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x0")'>CKA_CLASS</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x100")'>CKA_KEY_TYPE</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x161")'>CKA_VALUE_LEN</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x121")'>CKA_MODULUS_BITS</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => SetAttributePreset("0x122")'>CKA_PUBLIC_EXPONENT</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => AppendAttributePreset("0x3")'>CKA_LABEL</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => AppendAttributePreset("0x102")'>CKA_ID</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => AppendAttributePreset("0x0")'>CKA_CLASS</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => AppendAttributePreset("0x100")'>CKA_KEY_TYPE</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => AppendAttributePreset("0x161")'>CKA_VALUE_LEN</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => AppendAttributePreset("0x121")'>CKA_MODULUS_BITS</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => AppendAttributePreset("0x122")'>CKA_PUBLIC_EXPONENT</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="ClearAttributePresets">Clear</button>
                     </div>
                 }
 
@@ -562,6 +602,11 @@
             UserPin = _request.UserPin,
             MechanismTypeText = _request.MechanismTypeText,
             AttributeTypeText = _request.AttributeTypeText,
+            MechanismParameterProfile = _request.MechanismParameterProfile,
+            MechanismIvHex = _request.MechanismIvHex,
+            MechanismAdditionalDataHex = _request.MechanismAdditionalDataHex,
+            MechanismCounterBits = _request.MechanismCounterBits,
+            MechanismTagBits = _request.MechanismTagBits,
             KeyHandleText = _request.KeyHandleText,
             SecondaryKeyHandleText = _request.SecondaryKeyHandleText,
             DigestAlgorithm = _request.DigestAlgorithm,
@@ -620,6 +665,9 @@
             Operation = Pkcs11LabOperation.ModuleInfo,
             DigestAlgorithm = Pkcs11LabDigestAlgorithm.Sha256,
             PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            MechanismParameterProfile = Pkcs11LabMechanismParameterProfile.None,
+            MechanismCounterBits = 128,
+            MechanismTagBits = 128,
             LoginUserIfPinProvided = true,
             RandomLength = 32,
             MaxObjects = 20
@@ -667,7 +715,7 @@
             Pkcs11LabOperation.InspectObject => "Seçilen handle için common attribute snapshot ve capability görünümünü göster.",
             Pkcs11LabOperation.WrapKey => "Bir wrapping key handle ile başka bir key handle’ı `C_WrapKey` üzerinden sarıp blob üret.",
             Pkcs11LabOperation.UnwrapAesKey => "Wrapped blob’u kontrollü AES secret-key template ile `C_UnwrapKey` üzerinden aç.",
-            Pkcs11LabOperation.ReadAttribute => "Seçilen handle üzerinde ham attribute code okuyup status/length/raw hex görünümü al.",
+            Pkcs11LabOperation.ReadAttribute => "Seçilen handle üzerinde bir veya daha fazla ham attribute code okuyup status/length/raw hex görünümü al.",
             _ => operation.ToString()
         };
 
@@ -680,6 +728,11 @@
             _ => "Key/Object Handle"
         };
 
-    private void SetAttributePreset(string value)
-        => _request.AttributeTypeText = value;
+    private void AppendAttributePreset(string value)
+        => _request.AttributeTypeText = string.IsNullOrWhiteSpace(_request.AttributeTypeText)
+            ? value
+            : $"{_request.AttributeTypeText}, {value}";
+
+    private void ClearAttributePresets()
+        => _request.AttributeTypeText = null;
 }

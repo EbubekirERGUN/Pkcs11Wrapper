@@ -223,6 +223,82 @@ public sealed class Pkcs11LabValidationTests
         HsmAdminService.ValidateLabRequest(request);
     }
 
+    [Fact]
+    public void ValidateLabRequestAcceptsBatchAttributeCodes()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.ReadAttribute,
+            KeyHandleText = "42",
+            AttributeTypeText = "0x3, 0x102\n0x100"
+        };
+
+        HsmAdminService.ValidateLabRequest(request);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRejectsAesCbcProfileWithoutIv()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.EncryptData,
+            MechanismTypeText = "0x1085",
+            MechanismParameterProfile = Pkcs11LabMechanismParameterProfile.AesCbcIv,
+            KeyHandleText = "42",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "hello"
+        };
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("AES-CBC IV", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestAcceptsAesGcmParameterProfile()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.EncryptData,
+            MechanismTypeText = "0x1087",
+            MechanismParameterProfile = Pkcs11LabMechanismParameterProfile.AesGcm,
+            MechanismIvHex = "00112233445566778899AABB",
+            MechanismAdditionalDataHex = "AABBCCDD",
+            MechanismTagBits = 128,
+            KeyHandleText = "42",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "hello"
+        };
+
+        HsmAdminService.ValidateLabRequest(request);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRejectsIncompatibleMechanismParameterProfile()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 1,
+            Operation = Pkcs11LabOperation.SignData,
+            MechanismTypeText = "0x1",
+            MechanismParameterProfile = Pkcs11LabMechanismParameterProfile.AesCtr,
+            MechanismIvHex = "00112233445566778899AABBCCDDEEFF",
+            MechanismCounterBits = 128,
+            KeyHandleText = "42",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "hello"
+        };
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("not compatible", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(4097)]

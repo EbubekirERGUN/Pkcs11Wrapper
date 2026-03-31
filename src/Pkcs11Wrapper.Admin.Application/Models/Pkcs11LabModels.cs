@@ -45,6 +45,14 @@ public enum Pkcs11LabPayloadEncoding
     Hex = 1
 }
 
+public enum Pkcs11LabMechanismParameterProfile
+{
+    None = 0,
+    AesCbcIv = 1,
+    AesCtr = 2,
+    AesGcm = 3
+}
+
 public sealed class Pkcs11LabRequest
 {
     public Guid DeviceId { get; set; }
@@ -62,6 +70,16 @@ public sealed class Pkcs11LabRequest
     public string? MechanismTypeText { get; set; }
 
     public string? AttributeTypeText { get; set; }
+
+    public Pkcs11LabMechanismParameterProfile MechanismParameterProfile { get; set; }
+
+    public string? MechanismIvHex { get; set; }
+
+    public string? MechanismAdditionalDataHex { get; set; }
+
+    public int MechanismCounterBits { get; set; } = 128;
+
+    public int MechanismTagBits { get; set; } = 128;
 
     public string? KeyHandleText { get; set; }
 

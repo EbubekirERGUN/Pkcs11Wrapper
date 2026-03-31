@@ -659,6 +659,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             }
 
             _ = ParseLabObjectHandleText(request.KeyHandleText);
+            _ = CreateLabMechanismParameter(ParseMechanismTypeText(request.MechanismTypeText), request, validateOnly: true, notes: null);
         }
 
         if (request.Operation == Pkcs11LabOperation.InspectObject)
@@ -675,7 +676,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 throw new ArgumentException("Attribute type is required for raw attribute reads.", nameof(request));
             }
 
-            _ = ParseAttributeTypeText(request.AttributeTypeText);
+            _ = ParseAttributeTypeListText(request.AttributeTypeText);
         }
 
         if (request.Operation == Pkcs11LabOperation.WrapKey)
@@ -1106,12 +1107,13 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
-        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
+        Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         byte[] data = ResolveLabPayload(request, forDecryptInput: false);
         Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
-        int signatureLength = session.GetSignOutputLength(keyHandle, new Pkcs11Mechanism(mechanismType), data);
+        int signatureLength = session.GetSignOutputLength(keyHandle, mechanism, data);
         byte[] signature = new byte[Math.Max(signatureLength, 4096)];
-        if (!session.TrySign(keyHandle, new Pkcs11Mechanism(mechanismType), data, signature, out int written))
+        if (!session.TrySign(keyHandle, mechanism, data, signature, out int written))
         {
             throw new InvalidOperationException("The module did not return a signature buffer.");
         }
@@ -1139,11 +1141,12 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
-        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
+        Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         byte[] data = ResolveLabPayload(request, forDecryptInput: false);
         byte[] signature = ParseRequiredHex(request.SignatureHex, nameof(request.SignatureHex));
         Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
-        bool verified = session.Verify(keyHandle, new Pkcs11Mechanism(mechanismType), data, signature);
+        bool verified = session.Verify(keyHandle, mechanism, data, signature);
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
@@ -1168,12 +1171,13 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
-        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
+        Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         byte[] plaintext = ResolveLabPayload(request, forDecryptInput: false);
         Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
-        int cipherLength = session.GetEncryptOutputLength(keyHandle, new Pkcs11Mechanism(mechanismType), plaintext);
+        int cipherLength = session.GetEncryptOutputLength(keyHandle, mechanism, plaintext);
         byte[] ciphertext = new byte[Math.Max(cipherLength, plaintext.Length + 1024)];
-        if (!session.TryEncrypt(keyHandle, new Pkcs11Mechanism(mechanismType), plaintext, ciphertext, out int written))
+        if (!session.TryEncrypt(keyHandle, mechanism, plaintext, ciphertext, out int written))
         {
             throw new InvalidOperationException("The module did not return a ciphertext buffer.");
         }
@@ -1200,12 +1204,13 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
-        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
+        Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         byte[] ciphertext = ResolveLabPayload(request, forDecryptInput: true);
         Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
-        int plainLength = session.GetDecryptOutputLength(keyHandle, new Pkcs11Mechanism(mechanismType), ciphertext);
+        int plainLength = session.GetDecryptOutputLength(keyHandle, mechanism, ciphertext);
         byte[] plaintext = new byte[Math.Max(plainLength, ciphertext.Length)];
-        if (!session.TryDecrypt(keyHandle, new Pkcs11Mechanism(mechanismType), ciphertext, plaintext, out int written))
+        if (!session.TryDecrypt(keyHandle, mechanism, ciphertext, plaintext, out int written))
         {
             throw new InvalidOperationException("The module did not return a plaintext buffer.");
         }
@@ -1252,12 +1257,13 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
-        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
+        Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         Pkcs11ObjectHandle targetKeyHandle = ParseLabObjectHandleText(request.KeyHandleText);
         Pkcs11ObjectHandle wrappingKeyHandle = ParseLabObjectHandleText(request.SecondaryKeyHandleText, "Wrapping key handle");
-        int wrappedLength = session.GetWrapOutputLength(wrappingKeyHandle, new Pkcs11Mechanism(mechanismType), targetKeyHandle);
+        int wrappedLength = session.GetWrapOutputLength(wrappingKeyHandle, mechanism, targetKeyHandle);
         byte[] wrapped = new byte[Math.Max(wrappedLength, 4096)];
-        if (!session.TryWrapKey(wrappingKeyHandle, new Pkcs11Mechanism(mechanismType), targetKeyHandle, wrapped, out int written))
+        if (!session.TryWrapKey(wrappingKeyHandle, mechanism, targetKeyHandle, wrapped, out int written))
         {
             throw new InvalidOperationException("The module did not return a wrapped-key buffer.");
         }
@@ -1281,7 +1287,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: true);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
-        AddMechanismParameterWarning(mechanismType, notes);
+        byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
+        Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         Pkcs11ObjectHandle unwrappingKeyHandle = ParseLabObjectHandleText(request.KeyHandleText);
         byte[] wrappedKey = ParseRequiredHex(request.DataHex, nameof(request.DataHex));
         string label = string.IsNullOrWhiteSpace(request.UnwrapTargetLabel)
@@ -1302,7 +1309,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         Pkcs11ObjectHandle unwrappedHandle = session.UnwrapKey(
             unwrappingKeyHandle,
-            new Pkcs11Mechanism(mechanismType),
+            mechanism,
             wrappedKey,
             Pkcs11ProvisioningTemplates.CreateAesUnwrapTargetSecretKey(
                 labelBytes,
@@ -1347,65 +1354,19 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11ObjectHandle handle = ParseLabObjectHandleText(request.KeyHandleText);
-        Pkcs11AttributeType attributeType = ParseAttributeTypeText(request.AttributeTypeText!);
-        Pkcs11AttributeReadResult info = session.GetAttributeValueInfo(handle, attributeType);
-
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Handle: {handle.Value}");
-        output.AppendLine($"Attribute: {DescribeAttributeType(attributeType)}");
-        output.AppendLine($"Read status: {info.Status}");
-        output.AppendLine($"Reported length: {(info.Length == nuint.MaxValue ? "unavailable" : info.Length.ToString(CultureInfo.InvariantCulture))}");
+        IReadOnlyList<Pkcs11AttributeType> attributeTypes = ParseAttributeTypeListText(request.AttributeTypeText!);
+        output.AppendLine($"Attribute count: {attributeTypes.Count}");
 
-        switch (info.Status)
+        foreach (Pkcs11AttributeType attributeType in attributeTypes)
         {
-            case Pkcs11AttributeReadStatus.Sensitive:
-                notes.Add("Token marked this attribute as sensitive; the lab will not attempt to read raw bytes.");
-                break;
-            case Pkcs11AttributeReadStatus.UnavailableInformation:
-                notes.Add("The module reported unavailable information for this attribute type/handle combination.");
-                break;
-            case Pkcs11AttributeReadStatus.TypeInvalid:
-                notes.Add("The attribute code is not valid for this object or not recognized by the module.");
-                break;
+            AppendAttributeReadResult(session, handle, attributeType, output, notes);
         }
 
-        if (!info.IsReadable)
-        {
-            return ($"Read attribute metadata for {DescribeAttributeType(attributeType)}; raw value was not readable.", output.ToString(), notes);
-        }
-
-        if (info.Length > 4096)
-        {
-            notes.Add($"Attribute length is {info.Length} bytes, so the lab skipped raw byte dumping to avoid flooding the page.");
-            return ($"Attribute {DescribeAttributeType(attributeType)} is readable but too large for inline dump.", output.ToString(), notes);
-        }
-
-        byte[] buffer = new byte[(int)info.Length];
-        if (!session.TryGetAttributeValue(handle, attributeType, buffer, out int written, out Pkcs11AttributeReadResult readResult))
-        {
-            output.AppendLine($"Read attempt status: {readResult.Status}");
-            output.AppendLine($"Bytes written: {written}");
-            return ($"Raw attribute read for {DescribeAttributeType(attributeType)} did not return a buffer.", output.ToString(), notes);
-        }
-
-        ReadOnlySpan<byte> value = buffer.AsSpan(0, written);
-        output.AppendLine($"Read attempt status: {readResult.Status}");
-        output.AppendLine($"Bytes written: {written}");
-        output.AppendLine($"Hex: {(written == 0 ? "<empty>" : Convert.ToHexString(value))}");
-        output.AppendLine($"UTF-8: {TryDecodeUtf8OrPlaceholder(value)}");
-        if (written == 1)
-        {
-            output.AppendLine($"Boolean guess: {(value[0] != 0)}");
-        }
-
-        if (written == IntPtr.Size)
-        {
-            output.AppendLine($"nuint guess: {ReadNuintGuess(value)}");
-        }
-
-        return ($"Read raw attribute value for {DescribeAttributeType(attributeType)}.", output.ToString(), notes);
+        return ($"Read raw attribute diagnostics for {attributeTypes.Count} attribute code(s).", output.ToString(), notes);
     }
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteFindObjectsLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
@@ -1526,6 +1487,24 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return new Pkcs11AttributeType(parsed);
     }
 
+    private static IReadOnlyList<Pkcs11AttributeType> ParseAttributeTypeListText(string value)
+    {
+        string[] tokens = value
+            .Split([',', ';', '\r', '\n', '\t', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (tokens.Length == 0)
+        {
+            throw new ArgumentException("At least one attribute type code is required.", nameof(value));
+        }
+
+        if (tokens.Length > 32)
+        {
+            throw new ArgumentException("At most 32 attribute codes can be read in one batch.", nameof(value));
+        }
+
+        return tokens.Select(ParseAttributeTypeText).ToArray();
+    }
+
     private static Pkcs11ObjectHandle ParseLabObjectHandleText(string? value)
         => ParseLabObjectHandleText(value, "Key handle");
 
@@ -1598,16 +1577,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             : ParseRequiredHex(request.DataHex, nameof(request.DataHex));
     }
 
-    private static void AddMechanismParameterWarning(Pkcs11MechanismType mechanismType, List<string> notes)
-    {
-        if (!MechanismLikelyRequiresParameters(mechanismType))
-        {
-            return;
-        }
-
-        notes.Add("This lab currently sends empty mechanism parameters. Parameterized mechanisms such as OAEP/PSS/AES-CBC/CTR/GCM will fail until parameter inputs are added.");
-    }
-
     private static bool MechanismLikelyRequiresParameters(Pkcs11MechanismType mechanismType)
         => mechanismType.Value is 0x00000009u // CKM_RSA_PKCS_OAEP
             or 0x0000000du // CKM_RSA_PKCS_PSS
@@ -1619,6 +1588,93 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             or 0x00001086u // CKM_AES_MAC (parameterized in some flows)
             or 0x0000108au // CKM_AES_CTR
             or 0x0000108du; // CKM_AES_GCM
+
+    private static byte[] CreateLabMechanismParameter(Pkcs11MechanismType mechanismType, Pkcs11LabRequest request, bool validateOnly, List<string>? notes)
+    {
+        switch (request.MechanismParameterProfile)
+        {
+            case Pkcs11LabMechanismParameterProfile.None:
+                if (MechanismLikelyRequiresParameters(mechanismType))
+                {
+                    notes?.Add("This mechanism often requires parameters. Parameter profile is set to None, so the module will receive an empty parameter buffer.");
+                }
+
+                return [];
+
+            case Pkcs11LabMechanismParameterProfile.AesCbcIv:
+                EnsureMechanismCompatible(mechanismType, request.MechanismParameterProfile, Pkcs11MechanismTypes.AesCbc, Pkcs11MechanismTypes.AesCbcPad);
+                if (string.IsNullOrWhiteSpace(request.MechanismIvHex))
+                {
+                    throw new ArgumentException("AES-CBC IV is required.", nameof(request));
+                }
+
+                byte[] cbcIv = ParseRequiredHex(request.MechanismIvHex, nameof(request.MechanismIvHex));
+                if (cbcIv.Length != 16)
+                {
+                    throw new ArgumentException("AES-CBC IV must be exactly 16 bytes (32 hex chars).", nameof(request));
+                }
+
+                notes?.Add("Using AES-CBC IV parameter from the lab parameter editor.");
+                return cbcIv;
+
+            case Pkcs11LabMechanismParameterProfile.AesCtr:
+                EnsureMechanismCompatible(mechanismType, request.MechanismParameterProfile, Pkcs11MechanismTypes.AesCtr);
+                if (string.IsNullOrWhiteSpace(request.MechanismIvHex))
+                {
+                    throw new ArgumentException("AES-CTR counter block is required.", nameof(request));
+                }
+
+                byte[] ctrBlock = ParseRequiredHex(request.MechanismIvHex, nameof(request.MechanismIvHex));
+                if (ctrBlock.Length != 16)
+                {
+                    throw new ArgumentException("AES-CTR counter block must be exactly 16 bytes (32 hex chars).", nameof(request));
+                }
+
+                if (request.MechanismCounterBits < 1 || request.MechanismCounterBits > 128)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(request), "AES-CTR counter bits must be between 1 and 128.");
+                }
+
+                notes?.Add($"Using AES-CTR parameter editor with {request.MechanismCounterBits} counter bits.");
+                return Pkcs11MechanismParameters.AesCtr(ctrBlock, (nuint)request.MechanismCounterBits);
+
+            case Pkcs11LabMechanismParameterProfile.AesGcm:
+                EnsureMechanismCompatible(mechanismType, request.MechanismParameterProfile, Pkcs11MechanismTypes.AesGcm);
+                if (string.IsNullOrWhiteSpace(request.MechanismIvHex))
+                {
+                    throw new ArgumentException("AES-GCM IV is required.", nameof(request));
+                }
+
+                byte[] gcmIv = ParseRequiredHex(request.MechanismIvHex, nameof(request.MechanismIvHex));
+                byte[] aad = ParseOptionalHex(request.MechanismAdditionalDataHex, nameof(request.MechanismAdditionalDataHex));
+                if (gcmIv.Length == 0)
+                {
+                    throw new ArgumentException("AES-GCM IV is required.", nameof(request));
+                }
+
+                if (request.MechanismTagBits < 1 || request.MechanismTagBits > 128)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(request), "AES-GCM tag bits must be between 1 and 128.");
+                }
+
+                notes?.Add($"Using AES-GCM parameter editor with IV={gcmIv.Length} bytes, AAD={aad.Length} bytes, tagBits={request.MechanismTagBits}.");
+                return Pkcs11MechanismParameters.AesGcm(gcmIv, aad, (nuint)request.MechanismTagBits);
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(request.MechanismParameterProfile), request.MechanismParameterProfile, "Unsupported mechanism parameter profile.");
+        }
+    }
+
+    private static void EnsureMechanismCompatible(Pkcs11MechanismType actual, Pkcs11LabMechanismParameterProfile profile, params Pkcs11MechanismType[] allowed)
+    {
+        if (allowed.Any(candidate => candidate == actual))
+        {
+            return;
+        }
+
+        string allowedText = string.Join(", ", allowed.Select(DescribeMechanismType));
+        throw new InvalidOperationException($"Parameter profile '{profile}' is not compatible with mechanism {DescribeMechanismType(actual)}. Allowed mechanisms: {allowedText}.");
+    }
 
     private static string TryDecodeUtf8(ReadOnlySpan<byte> data)
     {
@@ -1649,6 +1705,62 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         catch
         {
             return "<not valid UTF-8>";
+        }
+    }
+
+    private static void AppendAttributeReadResult(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType, StringBuilder output, List<string> notes)
+    {
+        Pkcs11AttributeReadResult info = session.GetAttributeValueInfo(handle, attributeType);
+        output.AppendLine();
+        output.AppendLine($"Attribute: {DescribeAttributeType(attributeType)}");
+        output.AppendLine($"Read status: {info.Status}");
+        output.AppendLine($"Reported length: {(info.Length == nuint.MaxValue ? "unavailable" : info.Length.ToString(CultureInfo.InvariantCulture))}");
+
+        switch (info.Status)
+        {
+            case Pkcs11AttributeReadStatus.Sensitive:
+                notes.Add($"{DescribeAttributeType(attributeType)} is sensitive; raw bytes were not requested.");
+                return;
+            case Pkcs11AttributeReadStatus.UnavailableInformation:
+                notes.Add($"{DescribeAttributeType(attributeType)} reported unavailable information.");
+                return;
+            case Pkcs11AttributeReadStatus.TypeInvalid:
+                notes.Add($"{DescribeAttributeType(attributeType)} is not valid for this object or module.");
+                return;
+        }
+
+        if (!info.IsReadable)
+        {
+            return;
+        }
+
+        if (info.Length > 4096)
+        {
+            notes.Add($"{DescribeAttributeType(attributeType)} is {info.Length} bytes, so the lab skipped inline dumping to avoid flooding the page.");
+            return;
+        }
+
+        byte[] buffer = new byte[(int)info.Length];
+        if (!session.TryGetAttributeValue(handle, attributeType, buffer, out int written, out Pkcs11AttributeReadResult readResult))
+        {
+            output.AppendLine($"Read attempt status: {readResult.Status}");
+            output.AppendLine($"Bytes written: {written}");
+            return;
+        }
+
+        ReadOnlySpan<byte> value = buffer.AsSpan(0, written);
+        output.AppendLine($"Read attempt status: {readResult.Status}");
+        output.AppendLine($"Bytes written: {written}");
+        output.AppendLine($"Hex: {(written == 0 ? "<empty>" : Convert.ToHexString(value))}");
+        output.AppendLine($"UTF-8: {TryDecodeUtf8OrPlaceholder(value)}");
+        if (written == 1)
+        {
+            output.AppendLine($"Boolean guess: {(value[0] != 0)}");
+        }
+
+        if (written == IntPtr.Size)
+        {
+            output.AppendLine($"nuint guess: {ReadNuintGuess(value)}");
         }
     }
 
@@ -1698,11 +1810,11 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             0x00000260u => "CKM_SHA384 (0x260)",
             0x00000270u => "CKM_SHA512 (0x270)",
             0x00001080u => "CKM_AES_KEY_GEN (0x1080)",
-            0x00001082u => "CKM_AES_ECB (0x1082)",
-            0x00001085u => "CKM_AES_CBC (0x1085)",
-            0x00001086u => "CKM_AES_MAC (0x1086)",
-            0x0000108au => "CKM_AES_CTR (0x108a)",
-            0x0000108du => "CKM_AES_GCM (0x108d)",
+            0x00001081u => "CKM_AES_ECB (0x1081)",
+            0x00001082u => "CKM_AES_CBC (0x1082)",
+            0x00001085u => "CKM_AES_CBC_PAD (0x1085)",
+            0x00001086u => "CKM_AES_CTR (0x1086)",
+            0x00001087u => "CKM_AES_GCM (0x1087)",
             0x00002109u => "CKM_AES_KEY_WRAP_PAD (0x2109)",
             _ => $"0x{type.Value:x}"
         };
