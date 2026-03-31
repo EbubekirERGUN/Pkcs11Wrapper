@@ -14,19 +14,21 @@
 - Post-roadmap enhancement olarak Windows desteği güçlendirildi: platforma göre bilinen SoftHSM modül adı helper'ı eklendi, smoke sample bu helper'ı kullanacak şekilde güncellendi, Windows CI build/API/layout lane'i eklendi ve dokümantasyon Windows build/runtime beklentileriyle senkronlandı.
 - Windows desteği ikinci adımda daha da ileri taşındı: gerçek SoftHSM-for-Windows fixture bootstrap script'i (`eng/setup-softhsm-fixture.ps1`), Windows regression/smoke script'leri (`eng/run-regression-tests.ps1`, `eng/run-smoke.ps1`), Windows CI runtime regression lane'i, `docs/windows-local-setup.md` ve `docs/release-notes/windows-compatibility.md` eklendi.
 - `PROJECT_ROADMAP.md` güncellendi.
+- Yeni bir Blazor Server admin panel girişimi başlatıldı: `Pkcs11Wrapper.Admin.Application`, `Pkcs11Wrapper.Admin.Infrastructure`, `Pkcs11Wrapper.Admin.Web` ve `Pkcs11Wrapper.Admin.Tests` projeleri çözüme eklendi.
+- Admin panelin ilk iskeleti kuruldu: device profile CRUD, connection test, slot listeleme, key/object listeleme + explicit destroy akışı, uygulama-owned session registry, audit log görünümü ve dashboard ekranı eklendi.
+- Admin panel için başlangıç yol haritası `docs/admin-panel-roadmap.md` içinde oluşturuldu.
 
 ## Şu an üzerinde çalışılan
-- Windows runtime regression ve local setup/release note dokümantasyonu değişikliklerinin self-review ve doğrulaması tamamlandı.
+- Blazor Server admin panelinin ilk iskeleti tamamlandı; build/test/self-review doğrulaması alındı.
 
 ## Sıradaki işler
+- Admin panel Phase B: key/object detail, generate/create akışları ve daha güvenli destructive işlemler.
+- Admin panel Phase C: daha zengin session operasyonları ve login/logout görünürlüğü.
 - PKCS#11 v3 message API'lerini gerçekten expose eden bir vendor/modül ile runtime regression eklemek.
-- Gerekirse smoke veya örnek uygulamaya v3-capable bir örnek akış eklemek.
-- Yayın politikası netleşirse tag-only publish otomasyonu düşünmek.
-- Gerekirse Windows tarafında gerçek bir PKCS#11 modül/fixture ile pozitif runtime regression eklemek.
-- Windows runtime lane'i GitHub üzerinde ilk gerçek koşusunda gözlenip gerektiğinde paket/araç yolu ince ayarı yapmak.
+- Gerekirse Windows runtime lane'ini GitHub üzerinde ilk gerçek koşusunda gözleyip paket/araç yolu ince ayarı yapmak.
 
 ## Riskler / blocker'lar
 - Mevcut SoftHSM build'leri `C_GetInterface*` export etmediği için yeni v3 yüzeyin runtime pozitif doğrulaması henüz SoftHSM ile yapılamıyor; şimdilik ABI/layout + capability-gated davranış testleri var.
 
 ## Commit / push durumu
-- Yerel değişiklikler var; Windows runtime regression ve dokümantasyon değişiklikleri için henüz push yok.
+- Yerel değişiklikler var; admin panel scaffold'ı ve ilgili proje/doküman değişiklikleri için henüz push yok.

@@ -1,0 +1,99 @@
+@page "/sessions"
+@inject HsmAdminService Admin
+
+<PageTitle>Sessions</PageTitle>
+
+<h1>Sessions</h1>
+<p class="text-muted">Bu panelin açtığı session'ları görür, izler ve kapatırsın.</p>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+}
+
+<div class="d-flex gap-2 mb-3">
+    <button class="btn btn-primary" @onclick="Refresh">Refresh</button>
+    <button class="btn btn-outline-danger" @onclick="CloseAllAsync" disabled="@(_sessions.Count == 0)">Close All</button>
+</div>
+
+@if (_sessions.Count == 0)
+{
+    <p class="text-muted">No tracked sessions.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Session Id</th>
+                    <th>Device</th>
+                    <th>Slot</th>
+                    <th>Mode</th>
+                    <th>State</th>
+                    <th>Opened</th>
+                    <th>Last Touched</th>
+                    <th>Last Operation</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (AdminSessionSnapshot session in _sessions)
+                {
+                    <tr>
+                        <td><code>@session.SessionId</code></td>
+                        <td>@session.DeviceName</td>
+                        <td>@session.SlotId</td>
+                        <td>@(session.IsReadWrite ? "RW" : "RO")</td>
+                        <td>@session.State</td>
+                        <td>@session.OpenedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@session.LastTouchedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@session.LastOperation</td>
+                        <td>
+                            @if (session.IsHealthy)
+                            {
+                                <span class="badge text-bg-success">Healthy</span>
+                            }
+                            else
+                            {
+                                <span class="badge text-bg-danger">Broken</span>
+                            }
+                        </td>
+                        <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => CloseAsync(session.SessionId)">Close</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<AdminSessionSnapshot> _sessions = [];
+    private string? _statusMessage;
+    private bool _statusIsError;
+
+    protected override void OnInitialized() => Refresh();
+
+    private void Refresh() => _sessions = Admin.GetSessions();
+
+    private async Task CloseAsync(Guid sessionId)
+    {
+        bool closed = await Admin.CloseSessionAsync(sessionId);
+        _statusMessage = closed ? "Session closed." : "Session not found.";
+        _statusIsError = !closed;
+        Refresh();
+    }
+
+    private async Task CloseAllAsync()
+    {
+        foreach (AdminSessionSnapshot session in _sessions.ToArray())
+        {
+            await Admin.CloseSessionAsync(session.SessionId);
+        }
+
+        _statusMessage = "All tracked sessions closed.";
+        _statusIsError = false;
+        Refresh();
+    }
+}

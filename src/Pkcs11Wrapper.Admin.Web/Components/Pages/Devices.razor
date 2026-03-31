@@ -1,0 +1,186 @@
+@page "/devices"
+@inject HsmAdminService Admin
+
+<PageTitle>Devices</PageTitle>
+
+<h1>HSM Devices</h1>
+<p class="text-muted">PKCS#11 module path'lerini tanımla, bağlantı testi yap ve admin panelinin hangi cihazlara erişeceğini yönet.</p>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card shadow-sm">
+            <div class="card-header">@(_editingId is null ? "Add Device" : "Edit Device")</div>
+            <div class="card-body">
+                <EditForm Model="_input" OnValidSubmit="SaveAsync">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="mb-3">
+                        <label class="form-label">Name</label>
+                        <InputText class="form-control" @bind-Value="_input.Name" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">PKCS#11 Module Path</label>
+                        <InputText class="form-control" @bind-Value="_input.ModulePath" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Default Token Label</label>
+                        <InputText class="form-control" @bind-Value="_input.DefaultTokenLabel" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        <InputTextArea class="form-control" @bind-Value="_input.Notes" />
+                    </div>
+                    <div class="form-check mb-3">
+                        <InputCheckbox class="form-check-input" @bind-Value="_input.IsEnabled" />
+                        <label class="form-check-label">Enabled</label>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">Save</button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="ResetForm">Reset</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Configured Devices</span>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync">Refresh</button>
+            </div>
+            <div class="card-body">
+                @if (_devices.Count == 0)
+                {
+                    <p class="text-muted mb-0">No devices configured yet.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-striped align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Module Path</th>
+                                    <th>Token</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (HsmDeviceProfile device in _devices)
+                                {
+                                    <tr>
+                                        <td>
+                                            <div class="fw-semibold">@device.Name</div>
+                                            <div class="small text-muted">@device.Notes</div>
+                                        </td>
+                                        <td><code>@device.ModulePath</code></td>
+                                        <td>@device.DefaultTokenLabel</td>
+                                        <td>
+                                            @if (device.IsEnabled)
+                                            {
+                                                <span class="badge text-bg-success">Enabled</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge text-bg-secondary">Disabled</span>
+                                            }
+                                        </td>
+                                        <td class="text-end">
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary" @onclick="() => Edit(device)">Edit</button>
+                                                <button class="btn btn-outline-success" @onclick="() => TestAsync(device.Id)">Test</button>
+                                                <button class="btn btn-outline-danger" @onclick="() => DeleteAsync(device.Id)">Delete</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly HsmDeviceProfileInput _input = new();
+    private IReadOnlyList<HsmDeviceProfile> _devices = [];
+    private Guid? _editingId;
+    private string? _statusMessage;
+    private bool _statusIsError;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _devices = await Admin.GetDevicesAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            HsmDeviceProfile saved = await Admin.SaveDeviceAsync(_editingId, _input);
+            _statusMessage = $"Saved device '{saved.Name}'.";
+            _statusIsError = false;
+            ResetForm();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private void Edit(HsmDeviceProfile device)
+    {
+        _editingId = device.Id;
+        _input.Name = device.Name;
+        _input.ModulePath = device.ModulePath;
+        _input.DefaultTokenLabel = device.DefaultTokenLabel;
+        _input.Notes = device.Notes;
+        _input.IsEnabled = device.IsEnabled;
+    }
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _input.Name = string.Empty;
+        _input.ModulePath = string.Empty;
+        _input.DefaultTokenLabel = string.Empty;
+        _input.Notes = string.Empty;
+        _input.IsEnabled = true;
+    }
+
+    private async Task TestAsync(Guid id)
+    {
+        HsmConnectionTestResult result = await Admin.TestConnectionAsync(id);
+        _statusMessage = result.Success
+            ? $"{result.Message} Manufacturer={result.ManufacturerId}, Library={result.LibraryDescription}, InterfaceDiscovery={result.SupportsInterfaceDiscovery}."
+            : $"Connection test failed: {result.Message}";
+        _statusIsError = !result.Success;
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        await Admin.DeleteDeviceAsync(id);
+        _statusMessage = "Device deleted.";
+        _statusIsError = false;
+        if (_editingId == id)
+        {
+            ResetForm();
+        }
+
+        await LoadAsync();
+    }
+}

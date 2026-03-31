@@ -1,0 +1,57 @@
+@page "/audit"
+@inject HsmAdminService Admin
+
+<PageTitle>Audit Logs</PageTitle>
+
+<h1>Audit Logs</h1>
+<p class="text-muted">Panel üstünden yapılan temel yönetim işlemlerinin uygulama audit kaydı.</p>
+
+<div class="d-flex gap-2 mb-3">
+    <button class="btn btn-primary" @onclick="LoadAsync">Refresh</button>
+</div>
+
+@if (_logs.Count == 0)
+{
+    <p class="text-muted">No audit entries yet.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Actor</th>
+                    <th>Category</th>
+                    <th>Action</th>
+                    <th>Target</th>
+                    <th>Outcome</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (AdminAuditLogEntry log in _logs)
+                {
+                    <tr>
+                        <td>@log.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@log.Actor</td>
+                        <td>@log.Category</td>
+                        <td>@log.Action</td>
+                        <td>@log.Target</td>
+                        <td>@log.Outcome</td>
+                        <td>@log.Details</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<AdminAuditLogEntry> _logs = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+        => _logs = await Admin.GetAuditLogsAsync();
+}

@@ -1,0 +1,105 @@
+@page "/"
+@inject HsmAdminService Admin
+
+<PageTitle>Pkcs11Wrapper Admin</PageTitle>
+
+<h1>Pkcs11Wrapper Admin Dashboard</h1>
+<p class="text-muted">Blazor Server yönetim paneli iskeleti. Buradan device, slot, key, session ve audit akışlarını yönetebilirsin.</p>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_summary is null)
+{
+    <p>Loading dashboard...</p>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted small">Devices</div>
+                    <div class="display-6">@_summary.DeviceCount</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted small">Enabled Devices</div>
+                    <div class="display-6">@_summary.EnabledDeviceCount</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted small">Active Sessions</div>
+                    <div class="display-6">@_summary.ActiveSessionCount</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted small">Recent Audit Entries</div>
+                    <div class="display-6">@_summary.RecentAuditCount</div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_recentLogs.Count != 0)
+{
+    <h2 class="h4">Recent Audit Events</h2>
+    <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Category</th>
+                    <th>Action</th>
+                    <th>Target</th>
+                    <th>Outcome</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (AdminAuditLogEntry log in _recentLogs)
+                {
+                    <tr>
+                        <td>@log.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@log.Category</td>
+                        <td>@log.Action</td>
+                        <td>@log.Target</td>
+                        <td>@log.Outcome</td>
+                        <td>@log.Details</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private DashboardSummary? _summary;
+    private IReadOnlyList<AdminAuditLogEntry> _recentLogs = [];
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _summary = await Admin.GetDashboardAsync();
+            _recentLogs = await Admin.GetAuditLogsAsync(10);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

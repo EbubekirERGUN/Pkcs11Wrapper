@@ -1,0 +1,200 @@
+@page "/slots"
+@inject HsmAdminService Admin
+
+<PageTitle>Slots</PageTitle>
+
+<h1>Slots</h1>
+<p class="text-muted">Seçilen cihaz için slot ve token bilgisini görüntüle. Buradan read-only/read-write session açabilir ve slot seviyesinde CloseAllSessions çağırabilirsin.</p>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+}
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body row g-3 align-items-end">
+        <div class="col-lg-4">
+            <label class="form-label">Device</label>
+            <select class="form-select" @bind="_selectedDeviceId">
+                <option value="">Select device...</option>
+                @foreach (HsmDeviceProfile device in _devices)
+                {
+                    <option value="@device.Id">@device.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-lg-4">
+            <label class="form-label">Optional User PIN</label>
+            <input class="form-control" type="password" @bind="_userPin" />
+        </div>
+        <div class="col-lg-4 d-flex gap-2">
+            <button class="btn btn-primary" @onclick="LoadSlotsAsync" disabled="@string.IsNullOrWhiteSpace(_selectedDeviceId)">Load Slots</button>
+            <button class="btn btn-outline-secondary" @onclick="RefreshSessions">Refresh Sessions</button>
+        </div>
+    </div>
+</div>
+
+@if (_slots.Count != 0)
+{
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Slot</th>
+                    <th>Description</th>
+                    <th>Token</th>
+                    <th>Flags</th>
+                    <th>Mechanisms</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (HsmSlotSummary slot in _slots)
+                {
+                    <tr>
+                        <td>@slot.SlotId</td>
+                        <td>
+                            <div class="fw-semibold">@slot.SlotDescription</div>
+                            <div class="small text-muted">@slot.SlotManufacturer</div>
+                        </td>
+                        <td>
+                            @if (slot.TokenPresent)
+                            {
+                                <div class="fw-semibold">@slot.TokenLabel</div>
+                                <div class="small text-muted">@slot.TokenModel · @slot.TokenSerialNumber</div>
+                            }
+                            else
+                            {
+                                <span class="text-muted">No token</span>
+                            }
+                        </td>
+                        <td>
+                            <div>@slot.SlotFlags</div>
+                            <div class="small text-muted">@slot.TokenFlags</div>
+                        </td>
+                        <td>@slot.MechanismCount</td>
+                        <td class="text-end">
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-primary" @onclick="() => OpenSessionAsync(slot, false)">Open RO</button>
+                                <button class="btn btn-outline-warning" @onclick="() => OpenSessionAsync(slot, true)">Open RW</button>
+                                <button class="btn btn-outline-danger" @onclick="() => CloseAllAsync(slot)">Close All</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_sessions.Count != 0)
+{
+    <h2 class="h4 mt-4">Tracked Sessions</h2>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle">
+            <thead>
+                <tr>
+                    <th>Session</th>
+                    <th>Device</th>
+                    <th>Slot</th>
+                    <th>Mode</th>
+                    <th>State</th>
+                    <th>Last Operation</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (AdminSessionSnapshot session in _sessions)
+                {
+                    <tr>
+                        <td><code>@session.SessionId</code></td>
+                        <td>@session.DeviceName</td>
+                        <td>@session.SlotId</td>
+                        <td>@(session.IsReadWrite ? "RW" : "RO")</td>
+                        <td>@session.State</td>
+                        <td>@session.LastOperation</td>
+                        <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => CloseSessionAsync(session.SessionId)">Close</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<HsmDeviceProfile> _devices = [];
+    private IReadOnlyList<HsmSlotSummary> _slots = [];
+    private IReadOnlyList<AdminSessionSnapshot> _sessions = [];
+    private string? _selectedDeviceId;
+    private string? _userPin;
+    private string? _statusMessage;
+    private bool _statusIsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _devices = await Admin.GetDevicesAsync();
+        _sessions = Admin.GetSessions();
+        _selectedDeviceId = _devices.FirstOrDefault()?.Id.ToString();
+    }
+
+    private async Task LoadSlotsAsync()
+    {
+        try
+        {
+            if (!Guid.TryParse(_selectedDeviceId, out Guid deviceId))
+            {
+                return;
+            }
+
+            _slots = await Admin.GetSlotsAsync(deviceId);
+            _statusMessage = $"Loaded {_slots.Count} slot(s).";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task OpenSessionAsync(HsmSlotSummary slot, bool readWrite)
+    {
+        try
+        {
+            AdminSessionSnapshot snapshot = await Admin.OpenSessionAsync(slot.DeviceId, slot.SlotId, readWrite, _userPin);
+            _sessions = Admin.GetSessions();
+            _statusMessage = $"Opened {(snapshot.IsReadWrite ? "read-write" : "read-only")} session for slot {snapshot.SlotId}.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task CloseAllAsync(HsmSlotSummary slot)
+    {
+        try
+        {
+            await Admin.CloseAllSessionsAsync(slot.DeviceId, slot.SlotId);
+            _statusMessage = $"CloseAllSessions invoked for slot {slot.SlotId}.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task CloseSessionAsync(Guid sessionId)
+    {
+        await Admin.CloseSessionAsync(sessionId);
+        _sessions = Admin.GetSessions();
+        _statusMessage = "Session closed.";
+        _statusIsError = false;
+    }
+
+    private void RefreshSessions() => _sessions = Admin.GetSessions();
+}
