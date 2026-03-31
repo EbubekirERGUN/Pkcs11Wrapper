@@ -20,6 +20,15 @@ public sealed record Pkcs11LabHistoryListItem(
     string? CreatedHandleText,
     string? ArtifactHex);
 
+public sealed record Pkcs11LabTemplateListItem(
+    Guid Id,
+    string Name,
+    string? Notes,
+    Pkcs11LabOperation Operation,
+    DateTimeOffset UpdatedUtc,
+    bool HasPinnedDevice,
+    bool HasPinnedSlot);
+
 public static class Pkcs11LabView
 {
     public static Pkcs11LabOperationCategory GetCategory(Pkcs11LabOperation operation)
@@ -86,6 +95,37 @@ public static class Pkcs11LabView
         return query
             .OrderByDescending(item => item.RecordedAt)
             .ThenBy(item => item.Operation)
+            .ToArray();
+    }
+
+    public static IReadOnlyList<Pkcs11LabTemplateListItem> ApplyTemplateFilters(
+        IReadOnlyList<Pkcs11LabTemplateListItem> items,
+        string? searchText,
+        string categoryFilter)
+    {
+        IEnumerable<Pkcs11LabTemplateListItem> query = items;
+
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            string term = searchText.Trim();
+            query = query.Where(item =>
+                item.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || Contains(item.Notes, term)
+                || item.Operation.ToString().Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        query = categoryFilter.ToLowerInvariant() switch
+        {
+            "diagnostics" => query.Where(item => GetCategory(item.Operation) == Pkcs11LabOperationCategory.Diagnostics),
+            "crypto" => query.Where(item => GetCategory(item.Operation) == Pkcs11LabOperationCategory.Crypto),
+            "objects" => query.Where(item => GetCategory(item.Operation) == Pkcs11LabOperationCategory.Objects),
+            "attributes" => query.Where(item => GetCategory(item.Operation) == Pkcs11LabOperationCategory.Attributes),
+            _ => query
+        };
+
+        return query
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(item => item.UpdatedUtc)
             .ToArray();
     }
 

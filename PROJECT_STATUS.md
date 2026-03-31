@@ -52,6 +52,10 @@
   - configuration ekranında özet kartları ve import/export safety checklist görünürlüğü
   - PKCS#11 Lab ekranında quick operation palette, özet kartları ve history filter ergonomisi
   - `Pkcs11LabView` helper + testler ile operation category/history filtre mantığının testlenebilir hale getirilmesi
+- Admin panel Phase E beşinci polish dilimi teslim edildi:
+  - PKCS#11 Lab için App_Data-backed saved templates/favorites desteği
+  - template search/category filter ergonomisi ve hızlı apply/delete akışları
+  - PIN'in template'lere asla yazılmamasını doğrulayan store/test katmanı (`Pkcs11LabTemplateStore`)
 - Çözüm doğrulaması temiz:
   - `dotnet build Pkcs11Wrapper.sln -c Release`
   - `dotnet test Pkcs11Wrapper.sln -c Release`
@@ -62,7 +66,7 @@
 - Belgeleme senkronizasyonu yapıldı; README'ler artık admin panelin auth/users/config-transfer/PKCS#11 Lab gerçek durumunu ve benchmark baseline tarihini yansıtıyor.
 
 ## Sıradaki işler
-- Admin panel UX/product polish'in sonraki dilimleri (dashboard/widget genişletmeleri, recovery affordance polish, gerekiyorsa Lab için saved templates/favorites ergonomisi).
+- Admin panel UX/product polish'in sonraki dilimleri (dashboard/widget genişletmeleri, recovery affordance polish, gerekiyorsa Lab için favorites import/export veya pin-to-navigation ergonomisi).
 - PKCS#11 v3 interface yüzeyini gerçekten export eden vendor/modül ile ek runtime regression.
 - Benchmark suite'i performans hassas değişikliklerden sonra ve release öncesinde tekrar çalıştırıp en güncel baseline'ı tazelemek.
 - GitHub vitrin materyallerini zenginleştirmek (ekran görüntüsü, demo media, release notes).

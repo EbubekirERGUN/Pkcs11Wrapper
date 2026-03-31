@@ -2,6 +2,7 @@ using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
 using Pkcs11Wrapper.Admin.Application.Services;
 using Pkcs11Wrapper.Admin.Infrastructure;
+using Pkcs11Wrapper.Admin.Web.Lab;
 using Pkcs11Wrapper.Admin.Web.Components;
 using Pkcs11Wrapper.Admin.Web.Configuration;
 using Pkcs11Wrapper.Admin.Web.Security;
@@ -39,6 +40,7 @@ builder.Services.AddDataProtection()
 builder.Services.AddSingleton<IDeviceProfileStore, JsonDeviceProfileStore>();
 builder.Services.AddSingleton<IAuditLogStore, JsonLineAuditLogStore>();
 builder.Services.AddSingleton<ProtectedPinStore>();
+builder.Services.AddSingleton<Pkcs11LabTemplateStore>();
 builder.Services.AddSingleton<DeviceProfileService>();
 builder.Services.AddSingleton<AdminSessionRegistry>();
 builder.Services.AddSingleton<LocalAdminUserStore>();

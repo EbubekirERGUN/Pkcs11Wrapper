@@ -43,4 +43,20 @@ public sealed class Pkcs11LabViewTests
         Assert.Single(filtered);
         Assert.Equal(Pkcs11LabOperation.UnwrapAesKey, filtered[0].Operation);
     }
+
+    [Fact]
+    public void ApplyTemplateFiltersCanFilterByCategoryAndSearch()
+    {
+        Pkcs11LabTemplateListItem[] items =
+        [
+            new(Guid.NewGuid(), "module-info", null, Pkcs11LabOperation.ModuleInfo, DateTimeOffset.UtcNow.AddMinutes(-2), false, false),
+            new(Guid.NewGuid(), "rsa-sign", "sign flow", Pkcs11LabOperation.SignData, DateTimeOffset.UtcNow.AddMinutes(-1), true, true),
+            new(Guid.NewGuid(), "wrap-aes", "wrap object", Pkcs11LabOperation.WrapKey, DateTimeOffset.UtcNow, true, true)
+        ];
+
+        IReadOnlyList<Pkcs11LabTemplateListItem> filtered = Pkcs11LabView.ApplyTemplateFilters(items, "wrap", "objects");
+
+        Assert.Single(filtered);
+        Assert.Equal(Pkcs11LabOperation.WrapKey, filtered[0].Operation);
+    }
 }

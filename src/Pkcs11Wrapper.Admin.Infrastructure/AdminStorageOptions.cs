@@ -7,4 +7,6 @@ public sealed class AdminStorageOptions
     public string DeviceProfilesFileName { get; set; } = "device-profiles.json";
 
     public string AuditLogFileName { get; set; } = "audit-log.jsonl";
+
+    public string LabTemplatesFileName { get; set; } = "lab-templates.json";
 }

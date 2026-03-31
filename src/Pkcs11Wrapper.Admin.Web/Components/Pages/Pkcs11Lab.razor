@@ -1,7 +1,9 @@
 @page "/lab"
 @attribute [Authorize(Policy = AdminRoles.Operator)]
+@using Pkcs11Wrapper.Admin.Web.Lab
 @inject HsmAdminService Admin
 @inject ProtectedPinStore PinStore
+@inject Pkcs11LabTemplateStore TemplateStore
 
 <PageTitle>PKCS#11 Lab</PageTitle>
 
@@ -123,6 +125,98 @@
         </div>
 
         <div class="small text-muted">Use the palette for fast switching between diagnostic, crypto, object, and raw-attribute workflows without manually hunting through the full operation dropdown every time.</div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Saved templates / favorites</span>
+        <span class="small text-muted">Stored under App_Data · user PIN is never persisted</span>
+    </div>
+    <div class="card-body row g-4">
+        <div class="col-xl-4">
+            <div class="fw-semibold mb-2">Save current editor state</div>
+            <div class="small text-muted mb-3">Save repeatable lab requests as local favorites. Device/slot/mechanism selections can be kept; the PIN is always stripped before the template is written.</div>
+
+            <div class="mb-3">
+                <label class="form-label">Template name</label>
+                <input class="form-control" @bind="_templateName" placeholder="rsa-pss-sign-smoke" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Notes</label>
+                <textarea class="form-control" rows="3" @bind="_templateNotes" placeholder="What this template is for, token assumptions, expected key usage..."></textarea>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-primary" @onclick="SaveTemplateAsync">Save template</button>
+                <button type="button" class="btn btn-outline-secondary" @onclick="ResetTemplateDraft">Clear draft</button>
+            </div>
+        </div>
+
+        <div class="col-xl-8">
+            <div class="row g-3 mb-3 align-items-end">
+                <div class="col-lg-7">
+                    <label class="form-label small">Search templates</label>
+                    <input class="form-control form-control-sm" @bind="_templateSearchText" @bind:event="oninput" placeholder="name, notes, operation..." />
+                </div>
+                <div class="col-lg-5">
+                    <label class="form-label small">Category</label>
+                    <select class="form-select form-select-sm" @bind="_templateCategoryFilter">
+                        <option value="all">All categories</option>
+                        <option value="diagnostics">Diagnostics</option>
+                        <option value="crypto">Crypto</option>
+                        <option value="objects">Objects</option>
+                        <option value="attributes">Attributes</option>
+                    </select>
+                </div>
+                <div class="col-12 small text-muted">Showing @FilteredTemplates.Count of @_templates.Count saved template(s).</div>
+            </div>
+
+            @if (_templates.Count == 0)
+            {
+                <div class="text-muted small">No saved templates yet. Save a favorite once and reuse it later without re-entering the full request shape.</div>
+            }
+            else if (FilteredTemplates.Count == 0)
+            {
+                <div class="text-muted small">No template matched the current filters.</div>
+            }
+            else
+            {
+                <div class="d-flex flex-column gap-2">
+                    @foreach (Pkcs11LabSavedTemplate template in FilteredTemplates)
+                    {
+                        <div class="border rounded p-3 small">
+                            <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                                <div>
+                                    <div class="fw-semibold">@template.Name</div>
+                                    <div class="text-muted">@GetOperationLabel(template.Request.Operation) · updated @template.UpdatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 align-items-center">
+                                    <span class="badge text-bg-secondary">@GetCategoryLabel(Pkcs11LabView.GetCategory(template.Request.Operation))</span>
+                                    @if (template.Request.DeviceId != Guid.Empty)
+                                    {
+                                        <span class="badge text-bg-info">Pinned device</span>
+                                    }
+                                    @if (template.Request.SlotId is not null)
+                                    {
+                                        <span class="badge text-bg-dark">Pinned slot</span>
+                                    }
+                                </div>
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(template.Notes))
+                            {
+                                <div class="text-muted mt-2">@template.Notes</div>
+                            }
+
+                            <div class="d-flex flex-wrap gap-2 mt-3">
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ApplyTemplateAsync(template)">Apply template</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteTemplateAsync(template.Id)">Delete</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
     </div>
 </div>
 
@@ -656,6 +750,7 @@
     private Pkcs11LabRequest _request = CreateDefaultRequest();
     private Pkcs11LabExecutionResult? _lastResult;
     private readonly List<LabHistoryItem> _history = [];
+    private IReadOnlyList<Pkcs11LabSavedTemplate> _templates = [];
     private string? _statusMessage;
     private bool _statusIsError;
     private bool _rememberPin;
@@ -666,6 +761,10 @@
     private string _historySearchText = string.Empty;
     private string _historyStatusFilter = "all";
     private string _historyCategoryFilter = "all";
+    private string _templateName = string.Empty;
+    private string? _templateNotes;
+    private string _templateSearchText = string.Empty;
+    private string _templateCategoryFilter = "all";
 
     private const string AttributePresetIdentity = "Identity";
     private const string AttributePresetCapabilities = "Capabilities";
@@ -705,6 +804,31 @@
     private IReadOnlyList<Pkcs11LabOperation> PaletteOperations => Enum.GetValues<Pkcs11LabOperation>()
         .Where(operation => Pkcs11LabView.GetCategory(operation) == _operationPaletteCategory)
         .ToArray();
+    private IReadOnlyList<Pkcs11LabSavedTemplate> FilteredTemplates
+    {
+        get
+        {
+            LabTemplateViewRow[] rows = _templates
+                .Select(template => new LabTemplateViewRow(
+                    template,
+                    new Pkcs11LabTemplateListItem(
+                        template.Id,
+                        template.Name,
+                        template.Notes,
+                        template.Request.Operation,
+                        template.UpdatedUtc,
+                        template.Request.DeviceId != Guid.Empty,
+                        template.Request.SlotId is not null)))
+                .ToArray();
+
+            HashSet<Guid> allowedIds = Pkcs11LabView
+                .ApplyTemplateFilters(rows.Select(row => row.View).ToArray(), _templateSearchText, _templateCategoryFilter)
+                .Select(item => item.Id)
+                .ToHashSet();
+
+            return rows.Where(row => allowedIds.Contains(row.Template.Id)).Select(row => row.Template).ToArray();
+        }
+    }
     private IReadOnlyList<LabHistoryItem> FilteredHistory
     {
         get
@@ -736,6 +860,7 @@
         _devices = await Admin.GetDevicesAsync();
         _selectedDeviceId = _devices.FirstOrDefault()?.Id.ToString();
         _operationPaletteCategory = Pkcs11LabView.GetCategory(_request.Operation);
+        await LoadTemplatesAsync();
         await LoadSlotsForSelectedDeviceAsync();
     }
 
@@ -843,6 +968,50 @@
         }
     }
 
+    private async Task LoadTemplatesAsync()
+        => _templates = await TemplateStore.GetAllAsync();
+
+    private async Task SaveTemplateAsync()
+    {
+        try
+        {
+            Pkcs11LabSavedTemplate saved = await TemplateStore.SaveAsync(_templateName, _templateNotes, BuildTemplateDraft());
+            _templateName = saved.Name;
+            _templateNotes = saved.Notes;
+            await LoadTemplatesAsync();
+            _statusMessage = $"Saved lab template '{saved.Name}'. PIN values are never stored.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private void ResetTemplateDraft()
+    {
+        _templateName = string.Empty;
+        _templateNotes = null;
+    }
+
+    private async Task ApplyTemplateAsync(Pkcs11LabSavedTemplate template)
+    {
+        await ApplyRequestAsync(template.Request);
+        _templateName = template.Name;
+        _templateNotes = template.Notes;
+        _statusMessage = $"Applied lab template '{template.Name}'. Review the device/slot context, then run the operation.";
+        _statusIsError = false;
+    }
+
+    private async Task DeleteTemplateAsync(Guid templateId)
+    {
+        await TemplateStore.DeleteAsync(templateId);
+        await LoadTemplatesAsync();
+        _statusMessage = "Lab template deleted.";
+        _statusIsError = false;
+    }
+
     private async Task RunAsync()
     {
         try
@@ -929,6 +1098,15 @@
             RandomLength = _request.RandomLength,
             MaxObjects = _request.MaxObjects
         };
+    }
+
+    private Pkcs11LabRequest BuildTemplateDraft()
+    {
+        Pkcs11LabRequest request = CopyRequest(_request);
+        request.UserPin = null;
+        request.DeviceId = Guid.TryParse(_selectedDeviceId, out Guid deviceId) ? deviceId : Guid.Empty;
+        request.SlotId = ulong.TryParse(_selectedSlotId, out ulong slotId) ? (nuint)slotId : null;
+        return request;
     }
 
     private async Task PersistPinAsync(Pkcs11LabRequest request)
@@ -1163,16 +1341,25 @@
 
     private async Task ApplyRequestAsync(Pkcs11LabRequest request)
     {
-        _selectedDeviceId = request.DeviceId == Guid.Empty ? null : request.DeviceId.ToString();
+        if (request.DeviceId != Guid.Empty && _devices.Any(device => device.Id == request.DeviceId))
+        {
+            _selectedDeviceId = request.DeviceId.ToString();
+        }
+        else if (string.IsNullOrWhiteSpace(_selectedDeviceId))
+        {
+            _selectedDeviceId = _devices.FirstOrDefault()?.Id.ToString();
+        }
+
         await LoadSlotsForSelectedDeviceAsync();
 
-        if (request.SlotId is nuint slotId)
+        if (request.SlotId is nuint slotId && _slots.Any(slot => slot.SlotId == slotId))
         {
             _selectedSlotId = slotId.ToString();
             await LoadProtectedPinAsync();
         }
 
         _request = CopyRequest(request);
+        _request.UserPin = null;
         _operationPaletteCategory = Pkcs11LabView.GetCategory(_request.Operation);
         _lastResult = null;
     }
@@ -1245,5 +1432,6 @@
             _ => category.ToString()
         };
 
+    private sealed record LabTemplateViewRow(Pkcs11LabSavedTemplate Template, Pkcs11LabTemplateListItem View);
     private sealed record LabHistoryViewRow(LabHistoryItem Item, Pkcs11LabHistoryListItem View);
 }

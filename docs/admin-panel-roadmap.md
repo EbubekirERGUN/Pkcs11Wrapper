@@ -113,6 +113,7 @@ Goals:
 - Phase E second polish slice delivered: devices-page summary/filter/sort ergonomics, slots-page summary/token filtering/selected-device session visibility, and sessions-page search/filter/sort + filtered/invalidated bulk-close actions
 - Phase E third polish slice delivered: keys-page summary cards, client-side search/class/capability filters, sorting + paging, and a reusable/tested `KeyObjectListView` helper so heavy object lists stay manageable
 - Phase E fourth polish slice delivered: configuration-page summary/safety affordances plus PKCS#11 Lab quick-operation palette, summary cards, and filterable scenario-history UX backed by a reusable/tested `Pkcs11LabView` helper
+- Phase E fifth polish slice delivered: persistent PKCS#11 Lab saved templates/favorites with App_Data-backed storage, search/category filters, quick apply/delete actions, and explicit PIN stripping via a tested `Pkcs11LabTemplateStore`
 - capability/mechanism-aware key-management UX: slot-level mechanism probing, pre-submit warnings, and disabled generate/import actions when the selected slot obviously cannot satisfy them
 - object edit affordances are now more object-aware: obvious unsupported toggles are disabled based on object class + `CKA_MODIFIABLE` visibility
 - object copy workflow delivered via `C_CopyObject`, including label/ID/capability override template fields and admin-layer validation
