@@ -5,6 +5,7 @@ using Pkcs11Wrapper.Native.Interop;
 
 namespace Pkcs11Wrapper.Native.Tests;
 
+[Collection(Pkcs11RuntimeCollection.Name)]
 public sealed class Pkcs11V3ShimRuntimeTests
 {
     private static readonly byte[] ExpectedPinUtf8 = "123456"u8.ToArray();

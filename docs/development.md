@@ -66,6 +66,7 @@ The wrapper surface implemented through the current phase set includes:
 - multipart operations and operation-state APIs
 - optional PKCS#11 v3 interface discovery and message-based API surface
 - optional `C_LoginUser` / `C_SessionCancel` through the discovered v3 interface
+- opt-in structured operation telemetry with duration, result/exception, and slot/session/mechanism context
 - administrative operations for session invalidation and token/PIN provisioning
 - NativeAOT smoke validation through the sample app on Linux and Windows
 
@@ -92,6 +93,12 @@ Notable current assumptions:
 - Wrapper errors expose taxonomy metadata that classifies CKR outcomes into stable high-level categories (`Success`, `Lifecycle`, `StateConflict`, `InputValidation`, `Authentication`, `ObjectHandle`, `Capability`, `Resource`, `Device`, `Session`, `Integrity`, `Unknown`).
 - Taxonomy metadata includes a retryability hint via `IsRetryable` (`true`/`false`) for control-flow policy.
 - The raw `CK_RV` value is always preserved and remains the authoritative signal for exact module/token semantics.
+
+### Telemetry contract
+
+- Telemetry is disabled unless a consumer provides `IPkcs11OperationTelemetryListener`.
+- Emitted events carry operation/native-operation names, duration, status, raw return value when available, plus optional slot/session/mechanism metadata.
+- Listener exceptions are swallowed so telemetry remains observational and cannot break the primary PKCS#11 operation flow.
 
 ## Related docs
 

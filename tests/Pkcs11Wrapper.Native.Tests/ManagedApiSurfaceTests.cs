@@ -27,6 +27,33 @@ public sealed class ManagedApiSurfaceTests
     }
 
     [Fact]
+    public void TelemetryApisAreExposedOnManagedAndNativeSurfaces()
+    {
+        Assert.NotNull(typeof(Pkcs11Module).GetMethod(nameof(Pkcs11Module.Load), [typeof(string), typeof(IPkcs11OperationTelemetryListener)]));
+        Assert.NotNull(typeof(Pkcs11Module).GetProperty(nameof(Pkcs11Module.TelemetryListener)));
+        Assert.NotNull(typeof(Pkcs11NativeModule).GetProperty(nameof(Pkcs11NativeModule.TelemetryListener)));
+        Assert.NotNull(typeof(IPkcs11OperationTelemetryListener).GetMethod(nameof(IPkcs11OperationTelemetryListener.OnOperationCompleted)));
+
+        Pkcs11OperationTelemetryEvent operationEvent = new(
+            OperationName: "TestOperation",
+            NativeOperationName: "C_TestOperation",
+            Status: Pkcs11OperationTelemetryStatus.Succeeded,
+            Duration: TimeSpan.FromMilliseconds(1),
+            ReturnValue: CK_RV.Ok,
+            SlotId: 7,
+            SessionHandle: 11,
+            MechanismType: 13,
+            Exception: null);
+
+        Assert.True(operationEvent.IsSuccess);
+        Assert.Equal("TestOperation", operationEvent.OperationName);
+        Assert.Equal("C_TestOperation", operationEvent.NativeOperationName);
+        Assert.Equal((nuint)7, operationEvent.SlotId);
+        Assert.Equal((nuint)11, operationEvent.SessionHandle);
+        Assert.Equal((nuint)13, operationEvent.MechanismType);
+    }
+
+    [Fact]
     public void ModulePathDefaultsExposeSoftHsmCandidates()
     {
         Assert.NotNull(typeof(Pkcs11ModulePathDefaults).GetMethod(nameof(Pkcs11ModulePathDefaults.GetSoftHsmModuleCandidates), Type.EmptyTypes));
