@@ -684,18 +684,18 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 throw new ArgumentException("Mechanism type is required for cryptographic lab operations.", nameof(request));
             }
 
-            _ = ParseLabObjectHandleText(request.KeyHandleText);
+            ValidateLabObjectReference(request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
             _ = CreateLabMechanismParameter(ParseMechanismTypeText(request.MechanismTypeText), request, validateOnly: true, notes: null);
         }
 
         if (request.Operation == Pkcs11LabOperation.InspectObject)
         {
-            _ = ParseLabObjectHandleText(request.KeyHandleText);
+            ValidateLabObjectReference(request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         }
 
         if (request.Operation == Pkcs11LabOperation.ReadAttribute)
         {
-            _ = ParseLabObjectHandleText(request.KeyHandleText);
+            ValidateLabObjectReference(request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
 
             if (string.IsNullOrWhiteSpace(request.AttributeTypeText))
             {
@@ -707,7 +707,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         if (request.Operation == Pkcs11LabOperation.WrapKey)
         {
-            _ = ParseLabObjectHandleText(request.SecondaryKeyHandleText, "Wrapping key handle");
+            ValidateLabObjectReference(request.SecondaryKeyHandleText, request.SecondaryKeyLabel, request.SecondaryKeyIdHex, request.SecondaryKeyObjectClass, request.SecondaryKeyType, "Wrapping key handle");
         }
 
         if (request.Operation == Pkcs11LabOperation.UnwrapAesKey)
@@ -1136,7 +1136,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
         Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         byte[] data = ResolveLabPayload(request, forDecryptInput: false);
-        Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11ObjectHandle keyHandle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         int signatureLength = session.GetSignOutputLength(keyHandle, mechanism, data);
         byte[] signature = new byte[Math.Max(signatureLength, 4096)];
         if (!session.TrySign(keyHandle, mechanism, data, signature, out int written))
@@ -1171,7 +1171,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         byte[] data = ResolveLabPayload(request, forDecryptInput: false);
         byte[] signature = ParseRequiredHex(request.SignatureHex, nameof(request.SignatureHex));
-        Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11ObjectHandle keyHandle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         bool verified = session.Verify(keyHandle, mechanism, data, signature);
 
         StringBuilder output = new();
@@ -1200,7 +1200,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
         Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         byte[] plaintext = ResolveLabPayload(request, forDecryptInput: false);
-        Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11ObjectHandle keyHandle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         int cipherLength = session.GetEncryptOutputLength(keyHandle, mechanism, plaintext);
         byte[] ciphertext = new byte[Math.Max(cipherLength, plaintext.Length + 1024)];
         if (!session.TryEncrypt(keyHandle, mechanism, plaintext, ciphertext, out int written))
@@ -1233,7 +1233,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
         Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
         byte[] ciphertext = ResolveLabPayload(request, forDecryptInput: true);
-        Pkcs11ObjectHandle keyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11ObjectHandle keyHandle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         int plainLength = session.GetDecryptOutputLength(keyHandle, mechanism, ciphertext);
         byte[] plaintext = new byte[Math.Max(plainLength, ciphertext.Length)];
         if (!session.TryDecrypt(keyHandle, mechanism, ciphertext, plaintext, out int written))
@@ -1261,7 +1261,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
-        Pkcs11ObjectHandle handle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11ObjectHandle handle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         HsmObjectDetail detail = ReadObjectDetail(deviceId, request.SlotId.Value, session, handle);
 
         if (string.IsNullOrWhiteSpace(request.UserPin))
@@ -1285,8 +1285,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
         Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
-        Pkcs11ObjectHandle targetKeyHandle = ParseLabObjectHandleText(request.KeyHandleText);
-        Pkcs11ObjectHandle wrappingKeyHandle = ParseLabObjectHandleText(request.SecondaryKeyHandleText, "Wrapping key handle");
+        Pkcs11ObjectHandle targetKeyHandle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
+        Pkcs11ObjectHandle wrappingKeyHandle = ResolveLabObjectHandle(session, request.SecondaryKeyHandleText, request.SecondaryKeyLabel, request.SecondaryKeyIdHex, request.SecondaryKeyObjectClass, request.SecondaryKeyType, "Wrapping key handle");
         int wrappedLength = session.GetWrapOutputLength(wrappingKeyHandle, mechanism, targetKeyHandle);
         byte[] wrapped = new byte[Math.Max(wrappedLength, 4096)];
         if (!session.TryWrapKey(wrappingKeyHandle, mechanism, targetKeyHandle, wrapped, out int written))
@@ -1315,7 +1315,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
         Pkcs11Mechanism mechanism = mechanismParameter.Length == 0 ? new(mechanismType) : new(mechanismType, mechanismParameter);
-        Pkcs11ObjectHandle unwrappingKeyHandle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11ObjectHandle unwrappingKeyHandle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         byte[] wrappedKey = ParseRequiredHex(request.DataHex, nameof(request.DataHex));
         string label = string.IsNullOrWhiteSpace(request.UnwrapTargetLabel)
             ? ($"lab-unwrapped-{Guid.NewGuid():N}")[..22]
@@ -1379,7 +1379,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         List<string> notes = [];
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
-        Pkcs11ObjectHandle handle = ParseLabObjectHandleText(request.KeyHandleText);
+        Pkcs11ObjectHandle handle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
         output.AppendLine($"Auth mode: {authMode}");
@@ -1529,6 +1529,127 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
 
         return tokens.Select(ParseAttributeTypeText).ToArray();
+    }
+
+    private static void ValidateLabObjectReference(string? handleText, string? label, string? idHex, string? objectClassText, string? keyTypeText, string fieldName)
+    {
+        bool hasHandle = !string.IsNullOrWhiteSpace(handleText);
+        bool hasLocator = HasLabObjectLocator(label, idHex, objectClassText, keyTypeText);
+        if (!hasHandle && !hasLocator)
+        {
+            throw new ArgumentException($"{fieldName} is required for this lab operation.", fieldName);
+        }
+
+        if (hasHandle)
+        {
+            _ = ParseLabObjectHandleText(handleText, fieldName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(idHex))
+        {
+            _ = ParseOptionalHex(idHex, nameof(idHex));
+        }
+
+        _ = ResolveLabObjectClassText(objectClassText);
+        _ = ResolveLabKeyTypeText(keyTypeText);
+    }
+
+    private static Pkcs11ObjectHandle ResolveLabObjectHandle(Pkcs11Session session, string? handleText, string? label, string? idHex, string? objectClassText, string? keyTypeText, string fieldName)
+    {
+        if (!HasLabObjectLocator(label, idHex, objectClassText, keyTypeText))
+        {
+            return ParseLabObjectHandleText(handleText, fieldName);
+        }
+
+        byte[] labelBytes = string.IsNullOrWhiteSpace(label) ? [] : Encoding.UTF8.GetBytes(label.Trim());
+        byte[] idBytes = ParseOptionalHex(idHex, nameof(idHex));
+        Pkcs11ObjectClass? objectClass = ResolveLabObjectClassText(objectClassText);
+        Pkcs11KeyType? keyType = ResolveLabKeyTypeText(keyTypeText);
+        Pkcs11ObjectSearchParameters search = new(labelBytes, idBytes, objectClass, keyType);
+        List<Pkcs11ObjectHandle> matches = EnumerateObjectHandles(session, search, 3, out bool truncated);
+        if (matches.Count == 1)
+        {
+            return matches[0];
+        }
+
+        string locatorSummary = DescribeLabObjectLocator(label, idHex, objectClassText, keyTypeText);
+        if (matches.Count == 0)
+        {
+            throw new InvalidOperationException($"{fieldName} could not be resolved in the current session using {locatorSummary}.");
+        }
+
+        throw new InvalidOperationException(truncated
+            ? $"{fieldName} locator matched multiple objects in the current session. Refine {locatorSummary}."
+            : $"{fieldName} locator matched {matches.Count} objects in the current session. Refine {locatorSummary}.");
+    }
+
+    private static bool HasLabObjectLocator(string? label, string? idHex, string? objectClassText, string? keyTypeText)
+        => !string.IsNullOrWhiteSpace(label)
+            || !string.IsNullOrWhiteSpace(idHex)
+            || !string.IsNullOrWhiteSpace(objectClassText)
+            || !string.IsNullOrWhiteSpace(keyTypeText);
+
+    private static string DescribeLabObjectLocator(string? label, string? idHex, string? objectClassText, string? keyTypeText)
+    {
+        List<string> parts = [];
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            parts.Add($"label '{label.Trim()}'");
+        }
+
+        if (!string.IsNullOrWhiteSpace(idHex))
+        {
+            parts.Add($"id '{idHex.Trim()}'");
+        }
+
+        if (!string.IsNullOrWhiteSpace(objectClassText))
+        {
+            parts.Add($"class '{objectClassText.Trim()}'");
+        }
+
+        if (!string.IsNullOrWhiteSpace(keyTypeText))
+        {
+            parts.Add($"key type '{keyTypeText.Trim()}'");
+        }
+
+        return parts.Count == 0 ? "the raw handle value" : $"locator metadata ({string.Join(", ", parts)})";
+    }
+
+    private static Pkcs11ObjectClass? ResolveLabObjectClassText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim() switch
+        {
+            var text when text.Equals("Data", StringComparison.OrdinalIgnoreCase) => Pkcs11ObjectClasses.Data,
+            var text when text.Equals("Certificate", StringComparison.OrdinalIgnoreCase) => Pkcs11ObjectClasses.Certificate,
+            var text when text.Equals("PublicKey", StringComparison.OrdinalIgnoreCase) => Pkcs11ObjectClasses.PublicKey,
+            var text when text.Equals("PrivateKey", StringComparison.OrdinalIgnoreCase) => Pkcs11ObjectClasses.PrivateKey,
+            var text when text.Equals("SecretKey", StringComparison.OrdinalIgnoreCase) => Pkcs11ObjectClasses.SecretKey,
+            _ => throw new ArgumentException($"Object class '{value}' is not supported for lab locator resolution.", nameof(value))
+        };
+    }
+
+    private static Pkcs11KeyType? ResolveLabKeyTypeText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim() switch
+        {
+            var text when text.Equals("RSA", StringComparison.OrdinalIgnoreCase) => Pkcs11KeyTypes.Rsa,
+            var text when text.Equals("DSA", StringComparison.OrdinalIgnoreCase) => Pkcs11KeyTypes.Dsa,
+            var text when text.Equals("DH", StringComparison.OrdinalIgnoreCase) => Pkcs11KeyTypes.Dh,
+            var text when text.Equals("EC", StringComparison.OrdinalIgnoreCase) => Pkcs11KeyTypes.Ec,
+            var text when text.Equals("GenericSecret", StringComparison.OrdinalIgnoreCase) => Pkcs11KeyTypes.GenericSecret,
+            var text when text.Equals("AES", StringComparison.OrdinalIgnoreCase) => Pkcs11KeyTypes.Aes,
+            _ => throw new ArgumentException($"Key type '{value}' is not supported for lab locator resolution.", nameof(value))
+        };
     }
 
     private static Pkcs11ObjectHandle ParseLabObjectHandleText(string? value)
@@ -2105,9 +2226,17 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     private static void LoginUserToleratingAlreadyLoggedIn(Pkcs11Session session, string userPin)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userPin);
+
+        byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin);
+        LoginUserToleratingAlreadyLoggedIn(() => session.Login(Pkcs11UserType.User, pinUtf8));
+    }
+
+    private static void LoginUserToleratingAlreadyLoggedIn(Action loginAction)
+    {
         try
         {
-            LoginUserToleratingAlreadyLoggedIn(session, userPin);
+            loginAction();
         }
         catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == 0x100)
         {

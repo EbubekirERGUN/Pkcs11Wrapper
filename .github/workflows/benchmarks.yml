@@ -1,17 +1,55 @@
 name: benchmarks
+run-name: >-
+  benchmarks • ${{ github.event_name }} • ${{ github.ref_name }} • run #${{ github.run_number }}
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '15 5 * * 1'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/workflows/benchmarks.yml'
+      - '.github/scripts/render-benchmark-report.py'
+      - 'benchmarks/**'
+      - 'eng/run-benchmarks.sh'
+      - 'eng/setup-softhsm-fixture.sh'
+      - 'README.md'
+      - 'docs/benchmarks.md'
+      - 'docs/ci.md'
+      - 'global.json'
+      - 'Directory.Build.props'
+  pull_request:
+    paths:
+      - '.github/workflows/benchmarks.yml'
+      - '.github/scripts/render-benchmark-report.py'
+      - 'benchmarks/**'
+      - 'eng/run-benchmarks.sh'
+      - 'eng/setup-softhsm-fixture.sh'
+      - 'README.md'
+      - 'docs/benchmarks.md'
+      - 'docs/ci.md'
+      - 'global.json'
+      - 'Directory.Build.props'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   linux-softhsm-benchmarks:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       CI: true
+      BENCHMARK_ARTIFACT_NAME: pkcs11wrapper-benchmarks-linux-softhsm-run-${{ github.run_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,20 +65,70 @@ jobs:
       - name: Make engineering scripts executable
         run: chmod +x eng/setup-softhsm-fixture.sh eng/run-benchmarks.sh
 
+      - name: Restore
+        run: dotnet restore Pkcs11Wrapper.sln
+
+      - name: Build
+        run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore
+
       - name: Run benchmark suite
         run: ./eng/run-benchmarks.sh
 
-      - name: Publish benchmark summary to job summary
+      - name: Collect raw BenchmarkDotNet reports
         if: always()
         run: |
-          if [ -f artifacts/benchmarks/latest/summary.md ]; then
-            cat artifacts/benchmarks/latest/summary.md >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p artifacts/benchmarks/latest/benchmarkdotnet-results
+          mkdir -p artifacts/benchmarks/latest/logs
+
+          if [ -d BenchmarkDotNet.Artifacts/results ]; then
+            cp -R BenchmarkDotNet.Artifacts/results/. artifacts/benchmarks/latest/benchmarkdotnet-results/
+          fi
+
+          if ls BenchmarkDotNet.Artifacts/BenchmarkRun-*.log >/dev/null 2>&1; then
+            cp BenchmarkDotNet.Artifacts/BenchmarkRun-*.log artifacts/benchmarks/latest/logs/
+          fi
+
+      - name: Render GitHub benchmark report
+        if: always()
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          mkdir -p artifacts/benchmarks/latest
+
+          if [ -f artifacts/benchmarks/latest/summary.json ]; then
+            python3 .github/scripts/render-benchmark-report.py \
+              artifacts/benchmarks/latest/summary.json \
+              artifacts/benchmarks/latest/github-report.md \
+              artifacts/benchmarks/latest/summary.md
+          else
+            printf '%s\n' \
+              '# Benchmark run failed before a summary was produced' \
+              '' \
+              "- Workflow run: [${GITHUB_REPOSITORY} run #${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) on ${GITHUB_REF_NAME} via ${GITHUB_EVENT_NAME}" \
+              '- Expected summary path: artifacts/benchmarks/latest/summary.json' \
+              '- Check the uploaded artifact for any collected BenchmarkDotNet logs and partial raw reports.' \
+              > artifacts/benchmarks/latest/github-report.md
+          fi
+
+      - name: Publish benchmark report to job summary
+        if: always()
+        run: |
+          if [ -f artifacts/benchmarks/latest/github-report.md ]; then
+            cat artifacts/benchmarks/latest/github-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '# Benchmark run produced no GitHub report' >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pkcs11wrapper-benchmarks-linux-softhsm
+          name: ${{ env.BENCHMARK_ARTIFACT_NAME }}
           path: artifacts/benchmarks/latest
           if-no-files-found: error
+          retention-days: 30

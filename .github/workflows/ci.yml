@@ -1,4 +1,6 @@
 name: ci
+run-name: >-
+  ci • ${{ github.event_name }} • ${{ github.ref_name }} • run #${{ github.run_number }}
 
 on:
   push:
@@ -19,14 +21,23 @@ on:
         default: ""
         type: string
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test-aot:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_vendor_lane }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_vendor_lane != true }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       CI: true
+      CI_ARTIFACT_ROOT: artifacts/ci/linux
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,9 +46,17 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            Directory.Build.props
+            **/*.csproj
 
       - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install -y softhsm2 opensc file
+
+      - name: Prepare CI artifact directory
+        run: mkdir -p "$CI_ARTIFACT_ROOT"
 
       - name: Make engineering scripts executable
         run: chmod +x eng/setup-softhsm-fixture.sh eng/run-regression-tests.sh eng/run-smoke-aot.sh
@@ -49,18 +68,35 @@ jobs:
         run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 
       - name: Regression tests
-        run: ./eng/run-regression-tests.sh
+        run: |
+          set -euo pipefail
+          ./eng/run-regression-tests.sh 2>&1 | tee "$CI_ARTIFACT_ROOT/regression.log"
 
       - name: Native AOT smoke
-        run: ./eng/run-smoke-aot.sh
+        run: |
+          set -euo pipefail
+          ./eng/run-smoke-aot.sh 2>&1 | tee "$CI_ARTIFACT_ROOT/smoke-aot.log"
+
+      - name: Upload Linux CI artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkcs11wrapper-ci-linux-run-${{ github.run_number }}
+          path: |
+            artifacts/ci/linux
+            artifacts/smoke-aot/linux-x64
+          if-no-files-found: warn
+          retention-days: 14
 
   build-test-windows:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_vendor_lane }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_vendor_lane != true }}
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       CI: true
+      CI_ARTIFACT_ROOT: artifacts/ci/windows
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,6 +105,11 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            Directory.Build.props
+            **/*.csproj
 
       - name: Install native dependencies
         shell: pwsh
@@ -78,6 +119,10 @@ jobs:
         shell: pwsh
         run: .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1"
 
+      - name: Prepare CI artifact directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path $env:CI_ARTIFACT_ROOT | Out-Null
+
       - name: Restore
         run: dotnet restore Pkcs11Wrapper.sln
 
@@ -86,19 +131,30 @@ jobs:
 
       - name: Windows runtime regression tests
         shell: pwsh
-        run: .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoRestore -NoBuild
+        run: .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoRestore -NoBuild 2>&1 | Tee-Object -FilePath (Join-Path $env:CI_ARTIFACT_ROOT 'regression.log')
 
       - name: Windows smoke runtime
         shell: pwsh
-        run: .\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoBuild
+        run: .\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoBuild 2>&1 | Tee-Object -FilePath (Join-Path $env:CI_ARTIFACT_ROOT 'smoke.log')
+
+      - name: Upload Windows CI artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkcs11wrapper-ci-windows-run-${{ github.run_number }}
+          path: artifacts/ci/windows
+          if-no-files-found: warn
+          retention-days: 14
 
   vendor-regression:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vendor_lane && vars.VENDOR_PKCS11_MODULE_PATH != '' && vars.VENDOR_PKCS11_TOKEN_LABEL != '' && vars.VENDOR_PKCS11_FIND_LABEL != '' && vars.VENDOR_PKCS11_SIGN_FIND_LABEL != '' && secrets.VENDOR_PKCS11_USER_PIN != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vendor_lane }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       CI: true
+      CI_ARTIFACT_ROOT: artifacts/ci/vendor
       PKCS11_USE_EXISTING_ENV: "1"
       PKCS11_STRICT_REQUIRED: "1"
       PKCS11_VENDOR_PROFILE: "baseline-rsa-aes"
@@ -113,36 +169,96 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Evaluate vendor configuration
+        id: vendor-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$CI_ARTIFACT_ROOT"
+
+          missing=()
+          required=(
+            PKCS11_MODULE_PATH
+            PKCS11_TOKEN_LABEL
+            PKCS11_FIND_LABEL
+            PKCS11_SIGN_FIND_LABEL
+            PKCS11_USER_PIN
+          )
+
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            {
+              echo 'ready=false'
+              printf 'missing=%s\n' "$(IFS=,; echo "${missing[*]}")"
+            } >> "$GITHUB_OUTPUT"
+
+            {
+              echo '# Vendor regression lane skipped'
+              echo
+              echo 'The optional vendor lane was requested, but required configuration is missing.'
+              echo
+              printf -- '- Missing entries: `%s`\n' "$(IFS=', '; echo "${missing[*]}")"
+              echo '- Provide the repository Variables/Secrets documented in `docs/ci.md` and rerun the workflow.'
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            exit 0
+          fi
+
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+          {
+            echo '# Vendor regression lane enabled'
+            echo
+            echo 'Preflight configuration check passed. Running restore/build/regression against the configured PKCS#11 backend.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Setup .NET SDK
+        if: steps.vendor-config.outputs.ready == 'true'
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            Directory.Build.props
+            **/*.csproj
 
       - name: Install baseline native dependencies
+        if: steps.vendor-config.outputs.ready == 'true'
         run: sudo apt-get update && sudo apt-get install -y opensc
 
       - name: Install vendor dependencies (optional)
-        if: ${{ inputs.vendor_dependency_install_command != '' }}
+        if: ${{ steps.vendor-config.outputs.ready == 'true' && inputs.vendor_dependency_install_command != '' }}
         run: ${{ inputs.vendor_dependency_install_command }}
 
       - name: Make engineering scripts executable
+        if: steps.vendor-config.outputs.ready == 'true'
         run: chmod +x eng/run-regression-tests.sh
 
       - name: Restore
+        if: steps.vendor-config.outputs.ready == 'true'
         run: dotnet restore Pkcs11Wrapper.sln
 
       - name: Build
+        if: steps.vendor-config.outputs.ready == 'true'
         run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 
       - name: Vendor regression tests
-        run: ./eng/run-regression-tests.sh --use-existing-env
-
-  vendor-regression-config-missing:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vendor_lane && !(vars.VENDOR_PKCS11_MODULE_PATH != '' && vars.VENDOR_PKCS11_TOKEN_LABEL != '' && vars.VENDOR_PKCS11_FIND_LABEL != '' && vars.VENDOR_PKCS11_SIGN_FIND_LABEL != '' && secrets.VENDOR_PKCS11_USER_PIN != '') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Vendor lane skipped because configuration is missing
+        if: steps.vendor-config.outputs.ready == 'true'
         run: |
-          echo 'Optional vendor lane was requested but required configuration is missing.'
-          echo 'Set repository Variables: VENDOR_PKCS11_MODULE_PATH, VENDOR_PKCS11_TOKEN_LABEL, VENDOR_PKCS11_FIND_LABEL, VENDOR_PKCS11_SIGN_FIND_LABEL.'
-          echo 'Set repository Secret: VENDOR_PKCS11_USER_PIN (and optional VENDOR_PKCS11_SO_PIN).'
+          set -euo pipefail
+          ./eng/run-regression-tests.sh --use-existing-env 2>&1 | tee "$CI_ARTIFACT_ROOT/regression.log"
+
+      - name: Upload vendor CI artifacts
+        if: ${{ always() && steps.vendor-config.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkcs11wrapper-ci-vendor-run-${{ github.run_number }}
+          path: artifacts/ci/vendor
+          if-no-files-found: warn
+          retention-days: 14

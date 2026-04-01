@@ -748,8 +748,32 @@
     [SupplyParameterFromQuery(Name = "handle")]
     public string? QueryHandle { get; set; }
 
+    [SupplyParameterFromQuery(Name = "label")]
+    public string? QueryLabel { get; set; }
+
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? QueryIdHex { get; set; }
+
+    [SupplyParameterFromQuery(Name = "class")]
+    public string? QueryObjectClass { get; set; }
+
+    [SupplyParameterFromQuery(Name = "keyType")]
+    public string? QueryKeyType { get; set; }
+
     [SupplyParameterFromQuery(Name = "wrapHandle")]
     public string? QuerySecondaryHandle { get; set; }
+
+    [SupplyParameterFromQuery(Name = "wrapLabel")]
+    public string? QuerySecondaryLabel { get; set; }
+
+    [SupplyParameterFromQuery(Name = "wrapId")]
+    public string? QuerySecondaryIdHex { get; set; }
+
+    [SupplyParameterFromQuery(Name = "wrapClass")]
+    public string? QuerySecondaryObjectClass { get; set; }
+
+    [SupplyParameterFromQuery(Name = "wrapKeyType")]
+    public string? QuerySecondaryKeyType { get; set; }
 
     [SupplyParameterFromQuery(Name = "mechanism")]
     public string? QueryMechanism { get; set; }
@@ -894,7 +918,7 @@
             return;
         }
 
-        string signature = $"{QueryDevice}|{QuerySlot}|{QueryOperation}|{QueryHandle}|{QuerySecondaryHandle}|{QueryMechanism}|{QueryAttributeType}|{QueryMechanismParameterProfile}|{QueryRsaHashProfile}|{QueryPssSaltLength}";
+        string signature = $"{QueryDevice}|{QuerySlot}|{QueryOperation}|{QueryHandle}|{QueryLabel}|{QueryIdHex}|{QueryObjectClass}|{QueryKeyType}|{QuerySecondaryHandle}|{QuerySecondaryLabel}|{QuerySecondaryIdHex}|{QuerySecondaryObjectClass}|{QuerySecondaryKeyType}|{QueryMechanism}|{QueryAttributeType}|{QueryMechanismParameterProfile}|{QueryRsaHashProfile}|{QueryPssSaltLength}";
         if (signature == _lastAppliedQuerySignature)
         {
             return;
@@ -925,9 +949,25 @@
             _request.KeyHandleText = QueryHandle;
         }
 
+        if (!string.IsNullOrWhiteSpace(QueryLabel) || !string.IsNullOrWhiteSpace(QueryIdHex) || !string.IsNullOrWhiteSpace(QueryObjectClass) || !string.IsNullOrWhiteSpace(QueryKeyType))
+        {
+            _request.KeyLabel = QueryLabel;
+            _request.KeyIdHex = QueryIdHex;
+            _request.KeyObjectClass = QueryObjectClass;
+            _request.KeyType = QueryKeyType;
+        }
+
         if (!string.IsNullOrWhiteSpace(QuerySecondaryHandle))
         {
             _request.SecondaryKeyHandleText = QuerySecondaryHandle;
+        }
+
+        if (!string.IsNullOrWhiteSpace(QuerySecondaryLabel) || !string.IsNullOrWhiteSpace(QuerySecondaryIdHex) || !string.IsNullOrWhiteSpace(QuerySecondaryObjectClass) || !string.IsNullOrWhiteSpace(QuerySecondaryKeyType))
+        {
+            _request.SecondaryKeyLabel = QuerySecondaryLabel;
+            _request.SecondaryKeyIdHex = QuerySecondaryIdHex;
+            _request.SecondaryKeyObjectClass = QuerySecondaryObjectClass;
+            _request.SecondaryKeyType = QuerySecondaryKeyType;
         }
 
         if (!string.IsNullOrWhiteSpace(QueryMechanism))
@@ -1101,7 +1141,15 @@
             RsaOaepSourceHex = _request.RsaOaepSourceHex,
             PssSaltLength = _request.PssSaltLength,
             KeyHandleText = _request.KeyHandleText,
+            KeyLabel = _request.KeyLabel,
+            KeyIdHex = _request.KeyIdHex,
+            KeyObjectClass = _request.KeyObjectClass,
+            KeyType = _request.KeyType,
             SecondaryKeyHandleText = _request.SecondaryKeyHandleText,
+            SecondaryKeyLabel = _request.SecondaryKeyLabel,
+            SecondaryKeyIdHex = _request.SecondaryKeyIdHex,
+            SecondaryKeyObjectClass = _request.SecondaryKeyObjectClass,
+            SecondaryKeyType = _request.SecondaryKeyType,
             DigestAlgorithm = _request.DigestAlgorithm,
             PayloadEncoding = _request.PayloadEncoding,
             TextInput = _request.TextInput,
@@ -1291,8 +1339,15 @@
         request.Operation = Pkcs11LabOperation.VerifySignature;
         request.SignatureHex = item.Result.ArtifactHex;
         request.KeyHandleText = null;
+        request.KeyLabel = item.Request.KeyLabel;
+        request.KeyIdHex = item.Request.KeyIdHex;
+        request.KeyType = item.Request.KeyType;
+        request.KeyObjectClass = string.Equals(item.Request.KeyObjectClass, "PrivateKey", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(item.Request.KeyType, "RSA", StringComparison.OrdinalIgnoreCase)
+            ? "PublicKey"
+            : item.Request.KeyObjectClass;
         await ApplyRequestAsync(request);
-        _statusMessage = "Signature and original payload were moved into Verify. Choose the verify/public key handle before running.";
+        _statusMessage = "Signature and original payload were moved into Verify. Matching locator metadata was also prepared for session-safe re-resolution.";
         _statusIsError = false;
     }
 
@@ -1301,8 +1356,16 @@
         Pkcs11LabRequest request = CopyRequest(item.Request);
         request.Operation = Pkcs11LabOperation.DecryptData;
         request.DataHex = item.Result.ArtifactHex;
+        request.KeyHandleText = null;
+        request.KeyLabel = item.Request.KeyLabel;
+        request.KeyIdHex = item.Request.KeyIdHex;
+        request.KeyType = item.Request.KeyType;
+        request.KeyObjectClass = string.Equals(item.Request.KeyObjectClass, "PublicKey", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(item.Request.KeyType, "RSA", StringComparison.OrdinalIgnoreCase)
+            ? "PrivateKey"
+            : item.Request.KeyObjectClass;
         await ApplyRequestAsync(request);
-        _statusMessage = "Ciphertext was moved into Decrypt. If this was an RSA public-key encrypt flow, switch to the matching decrypt/private key handle before running.";
+        _statusMessage = "Ciphertext was moved into Decrypt. Matching locator metadata was prepared so the current session can re-resolve the decrypt key safely.";
         _statusIsError = false;
     }
 
@@ -1324,6 +1387,10 @@
         request.RsaOaepSourceHex = item.Request.RsaOaepSourceHex;
         request.PssSaltLength = item.Request.PssSaltLength;
         request.KeyHandleText = item.Request.SecondaryKeyHandleText;
+        request.KeyLabel = item.Request.SecondaryKeyLabel;
+        request.KeyIdHex = item.Request.SecondaryKeyIdHex;
+        request.KeyObjectClass = item.Request.SecondaryKeyObjectClass;
+        request.KeyType = item.Request.SecondaryKeyType;
         request.DataHex = item.Result.ArtifactHex;
         await ApplyRequestAsync(request);
         _statusMessage = "Wrapped blob was moved into Unwrap AES Key and the previous wrapping key handle was reused as the unwrapping key handle.";
@@ -1409,7 +1476,15 @@
             RsaOaepSourceHex = request.RsaOaepSourceHex,
             PssSaltLength = request.PssSaltLength,
             KeyHandleText = request.KeyHandleText,
+            KeyLabel = request.KeyLabel,
+            KeyIdHex = request.KeyIdHex,
+            KeyObjectClass = request.KeyObjectClass,
+            KeyType = request.KeyType,
             SecondaryKeyHandleText = request.SecondaryKeyHandleText,
+            SecondaryKeyLabel = request.SecondaryKeyLabel,
+            SecondaryKeyIdHex = request.SecondaryKeyIdHex,
+            SecondaryKeyObjectClass = request.SecondaryKeyObjectClass,
+            SecondaryKeyType = request.SecondaryKeyType,
             DigestAlgorithm = request.DigestAlgorithm,
             PayloadEncoding = request.PayloadEncoding,
             TextInput = request.TextInput,

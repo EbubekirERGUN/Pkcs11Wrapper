@@ -1,6 +1,8 @@
 using System.Reflection;
 using Pkcs11Wrapper.Admin.Application.Models;
 using Pkcs11Wrapper.Admin.Application.Services;
+using Pkcs11Wrapper.Native;
+using Pkcs11Wrapper.Native.Interop;
 
 namespace Pkcs11Wrapper.Admin.Tests;
 
@@ -142,5 +144,85 @@ public sealed class HsmAdminServiceTests
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateCopyObjectRequest(request));
         Assert.Contains("Label is required", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateLabRequestAcceptsLocatorMetadataWithoutRawHandle()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 5,
+            Operation = Pkcs11LabOperation.SignData,
+            MechanismTypeText = "0x1",
+            KeyLabel = "ci-rsa",
+            KeyIdHex = "B2",
+            KeyObjectClass = "PrivateKey",
+            KeyType = "RSA",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "runtime-sign-data"
+        };
+
+        HsmAdminService.ValidateLabRequest(request);
+    }
+
+    [Fact]
+    public void ValidateLabRequestRejectsUnsupportedLocatorObjectClass()
+    {
+        Pkcs11LabRequest request = new()
+        {
+            DeviceId = Guid.NewGuid(),
+            SlotId = 5,
+            Operation = Pkcs11LabOperation.SignData,
+            MechanismTypeText = "0x1",
+            KeyLabel = "ci-rsa",
+            KeyObjectClass = "UnknownClass",
+            PayloadEncoding = Pkcs11LabPayloadEncoding.Utf8Text,
+            TextInput = "runtime-sign-data"
+        };
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateLabRequest(request));
+        Assert.Contains("Object class", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoginUserToleratingAlreadyLoggedInSwallowsAlreadyLoggedInReturnValue()
+    {
+        MethodInfo method = GetLoginUserToleratingAlreadyLoggedInActionOverload();
+        bool attempted = false;
+
+        method.Invoke(null,
+        [
+            (Action)(() =>
+            {
+                attempted = true;
+                throw new Pkcs11Exception("C_Login", new CK_RV(0x100));
+            })
+        ]);
+
+        Assert.True(attempted);
+    }
+
+    [Fact]
+    public void LoginUserToleratingAlreadyLoggedInPropagatesUnexpectedPkcs11Errors()
+    {
+        MethodInfo method = GetLoginUserToleratingAlreadyLoggedInActionOverload();
+
+        TargetInvocationException ex = Assert.Throws<TargetInvocationException>(() => method.Invoke(null,
+        [
+            (Action)(() => throw new Pkcs11Exception("C_Login", new CK_RV(0xA0)))
+        ]));
+
+        Pkcs11Exception inner = Assert.IsType<Pkcs11Exception>(ex.InnerException);
+        Assert.Equal((nuint)0xA0, (nuint)inner.RawResult);
+    }
+
+    private static MethodInfo GetLoginUserToleratingAlreadyLoggedInActionOverload()
+    {
+        return typeof(HsmAdminService)
+            .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
+            .Single(method => method.Name == "LoginUserToleratingAlreadyLoggedIn"
+                && method.GetParameters() is [{ ParameterType: var parameterType }]
+                && parameterType == typeof(Action));
     }
 }

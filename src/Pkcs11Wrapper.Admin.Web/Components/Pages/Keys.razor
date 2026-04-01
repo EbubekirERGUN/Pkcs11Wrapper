@@ -807,16 +807,50 @@
     }
 
     private void OpenLabInspect(HsmKeyObjectSummary key)
-        => Navigation.NavigateTo(BuildLabUri(key.DeviceId, key.SlotId, Pkcs11LabOperation.InspectObject, primaryHandle: key.Handle));
+        => Navigation.NavigateTo(BuildLabUri(
+            key.DeviceId,
+            key.SlotId,
+            Pkcs11LabOperation.InspectObject,
+            primaryHandle: key.Handle,
+            primaryLabel: key.Label,
+            primaryIdHex: key.IdHex,
+            primaryObjectClass: key.ObjectClass,
+            primaryKeyType: key.KeyType));
 
     private void OpenLabInspect(HsmObjectDetail detail)
-        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.InspectObject, primaryHandle: detail.Handle));
+        => Navigation.NavigateTo(BuildLabUri(
+            detail.DeviceId,
+            detail.SlotId,
+            Pkcs11LabOperation.InspectObject,
+            primaryHandle: detail.Handle,
+            primaryLabel: detail.Label,
+            primaryIdHex: detail.IdHex,
+            primaryObjectClass: detail.ObjectClass,
+            primaryKeyType: detail.KeyType));
 
     private void OpenLabAttributePreset(HsmObjectDetail detail, string attributeType)
-        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.ReadAttribute, primaryHandle: detail.Handle, attributeType: attributeType));
+        => Navigation.NavigateTo(BuildLabUri(
+            detail.DeviceId,
+            detail.SlotId,
+            Pkcs11LabOperation.ReadAttribute,
+            primaryHandle: detail.Handle,
+            primaryLabel: detail.Label,
+            primaryIdHex: detail.IdHex,
+            primaryObjectClass: detail.ObjectClass,
+            primaryKeyType: detail.KeyType,
+            attributeType: attributeType));
 
     private void OpenLabCryptoPreset(HsmObjectDetail detail, Pkcs11LabOperation operation, string mechanism)
-        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, operation, primaryHandle: detail.Handle, mechanism: mechanism));
+        => Navigation.NavigateTo(BuildLabUri(
+            detail.DeviceId,
+            detail.SlotId,
+            operation,
+            primaryHandle: detail.Handle,
+            primaryLabel: detail.Label,
+            primaryIdHex: detail.IdHex,
+            primaryObjectClass: detail.ObjectClass,
+            primaryKeyType: detail.KeyType,
+            mechanism: mechanism));
 
     private void OpenLabRsaPreset(HsmObjectDetail detail, Pkcs11LabOperation operation, string mechanism, Pkcs11LabMechanismParameterProfile parameterProfile, Pkcs11LabRsaHashProfile rsaHashProfile, int? pssSaltLength = null)
         => Navigation.NavigateTo(
@@ -825,16 +859,40 @@
                 detail.SlotId,
                 operation,
                 primaryHandle: detail.Handle,
+                primaryLabel: detail.Label,
+                primaryIdHex: detail.IdHex,
+                primaryObjectClass: detail.ObjectClass,
+                primaryKeyType: detail.KeyType,
                 mechanism: mechanism,
                 parameterProfile: parameterProfile,
                 rsaHashProfile: rsaHashProfile,
                 pssSaltLength: pssSaltLength));
 
     private void OpenLabWrapPreset(HsmObjectDetail detail, string mechanism)
-        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.WrapKey, secondaryHandle: detail.Handle, mechanism: mechanism));
+        => Navigation.NavigateTo(
+            BuildLabUri(
+                detail.DeviceId,
+                detail.SlotId,
+                Pkcs11LabOperation.WrapKey,
+                secondaryHandle: detail.Handle,
+                secondaryLabel: detail.Label,
+                secondaryIdHex: detail.IdHex,
+                secondaryObjectClass: detail.ObjectClass,
+                secondaryKeyType: detail.KeyType,
+                mechanism: mechanism));
 
     private void OpenLabUnwrapPreset(HsmObjectDetail detail, string mechanism)
-        => Navigation.NavigateTo(BuildLabUri(detail.DeviceId, detail.SlotId, Pkcs11LabOperation.UnwrapAesKey, primaryHandle: detail.Handle, mechanism: mechanism));
+        => Navigation.NavigateTo(
+            BuildLabUri(
+                detail.DeviceId,
+                detail.SlotId,
+                Pkcs11LabOperation.UnwrapAesKey,
+                primaryHandle: detail.Handle,
+                primaryLabel: detail.Label,
+                primaryIdHex: detail.IdHex,
+                primaryObjectClass: detail.ObjectClass,
+                primaryKeyType: detail.KeyType,
+                mechanism: mechanism));
 
     private void BeginEdit(HsmKeyObjectSummary key)
     {
@@ -1303,7 +1361,25 @@
         return mechanism is not null;
     }
 
-    private static string BuildLabUri(Guid deviceId, nuint slotId, Pkcs11LabOperation operation, nuint? primaryHandle = null, string? mechanism = null, nuint? secondaryHandle = null, string? attributeType = null, Pkcs11LabMechanismParameterProfile? parameterProfile = null, Pkcs11LabRsaHashProfile? rsaHashProfile = null, int? pssSaltLength = null)
+    private static string BuildLabUri(
+        Guid deviceId,
+        nuint slotId,
+        Pkcs11LabOperation operation,
+        nuint? primaryHandle = null,
+        string? primaryLabel = null,
+        string? primaryIdHex = null,
+        string? primaryObjectClass = null,
+        string? primaryKeyType = null,
+        string? mechanism = null,
+        nuint? secondaryHandle = null,
+        string? secondaryLabel = null,
+        string? secondaryIdHex = null,
+        string? secondaryObjectClass = null,
+        string? secondaryKeyType = null,
+        string? attributeType = null,
+        Pkcs11LabMechanismParameterProfile? parameterProfile = null,
+        Pkcs11LabRsaHashProfile? rsaHashProfile = null,
+        int? pssSaltLength = null)
     {
         List<string> query =
         [
@@ -1312,15 +1388,8 @@
             $"op={Uri.EscapeDataString(operation.ToString())}"
         ];
 
-        if (primaryHandle is not null)
-        {
-            query.Add($"handle={primaryHandle.Value}");
-        }
-
-        if (secondaryHandle is not null)
-        {
-            query.Add($"wrapHandle={secondaryHandle.Value}");
-        }
+        AddLocatorQuery(query, string.Empty, primaryHandle, primaryLabel, primaryIdHex, primaryObjectClass, primaryKeyType);
+        AddLocatorQuery(query, "wrap", secondaryHandle, secondaryLabel, secondaryIdHex, secondaryObjectClass, secondaryKeyType);
 
         if (!string.IsNullOrWhiteSpace(mechanism))
         {
@@ -1348,6 +1417,40 @@
         }
 
         return $"/lab?{string.Join("&", query)}";
+    }
+
+    private static void AddLocatorQuery(List<string> query, string prefix, nuint? handle, string? label, string? idHex, string? objectClass, string? keyType)
+    {
+        string handleKey = string.IsNullOrEmpty(prefix) ? "handle" : $"{prefix}Handle";
+        string labelKey = string.IsNullOrEmpty(prefix) ? "label" : $"{prefix}Label";
+        string idKey = string.IsNullOrEmpty(prefix) ? "id" : $"{prefix}Id";
+        string classKey = string.IsNullOrEmpty(prefix) ? "class" : $"{prefix}Class";
+        string keyTypeKey = string.IsNullOrEmpty(prefix) ? "keyType" : $"{prefix}KeyType";
+
+        if (handle is not null)
+        {
+            query.Add($"{handleKey}={handle.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            query.Add($"{labelKey}={Uri.EscapeDataString(label)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(idHex))
+        {
+            query.Add($"{idKey}={Uri.EscapeDataString(idHex)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(objectClass))
+        {
+            query.Add($"{classKey}={Uri.EscapeDataString(objectClass)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(keyType))
+        {
+            query.Add($"{keyTypeKey}={Uri.EscapeDataString(keyType)}");
+        }
     }
 
     private RenderFragment CapabilityCheckbox(Func<bool> getValue, Action<bool> setValue, string label) => builder =>

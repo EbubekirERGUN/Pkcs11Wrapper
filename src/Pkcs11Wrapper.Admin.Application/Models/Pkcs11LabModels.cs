@@ -115,7 +115,23 @@ public sealed class Pkcs11LabRequest
 
     public string? KeyHandleText { get; set; }
 
+    public string? KeyLabel { get; set; }
+
+    public string? KeyIdHex { get; set; }
+
+    public string? KeyObjectClass { get; set; }
+
+    public string? KeyType { get; set; }
+
     public string? SecondaryKeyHandleText { get; set; }
+
+    public string? SecondaryKeyLabel { get; set; }
+
+    public string? SecondaryKeyIdHex { get; set; }
+
+    public string? SecondaryKeyObjectClass { get; set; }
+
+    public string? SecondaryKeyType { get; set; }
 
     public Pkcs11LabDigestAlgorithm DigestAlgorithm { get; set; } = Pkcs11LabDigestAlgorithm.Sha256;
 

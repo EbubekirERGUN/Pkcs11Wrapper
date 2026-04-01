@@ -150,6 +150,15 @@ Latest committed Linux + SoftHSM baseline (`docs/benchmarks/latest-linux-softhsm
 | `VerifySha256RsaPkcs_1KiB` | `19.652 μs` |
 | `GenerateDestroyRsaKeyPair` | `26.19 ms` |
 
+Automated GitHub benchmark runs now publish a GitHub-friendly report per run with:
+
+- generated date/time (UTC)
+- runner environment (`OS`, architecture, SDK, runtime, PKCS#11 module)
+- headline benchmark numbers for the main reference operations
+- downloadable artifacts containing `summary.md`, `summary.json`, and raw BenchmarkDotNet CSV/HTML/markdown outputs
+
+That workflow report shows the **latest executed run** on GitHub, while `docs/benchmarks/latest-linux-softhsm.md` remains the latest **reviewed and committed** baseline snapshot.
+
 Full benchmark guidance and rerun flow:
 
 - [docs/benchmarks.md](docs/benchmarks.md)

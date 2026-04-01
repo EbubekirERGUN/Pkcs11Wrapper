@@ -49,11 +49,18 @@ Windows PowerShell:
 
 - latest generated summary: `artifacts/benchmarks/latest/summary.md`
 - latest generated JSON: `artifacts/benchmarks/latest/summary.json`
+- latest GitHub-friendly run report: `artifacts/benchmarks/latest/github-report.md`
+- raw BenchmarkDotNet per-suite exports: `artifacts/benchmarks/latest/benchmarkdotnet-results/`
 - latest committed Linux baseline: `docs/benchmarks/latest-linux-softhsm.md`
 
 ## Periodic publishing strategy
 
 The repository also includes a dedicated GitHub Actions benchmark workflow so we can rerun the same benchmark suite at regular intervals and keep the **latest published baseline** visible on GitHub.
+
+That workflow now publishes each run in two GitHub-friendly ways:
+
+- a concise job summary showing the latest run date, environment, headline benchmark numbers, and a collapsible full summary
+- a downloadable artifact bundle containing the markdown/JSON summary plus raw BenchmarkDotNet CSV, HTML, GitHub-markdown, and log files when available
 
 Recommended discipline:
 

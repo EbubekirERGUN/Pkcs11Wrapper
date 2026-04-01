@@ -10,7 +10,7 @@
 
 `.github/workflows/benchmarks.yml` defines:
 
-- `linux-softhsm-benchmarks` (manual + weekly benchmark baseline lane)
+- `linux-softhsm-benchmarks` (weekly/manual benchmark lane plus targeted push/PR validation for benchmark/reporting changes)
 
 Triggers:
 
@@ -22,17 +22,28 @@ Benchmark workflow triggers:
 
 - weekly schedule (`cron`)
 - `workflow_dispatch`
+- push to `main` / `master` when benchmark workflow/reporting inputs change
+- pull requests that change benchmark workflow/reporting inputs
 
-Ordered steps:
+Workflow-level behavior:
+
+- `permissions: contents: read`
+- `concurrency` cancels superseded runs on the same ref
+- each CI job has a 30-minute timeout
+- `actions/setup-dotnet` caches NuGet packages based on `global.json`, `Directory.Build.props`, and project files
+
+Ordered Linux steps:
 
 - checkout the repository
 - install the SDK pinned by `global.json`
 - install native dependencies: `softhsm2`, `opensc`, `file`
+- create a CI artifact directory
 - mark engineering scripts executable
 - `dotnet restore Pkcs11Wrapper.sln`
 - `dotnet build Pkcs11Wrapper.sln -c Release --no-restore`
 - `./eng/run-regression-tests.sh`
 - `./eng/run-smoke-aot.sh`
+- upload captured CI logs plus the Linux NativeAOT publish output as Actions artifacts
 
 Job-level env:
 
@@ -61,6 +72,7 @@ Optional vendor regression coverage from `vendor-regression` guarantees that, wh
 - solution restore/build/test still works with a non-SoftHSM PKCS#11 backend
 - regression tests can run against pre-provisioned vendor token material
 - required runtime env contract is validated before tests start
+- missing vendor config is reported through a job summary instead of making the workflow file invalid
 
 Windows runtime coverage from `build-test-windows` guarantees that:
 
@@ -68,12 +80,14 @@ Windows runtime coverage from `build-test-windows` guarantees that:
 - a real SoftHSM-for-Windows fixture can be provisioned in CI
 - the full regression suite still runs on Windows against a PKCS#11 module
 - the smoke sample still executes successfully on Windows with the fixture env
+- regression/smoke console logs are captured as downloadable Actions artifacts
 
-Benchmark coverage from `benchmarks.yml` guarantees that, when the scheduled or manual workflow runs:
+Benchmark coverage from `benchmarks.yml` guarantees that, whenever the workflow runs:
 
 - the benchmark project still restores and executes on the pinned SDK
 - a real SoftHSM fixture can still be provisioned for performance measurement
-- the latest benchmark summary is published as an Actions artifact and copied into the job summary
+- the latest benchmark run emits a GitHub-friendly job summary with date, environment, and headline numbers
+- the latest benchmark summary plus raw BenchmarkDotNet exports/logs are published as an Actions artifact
 - performance tracking stays repeatable instead of ad-hoc
 
 ## Fixture behavior in CI
@@ -123,7 +137,7 @@ Enablement path:
 Guard behavior:
 
 - if `run_vendor_lane` is `false`, vendor lane is not scheduled
-- if `run_vendor_lane` is `true` but required config is missing, `vendor-regression` is skipped and `vendor-regression-config-missing` prints an informational message
+- if `run_vendor_lane` is `true` but required config is missing, `vendor-regression` exits early with a clear job summary and no restore/build/test work
 - default contributors do not need vendor secrets to run or contribute through standard PR CI
 
 ## Local CI parity
