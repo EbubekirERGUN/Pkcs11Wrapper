@@ -2107,7 +2107,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         try
         {
-            session.Login(Pkcs11UserType.User, Encoding.UTF8.GetBytes(userPin));
+            LoginUserToleratingAlreadyLoggedIn(session, userPin);
         }
         catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == 0x100)
         {
