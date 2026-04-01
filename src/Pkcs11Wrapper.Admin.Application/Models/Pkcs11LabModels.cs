@@ -179,4 +179,9 @@ public sealed record Pkcs11LabExecutionResult(
     long DurationMilliseconds,
     Pkcs11LabArtifactKind ArtifactKind,
     string? ArtifactHex,
-    string? CreatedHandleText);
+    string? CreatedHandleText,
+    string? CreatedLabel,
+    string? CreatedIdHex,
+    string? CreatedObjectClass,
+    string? CreatedKeyType,
+    bool CreatedObjectPersistsAcrossSessions);

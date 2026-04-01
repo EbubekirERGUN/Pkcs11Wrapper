@@ -69,7 +69,12 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         List<string> Notes,
         Pkcs11LabArtifactKind ArtifactKind = Pkcs11LabArtifactKind.None,
         string? ArtifactHex = null,
-        string? CreatedHandleText = null)
+        string? CreatedHandleText = null,
+        string? CreatedLabel = null,
+        string? CreatedIdHex = null,
+        string? CreatedObjectClass = null,
+        string? CreatedKeyType = null,
+        bool CreatedObjectPersistsAcrossSessions = false)
     {
         public static implicit operator LabExecutionPayload((string Summary, string OutputText, List<string> Notes) value)
             => new(value.Summary, value.OutputText, value.Notes);
@@ -263,7 +268,21 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
             stopwatch.Stop();
             await auditLog.WriteAsync("Lab", request.Operation.ToString(), target, "Success", execution.Summary, cancellationToken: cancellationToken);
-            return new(request.Operation.ToString(), true, execution.Summary, execution.OutputText, execution.Notes, stopwatch.ElapsedMilliseconds, execution.ArtifactKind, execution.ArtifactHex, execution.CreatedHandleText);
+            return new(
+                request.Operation.ToString(),
+                true,
+                execution.Summary,
+                execution.OutputText,
+                execution.Notes,
+                stopwatch.ElapsedMilliseconds,
+                execution.ArtifactKind,
+                execution.ArtifactHex,
+                execution.CreatedHandleText,
+                execution.CreatedLabel,
+                execution.CreatedIdHex,
+                execution.CreatedObjectClass,
+                execution.CreatedKeyType,
+                execution.CreatedObjectPersistsAcrossSessions);
         }
         catch (Exception ex)
         {
@@ -271,7 +290,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             string summary = $"{request.Operation} failed: {ex.Message}";
             string output = $"{ex.GetType().Name}: {ex.Message}";
             await auditLog.WriteAsync("Lab", request.Operation.ToString(), target, "Failure", ex.Message, cancellationToken: cancellationToken);
-            return new(request.Operation.ToString(), false, summary, output, [], stopwatch.ElapsedMilliseconds, Pkcs11LabArtifactKind.None, null, null);
+            return new(request.Operation.ToString(), false, summary, output, [], stopwatch.ElapsedMilliseconds, Pkcs11LabArtifactKind.None, null, null, null, null, null, null, false);
         }
     }
 
@@ -1371,7 +1390,18 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
 
         notes.Add("This lab currently limits unwrap target templates to AES secret keys so the result stays inspectable and constrained.");
-        return new($"Unwrapped an AES secret key into handle {unwrappedHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes, Pkcs11LabArtifactKind.None, null, unwrappedHandle.Value.ToString(CultureInfo.InvariantCulture));
+        return new(
+            $"Unwrapped an AES secret key into handle {unwrappedHandle.Value} using {DescribeMechanismType(mechanismType)}.",
+            output.ToString(),
+            notes,
+            Pkcs11LabArtifactKind.None,
+            null,
+            unwrappedHandle.Value.ToString(CultureInfo.InvariantCulture),
+            detail.Label,
+            detail.IdHex,
+            detail.ObjectClass,
+            detail.KeyType,
+            request.UnwrapTokenObject);
     }
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteReadAttributeLab(Pkcs11Module module, Pkcs11LabRequest request)
