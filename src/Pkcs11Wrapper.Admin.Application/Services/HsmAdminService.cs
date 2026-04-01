@@ -9,7 +9,7 @@ using Pkcs11Wrapper.Native;
 
 namespace Pkcs11Wrapper.Admin.Application.Services;
 
-public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization)
+public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization, IDeviceDependencyCleanupService? dependencyCleanup = null)
 {
     private const string DestroyConfirmationPrefix = "DESTROY ";
     private const string ConfigurationFormat = "Pkcs11Wrapper.Admin.Configuration";
@@ -81,18 +81,33 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return deviceProfiles.GetAllAsync(cancellationToken);
     }
 
-    public Task<HsmDeviceProfile> SaveDeviceAsync(Guid? id, HsmDeviceProfileInput input, CancellationToken cancellationToken = default)
+    public async Task<HsmDeviceProfile> SaveDeviceAsync(Guid? id, HsmDeviceProfileInput input, CancellationToken cancellationToken = default)
     {
         authorization.DemandAdmin();
-        return deviceProfiles.UpsertAsync(id, input, cancellationToken);
+
+        HsmDeviceProfile? existing = id.HasValue ? await deviceProfiles.GetAsync(id.Value, cancellationToken) : null;
+        HsmDeviceProfile saved = await deviceProfiles.UpsertAsync(id, input, cancellationToken);
+
+        if (RequiresDependentStateReconciliation(existing, saved))
+        {
+            DeviceDependencyCleanupSummary cleanup = await ReconcileDependentStateAsync([saved.Id], $"Device profile '{saved.Name}' changed and dependent runtime/local state was invalidated.", "DeviceConfigChanged", cancellationToken);
+            await auditLog.WriteAsync("Device", existing is null ? "Create" : "Update", saved.Name, "Success", $"Device profile {(existing is null ? "created" : "updated")}.{cleanup.ToAuditSuffix()}", cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await auditLog.WriteAsync("Device", existing is null ? "Create" : "Update", saved.Name, "Success", $"Device profile {(existing is null ? "created" : "updated")}.", cancellationToken: cancellationToken);
+        }
+
+        return saved;
     }
 
     public async Task DeleteDeviceAsync(Guid id, CancellationToken cancellationToken = default)
     {
         authorization.DemandAdmin();
-        HsmDeviceProfile? existing = await deviceProfiles.GetAsync(id, cancellationToken);
+        HsmDeviceProfile existing = await RequireDeviceAsync(id, cancellationToken);
         await deviceProfiles.DeleteAsync(id, cancellationToken);
-        await auditLog.WriteAsync("Device", "Delete", existing?.Name ?? id.ToString(), "Success", "Device profile removed.", cancellationToken: cancellationToken);
+        DeviceDependencyCleanupSummary cleanup = await ReconcileDependentStateAsync([id], $"Device profile '{existing.Name}' was deleted.", "DeleteDevice", cancellationToken);
+        await auditLog.WriteAsync("Device", "Delete", existing.Name, "Success", $"Device profile removed.{cleanup.ToAuditSuffix()}", cancellationToken: cancellationToken);
     }
 
     public IReadOnlyList<AdminSessionSnapshot> GetSessions()
@@ -107,10 +122,10 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return auditLog.GetRecentAsync(take, cancellationToken);
     }
 
-    public Task<AuditIntegrityStatus> GetAuditIntegrityAsync(CancellationToken cancellationToken = default)
+    public Task<AuditIntegrityStatus> GetAuditIntegrityAsync(bool forceVerification = false, CancellationToken cancellationToken = default)
     {
         authorization.DemandViewer();
-        return auditLog.VerifyIntegrityAsync(cancellationToken);
+        return auditLog.VerifyIntegrityAsync(forceVerification, cancellationToken);
     }
 
     public async Task<DashboardSummary> GetDashboardAsync(CancellationToken cancellationToken = default)
@@ -119,7 +134,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         IReadOnlyList<HsmDeviceProfile> devices = await deviceProfiles.GetAllAsync(cancellationToken);
         IReadOnlyList<AdminAuditLogEntry> logs = await auditLog.GetRecentAsync(25, cancellationToken);
         IReadOnlyList<AdminSessionSnapshot> sessions = sessionRegistry.GetSnapshots();
-        AuditIntegrityStatus integrity = await auditLog.VerifyIntegrityAsync(cancellationToken);
+        AuditIntegrityStatus integrity = await auditLog.VerifyIntegrityAsync(forceVerification: false, cancellationToken);
 
         return new DashboardSummary(
             devices.Count,
@@ -191,8 +206,11 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             }
 
             ValidateConfigurationBundle(bundle);
+            IReadOnlyList<HsmDeviceProfile> beforeImport = await deviceProfiles.GetAllAsync(cancellationToken);
             AdminConfigurationImportResult importResult = await deviceProfiles.ImportAsync(bundle.DeviceProfiles, mode, cancellationToken);
+            IReadOnlyList<HsmDeviceProfile> afterImport = await deviceProfiles.GetAllAsync(cancellationToken);
 
+            DeviceDependencyCleanupSummary cleanup = await ReconcileDependentStateForImportAsync(beforeImport, afterImport, mode, cancellationToken);
             List<string> warnings = [.. importResult.Warnings];
             string currentVersion = GetCurrentProductVersion();
             if (!string.IsNullOrWhiteSpace(bundle.ProductVersion) && !string.Equals(bundle.ProductVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
@@ -212,7 +230,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 "Import",
                 importTarget,
                 "Success",
-                $"{result.Summary}{warningSuffix}",
+                $"{result.Summary}{cleanup.ToAuditSuffix()}{warningSuffix}",
                 cancellationToken: cancellationToken);
 
             return result;
@@ -2529,6 +2547,58 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         Pkcs11Module module = Pkcs11Module.Load(device.ModulePath);
         module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
         return module;
+    }
+
+    private static bool RequiresDependentStateReconciliation(HsmDeviceProfile? existing, HsmDeviceProfile updated)
+        => existing is not null && (!string.Equals(existing.ModulePath, updated.ModulePath, StringComparison.Ordinal) || existing.IsEnabled != updated.IsEnabled);
+
+    private async Task<DeviceDependencyCleanupSummary> ReconcileDependentStateAsync(IReadOnlyCollection<Guid> affectedDeviceIds, string reason, string operation, CancellationToken cancellationToken)
+    {
+        int invalidatedSessions = 0;
+        foreach (Guid deviceId in affectedDeviceIds.Distinct())
+        {
+            invalidatedSessions += await sessionRegistry.InvalidateAndReleaseForDeviceAsync(deviceId, reason, operation);
+        }
+
+        DeviceDependencyCleanupSummary dependencyCleanupSummary = dependencyCleanup is null
+            ? new DeviceDependencyCleanupSummary(0, 0, 0)
+            : await dependencyCleanup.CleanupForDevicesAsync(affectedDeviceIds, cancellationToken);
+
+        return dependencyCleanupSummary with { InvalidatedTrackedSessions = invalidatedSessions };
+    }
+
+    private async Task<DeviceDependencyCleanupSummary> ReconcileDependentStateForImportAsync(IReadOnlyList<HsmDeviceProfile> beforeImport, IReadOnlyList<HsmDeviceProfile> afterImport, AdminConfigurationImportMode mode, CancellationToken cancellationToken)
+    {
+        HashSet<Guid> retainedIds = [.. afterImport.Select(device => device.Id)];
+        HashSet<Guid> changedIds = [];
+
+        Dictionary<Guid, HsmDeviceProfile> beforeById = beforeImport.ToDictionary(device => device.Id);
+        foreach (HsmDeviceProfile current in afterImport)
+        {
+            if (beforeById.TryGetValue(current.Id, out HsmDeviceProfile? previous) && RequiresDependentStateReconciliation(previous, current))
+            {
+                changedIds.Add(current.Id);
+            }
+        }
+
+        DeviceDependencyCleanupSummary changedCleanup = changedIds.Count == 0
+            ? new DeviceDependencyCleanupSummary(0, 0, 0)
+            : await ReconcileDependentStateAsync(changedIds, "Device profile configuration changed during import.", "ImportConfiguration", cancellationToken);
+
+        if (mode != AdminConfigurationImportMode.ReplaceAll)
+        {
+            return changedCleanup;
+        }
+
+        int invalidatedMissingSessions = await sessionRegistry.InvalidateAndReleaseMissingDevicesAsync(retainedIds, "Device profile was removed by replace-all configuration import.", "ImportConfiguration");
+        DeviceDependencyCleanupSummary missingCleanup = dependencyCleanup is null
+            ? new DeviceDependencyCleanupSummary(0, 0, 0)
+            : await dependencyCleanup.CleanupForMissingDevicesAsync(retainedIds, cancellationToken);
+
+        return new DeviceDependencyCleanupSummary(
+            changedCleanup.InvalidatedTrackedSessions + invalidatedMissingSessions,
+            changedCleanup.RemovedProtectedPinEntries + missingCleanup.RemovedProtectedPinEntries,
+            changedCleanup.RemovedLabTemplates + missingCleanup.RemovedLabTemplates);
     }
 
     private async Task<HsmDeviceProfile> RequireDeviceAsync(Guid deviceId, CancellationToken cancellationToken)

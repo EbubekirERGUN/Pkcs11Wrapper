@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.Admin.Application.Models;
@@ -229,7 +228,7 @@ generated_utc: {createdUtc:O}
 
 Rotate this password after first sign-in and then retire this file.
 """;
-            await File.WriteAllTextAsync(BootstrapNoticePath, bootstrap, Encoding.UTF8, cancellationToken);
+            await CrashSafeFileStore.WriteTextAsync(BootstrapNoticePath, bootstrap, cancellationToken);
         }
         finally
         {
@@ -238,24 +237,10 @@ Rotate this password after first sign-in and then retire this file.
     }
 
     private async Task<List<AdminWebUserRecord>> ReadUsersUnsafeAsync(CancellationToken cancellationToken)
-    {
-        if (!File.Exists(UserFilePath))
-        {
-            return [];
-        }
+        => (await CrashSafeFileStore.ReadJsonAsync(UserFilePath, AdminWebJsonContext.Default.AdminWebUserRecordArray, cancellationToken) ?? []).Select(Clone).ToList();
 
-        await using FileStream stream = File.OpenRead(UserFilePath);
-        AdminWebUserRecord[]? users = await JsonSerializer.DeserializeAsync(stream, AdminWebJsonContext.Default.AdminWebUserRecordArray, cancellationToken);
-        return users?.Select(Clone).ToList() ?? [];
-    }
-
-    private async Task SaveUsersUnsafeAsync(IReadOnlyList<AdminWebUserRecord> users, CancellationToken cancellationToken)
-    {
-        Directory.CreateDirectory(StorageRoot);
-        await using FileStream stream = File.Create(UserFilePath);
-        await JsonSerializer.SerializeAsync(stream, users.Select(Clone).ToArray(), AdminWebJsonContext.Default.AdminWebUserRecordArray, cancellationToken);
-        await stream.FlushAsync(cancellationToken);
-    }
+    private Task SaveUsersUnsafeAsync(IReadOnlyList<AdminWebUserRecord> users, CancellationToken cancellationToken)
+        => CrashSafeFileStore.WriteJsonAsync(UserFilePath, users.Select(Clone).ToArray(), AdminWebJsonContext.Default.AdminWebUserRecordArray, cancellationToken);
 
     private async Task<string?> TryReadBootstrapUserNameUnsafeAsync(CancellationToken cancellationToken)
     {

@@ -33,7 +33,7 @@
 
         @if (_showError)
         {
-            <div class="alert alert-danger">Login failed. Check username/password and try again.</div>
+            <div class="alert alert-danger">@_errorMessage</div>
         }
 
         <div class="mb-3">
@@ -55,6 +55,7 @@
 
 @code {
     private bool _showError;
+    private string _errorMessage = "Login failed. Check username/password and try again.";
     private string _returnUrl = "/";
 
     protected override void OnInitialized()
@@ -62,7 +63,11 @@
         Uri uri = Navigation.ToAbsoluteUri(Navigation.Uri);
         Dictionary<string, string> query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query)
             .ToDictionary(x => x.Key, x => x.Value.ToString(), StringComparer.OrdinalIgnoreCase);
-        _showError = string.Equals(query.GetValueOrDefault("error"), "1", StringComparison.Ordinal);
+        string errorCode = query.GetValueOrDefault("error") ?? string.Empty;
+        _showError = !string.IsNullOrWhiteSpace(errorCode);
+        _errorMessage = string.Equals(errorCode, "locked", StringComparison.OrdinalIgnoreCase)
+            ? "Too many failed login attempts. Wait for the lockout window to expire before trying again."
+            : "Login failed. Check username/password and try again.";
         _returnUrl = string.IsNullOrWhiteSpace(query.GetValueOrDefault("returnUrl")) ? "/" : query["returnUrl"]!;
     }
 }

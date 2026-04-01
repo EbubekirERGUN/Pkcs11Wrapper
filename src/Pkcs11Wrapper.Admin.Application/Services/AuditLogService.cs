@@ -5,16 +5,40 @@ namespace Pkcs11Wrapper.Admin.Application.Services;
 
 public sealed class AuditLogService(IAuditLogStore store, IAdminActorContext actorContext)
 {
+    private readonly SemaphoreSlim _integrityGate = new(1, 1);
+    private AuditIntegrityStatus? _cachedIntegrity;
+
     public Task<IReadOnlyList<AdminAuditLogEntry>> GetRecentAsync(int take = 200, CancellationToken cancellationToken = default)
         => store.ReadRecentAsync(take, cancellationToken);
 
-    public Task<AuditIntegrityStatus> VerifyIntegrityAsync(CancellationToken cancellationToken = default)
-        => store.VerifyIntegrityAsync(cancellationToken);
+    public async Task<AuditIntegrityStatus> VerifyIntegrityAsync(bool forceVerification = false, CancellationToken cancellationToken = default)
+    {
+        if (!forceVerification && _cachedIntegrity is not null)
+        {
+            return _cachedIntegrity;
+        }
 
-    public Task WriteAsync(string category, string action, string target, string outcome, string details, string? actor = null, CancellationToken cancellationToken = default)
+        await _integrityGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!forceVerification && _cachedIntegrity is not null)
+            {
+                return _cachedIntegrity;
+            }
+
+            _cachedIntegrity = await store.VerifyIntegrityAsync(cancellationToken);
+            return _cachedIntegrity;
+        }
+        finally
+        {
+            _integrityGate.Release();
+        }
+    }
+
+    public async Task WriteAsync(string category, string action, string target, string outcome, string details, string? actor = null, CancellationToken cancellationToken = default)
     {
         AdminActorInfo current = actorContext.GetCurrent();
-        return store.AppendAsync(
+        await store.AppendAsync(
             new AdminAuditLogEntry(
                 Guid.NewGuid(),
                 DateTimeOffset.UtcNow,
