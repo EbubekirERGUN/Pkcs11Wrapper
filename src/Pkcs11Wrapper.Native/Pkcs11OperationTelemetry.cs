@@ -10,6 +10,20 @@ public enum Pkcs11OperationTelemetryStatus
     Failed = 2,
 }
 
+public enum Pkcs11TelemetryFieldClassification
+{
+    SafeMetadata = 0,
+    LengthOnly = 1,
+    Masked = 2,
+    Hashed = 3,
+    NeverLog = 4,
+}
+
+public readonly record struct Pkcs11OperationTelemetryField(
+    string Name,
+    Pkcs11TelemetryFieldClassification Classification,
+    string? Value);
+
 public readonly record struct Pkcs11OperationTelemetryEvent(
     string OperationName,
     string? NativeOperationName,
@@ -21,6 +35,8 @@ public readonly record struct Pkcs11OperationTelemetryEvent(
     nuint? MechanismType,
     Exception? Exception)
 {
+    public IReadOnlyList<Pkcs11OperationTelemetryField> Fields { get; init; } = Array.Empty<Pkcs11OperationTelemetryField>();
+
     public bool IsSuccess => Status == Pkcs11OperationTelemetryStatus.Succeeded;
 }
 
@@ -29,7 +45,7 @@ public interface IPkcs11OperationTelemetryListener
     void OnOperationCompleted(in Pkcs11OperationTelemetryEvent operationEvent);
 }
 
-internal readonly ref struct Pkcs11OperationTelemetryScope
+internal ref struct Pkcs11OperationTelemetryScope
 {
     private readonly IPkcs11OperationTelemetryListener? _listener;
     private readonly string _operationName;
@@ -38,6 +54,7 @@ internal readonly ref struct Pkcs11OperationTelemetryScope
     private readonly nuint? _sessionHandle;
     private readonly nuint? _mechanismType;
     private readonly long _startTimestamp;
+    private List<Pkcs11OperationTelemetryField>? _fields;
 
     public Pkcs11OperationTelemetryScope(
         IPkcs11OperationTelemetryListener? listener,
@@ -54,6 +71,30 @@ internal readonly ref struct Pkcs11OperationTelemetryScope
         _sessionHandle = sessionHandle?.Value;
         _mechanismType = mechanismType?.Value;
         _startTimestamp = listener is null ? 0 : Stopwatch.GetTimestamp();
+        _fields = null;
+    }
+
+    public bool IsEnabled => _listener is not null;
+
+    public void AddField(Pkcs11OperationTelemetryField field)
+    {
+        if (_listener is null)
+        {
+            return;
+        }
+
+        (_fields ??= []).Add(field);
+    }
+
+    public void AddFields(IEnumerable<Pkcs11OperationTelemetryField> fields)
+    {
+        if (_listener is null)
+        {
+            return;
+        }
+
+        _fields ??= [];
+        _fields.AddRange(fields);
     }
 
     public void Succeeded(CK_RV returnValue)
@@ -84,7 +125,12 @@ internal readonly ref struct Pkcs11OperationTelemetryScope
             _slotId,
             _sessionHandle,
             _mechanismType,
-            exception);
+            exception)
+        {
+            Fields = _fields is { Count: > 0 }
+                ? _fields.ToArray()
+                : Array.Empty<Pkcs11OperationTelemetryField>()
+        };
 
         try
         {

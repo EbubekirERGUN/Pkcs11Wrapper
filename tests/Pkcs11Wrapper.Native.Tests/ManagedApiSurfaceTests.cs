@@ -34,6 +34,11 @@ public sealed class ManagedApiSurfaceTests
         Assert.NotNull(typeof(Pkcs11NativeModule).GetProperty(nameof(Pkcs11NativeModule.TelemetryListener)));
         Assert.NotNull(typeof(IPkcs11OperationTelemetryListener).GetMethod(nameof(IPkcs11OperationTelemetryListener.OnOperationCompleted)));
 
+        Pkcs11OperationTelemetryField field = new(
+            Name: "credential.pin",
+            Classification: Pkcs11TelemetryFieldClassification.Masked,
+            Value: "set(len=4)");
+
         Pkcs11OperationTelemetryEvent operationEvent = new(
             OperationName: "TestOperation",
             NativeOperationName: "C_TestOperation",
@@ -43,7 +48,10 @@ public sealed class ManagedApiSurfaceTests
             SlotId: 7,
             SessionHandle: 11,
             MechanismType: 13,
-            Exception: null);
+            Exception: null)
+        {
+            Fields = [field]
+        };
 
         Assert.True(operationEvent.IsSuccess);
         Assert.Equal("TestOperation", operationEvent.OperationName);
@@ -51,6 +59,9 @@ public sealed class ManagedApiSurfaceTests
         Assert.Equal((nuint)7, operationEvent.SlotId);
         Assert.Equal((nuint)11, operationEvent.SessionHandle);
         Assert.Equal((nuint)13, operationEvent.MechanismType);
+        Assert.Single(operationEvent.Fields);
+        Assert.Equal(Pkcs11TelemetryFieldClassification.Masked, operationEvent.Fields[0].Classification);
+        Assert.Equal("credential.pin", operationEvent.Fields[0].Name);
     }
 
     [Fact]

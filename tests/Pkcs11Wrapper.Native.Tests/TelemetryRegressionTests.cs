@@ -50,6 +50,21 @@ public sealed class TelemetryRegressionTests
         Assert.Contains(events, e => e.OperationName == "C_Digest" && e.NativeOperationName == "C_Digest" && e.SessionHandle.HasValue && e.MechanismType == Pkcs11MechanismTypes.Sha256.Value && e.Status == Pkcs11OperationTelemetryStatus.Succeeded && e.Duration >= TimeSpan.Zero);
         Assert.Contains(events, e => e.OperationName == nameof(Pkcs11NativeModule.GenerateRandom) && e.NativeOperationName == "C_GenerateRandom" && e.SessionHandle.HasValue && e.Status == Pkcs11OperationTelemetryStatus.Succeeded);
         Assert.Contains(events, e => e.OperationName == nameof(Pkcs11NativeModule.CloseSession) && e.NativeOperationName == "C_CloseSession" && e.SessionHandle.HasValue && e.Status == Pkcs11OperationTelemetryStatus.Succeeded);
+
+        Pkcs11OperationTelemetryEvent loginEvent = Assert.Single(events, e => e.OperationName == nameof(Pkcs11NativeModule.Login) && e.NativeOperationName == "C_Login");
+        Pkcs11OperationTelemetryField loginPin = Assert.Single(loginEvent.Fields, f => f.Name == "credential.pin");
+        Assert.Equal(Pkcs11TelemetryFieldClassification.Masked, loginPin.Classification);
+        Assert.Equal($"set(len={Encoding.UTF8.GetByteCount(userPin)})", loginPin.Value);
+
+        Pkcs11OperationTelemetryEvent digestEvent = Assert.Single(events, e => e.OperationName == "C_Digest" && e.NativeOperationName == "C_Digest");
+        Assert.Contains(digestEvent.Fields, f => f.Name == "input" && f.Classification == Pkcs11TelemetryFieldClassification.LengthOnly && f.Value == "len=17");
+        Assert.Contains(digestEvent.Fields, f => f.Name == "output" && f.Classification == Pkcs11TelemetryFieldClassification.LengthOnly && f.Value == "len=32");
+
+        Pkcs11OperationTelemetryEvent randomEvent = Assert.Single(events, e => e.OperationName == nameof(Pkcs11NativeModule.GenerateRandom) && e.NativeOperationName == "C_GenerateRandom");
+        Assert.Contains(randomEvent.Fields, f => f.Name == "random.output" && f.Classification == Pkcs11TelemetryFieldClassification.LengthOnly && f.Value == "len=16");
+
+        Assert.DoesNotContain(events.SelectMany(e => e.Fields), f => (f.Value ?? string.Empty).Contains(userPin, StringComparison.Ordinal));
+        Assert.DoesNotContain(events.SelectMany(e => e.Fields), f => (f.Value ?? string.Empty).Contains("telemetry-payload", StringComparison.Ordinal));
     }
 
     [Fact]

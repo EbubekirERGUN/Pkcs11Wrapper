@@ -104,9 +104,10 @@ Telemetry is opt-in and disabled by default. When you attach a listener, the wra
 - success / returned-false / failure status
 - native return value when available
 - optional slot, session, and mechanism context
+- redacted `Fields` for safe metadata, masked credentials, hashed identifiers, and length-only payload summaries
 - captured exception for faulted operations
 
-Listener failures are swallowed so observational code does not break the underlying PKCS#11 call flow.
+Listener failures are swallowed so observational code does not break the underlying PKCS#11 call flow. The wrapper never emits raw PINs, key material, plaintext/ciphertext payloads, unwrap/import blobs, or secret PKCS#11 attributes. See `docs/telemetry-redaction.md` for the full policy.
 
 ```csharp
 using Pkcs11Wrapper;

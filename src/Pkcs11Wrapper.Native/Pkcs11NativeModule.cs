@@ -525,6 +525,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void InitToken(CK_SLOT_ID slotId, ReadOnlySpan<byte> soPinUtf8, ReadOnlySpan<byte> label)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(InitToken), "C_InitToken", slotId: slotId);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.InitToken(soPinUtf8, label));
+        }
+
         try
         {
             EnsureInitialized();
@@ -752,6 +757,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void Login(CK_SESSION_HANDLE sessionHandle, CK_USER_TYPE userType, ReadOnlySpan<byte> pinUtf8)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(Login), "C_Login", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Credentials(userType, pinUtf8));
+        }
+
         try
         {
             EnsureInitialized();
@@ -806,6 +816,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void InitPin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> pinUtf8)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(InitPin), "C_InitPIN", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.MaskedSecret("credential.pin", pinUtf8));
+        }
+
         try
         {
             EnsureInitialized();
@@ -840,6 +855,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void SetPin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> oldPinUtf8, ReadOnlySpan<byte> newPinUtf8)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(SetPin), "C_SetPIN", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.PinChange(oldPinUtf8, newPinUtf8));
+        }
+
         try
         {
             EnsureInitialized();
@@ -890,6 +910,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public bool TryFindObjects(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<CK_ATTRIBUTE> template, Span<CK_OBJECT_HANDLE> destination, out int written, out bool hasMore)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(TryFindObjects), "C_FindObjects", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("searchTemplate", template));
+            telemetry.AddField(Pkcs11TelemetryRedaction.Safe("search.destinationCapacity", destination.Length));
+        }
+
         EnsureInitialized();
 
         EnsureFunctionAvailable((void*)FunctionList->C_FindObjectsInit, "C_FindObjectsInit");
@@ -981,6 +1007,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public Pkcs11NativeAttributeQuery QueryAttributeValue(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE objectHandle, CK_ATTRIBUTE_TYPE attributeType)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(QueryAttributeValue), "C_GetAttributeValue", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.AttributeType("attribute.type", attributeType));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1009,6 +1040,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public bool TryGetAttributeValue(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE objectHandle, CK_ATTRIBUTE_TYPE attributeType, Span<byte> destination, out int written, out Pkcs11NativeAttributeQuery query)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(TryGetAttributeValue), "C_GetAttributeValue", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.AttributeType("attribute.type", attributeType));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("attribute.destination", destination.Length));
+        }
+
         try
         {
             query = QueryAttributeValue(sessionHandle, objectHandle, attributeType);
@@ -1184,6 +1221,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public CK_OBJECT_HANDLE CreateObject(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<CK_ATTRIBUTE> template)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(CreateObject), "C_CreateObject", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("template", template));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1219,6 +1261,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public CK_OBJECT_HANDLE CopyObject(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE sourceObjectHandle, ReadOnlySpan<CK_ATTRIBUTE> template)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(CopyObject), "C_CopyObject", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.Safe("sourceObjectHandle", sourceObjectHandle.Value));
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("template", template));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1254,6 +1302,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void SetAttributeValue(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE objectHandle, ReadOnlySpan<CK_ATTRIBUTE> template)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(SetAttributeValue), "C_SetAttributeValue", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.Safe("objectHandle", objectHandle.Value));
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("template", template));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1307,6 +1361,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public CK_OBJECT_HANDLE GenerateKey(CK_SESSION_HANDLE sessionHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter, ReadOnlySpan<CK_ATTRIBUTE> template)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(GenerateKey), "C_GenerateKey", sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("template", template));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1347,6 +1407,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public (CK_OBJECT_HANDLE PublicKeyHandle, CK_OBJECT_HANDLE PrivateKeyHandle) GenerateKeyPair(CK_SESSION_HANDLE sessionHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter, ReadOnlySpan<CK_ATTRIBUTE> publicKeyTemplate, ReadOnlySpan<CK_ATTRIBUTE> privateKeyTemplate)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(GenerateKeyPair), "C_GenerateKeyPair", sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("publicTemplate", publicKeyTemplate));
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("privateTemplate", privateKeyTemplate));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1388,6 +1455,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public int GetWrapKeyOutputLength(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE wrappingKeyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter, CK_OBJECT_HANDLE keyHandle)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(GetWrapKeyOutputLength), "C_WrapKey", sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1400,6 +1472,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 CK_MECHANISM mechanism = CreateMechanism(mechanismType, mechanismParameterPointer, mechanismParameter.Length, out MarshalledMechanismParameters marshalledMechanismParameters);
                 CK_RV result = FunctionList->C_WrapKey(sessionHandle, &mechanism, wrappingKeyHandle, keyHandle, null, &wrappedKeyLength);
                 ThrowIfFailed(result, "C_WrapKey");
+                telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("wrappedKey", ToInt32Checked(wrappedKeyLength, "wrapped key length")));
                 telemetry.Succeeded(result);
             }
 
@@ -1415,6 +1488,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public bool TryWrapKey(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE wrappingKeyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter, CK_OBJECT_HANDLE keyHandle, Span<byte> wrappedKey, out int written)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(TryWrapKey), "C_WrapKey", sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("wrappedKey.destination", wrappedKey.Length));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1431,11 +1510,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 if (result == Pkcs11ReturnValues.BufferTooSmall)
                 {
                     written = ToInt32Checked(wrappedKeyLength, "wrapped key length");
+                    telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("wrappedKey", written));
                     telemetry.ReturnedFalse(result);
                     return false;
                 }
 
                 ThrowIfFailed(result, "C_WrapKey");
+                telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("wrappedKey", ToInt32Checked(wrappedKeyLength, "wrapped key length")));
                 telemetry.Succeeded(result);
             }
 
@@ -1452,6 +1533,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public CK_OBJECT_HANDLE UnwrapKey(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE unwrappingKeyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter, ReadOnlySpan<byte> wrappedKey, ReadOnlySpan<CK_ATTRIBUTE> template)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(UnwrapKey), "C_UnwrapKey", sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("wrappedKey", wrappedKey));
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("template", template));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1490,6 +1578,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public CK_OBJECT_HANDLE DeriveKey(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE baseKeyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter, ReadOnlySpan<CK_ATTRIBUTE> template)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(DeriveKey), "C_DeriveKey", sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("template", template));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1751,6 +1845,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public bool Verify(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE keyHandle, CK_MECHANISM_TYPE mechanismType, ReadOnlySpan<byte> mechanismParameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(Verify), "C_Verify", sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("data", data));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("signature", signature));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1792,6 +1893,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void SignUpdate(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> data)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(SignUpdate), "C_SignUpdate", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("data", data));
+        }
+
         try
         {
             EnsureDataUpdateFunction(FunctionList->C_SignUpdate, "C_SignUpdate");
@@ -1866,6 +1972,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void VerifyUpdate(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> data)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(VerifyUpdate), "C_VerifyUpdate", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("data", data));
+        }
+
         try
         {
             EnsureDataUpdateFunction(FunctionList->C_VerifyUpdate, "C_VerifyUpdate");
@@ -1895,6 +2006,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public bool VerifyFinal(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> signature)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(VerifyFinal), "C_VerifyFinal", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("signature", signature));
+        }
+
         try
         {
             EnsureInitialized();
@@ -1969,6 +2085,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void DigestUpdate(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> data)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(DigestUpdate), "C_DigestUpdate", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("data", data));
+        }
+
         try
         {
             EnsureDataUpdateFunction(FunctionList->C_DigestUpdate, "C_DigestUpdate");
@@ -2007,6 +2128,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void GenerateRandom(CK_SESSION_HANDLE sessionHandle, Span<byte> destination)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(GenerateRandom), "C_GenerateRandom", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("random.output", destination.Length));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2039,6 +2165,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void SeedRandom(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> seed)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(SeedRandom), "C_SeedRandom", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("random.seed", seed));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2284,6 +2415,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void SetOperationState(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> state, CK_OBJECT_HANDLE encryptionKeyHandle, CK_OBJECT_HANDLE authenticationKeyHandle)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(SetOperationState), "C_SetOperationState", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("operation.state", state));
+            telemetry.AddField(Pkcs11TelemetryRedaction.Safe("operation.encryptionKeyHandle", encryptionKeyHandle.Value));
+            telemetry.AddField(Pkcs11TelemetryRedaction.Safe("operation.authenticationKeyHandle", authenticationKeyHandle.Value));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2370,6 +2508,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     public void LoginUser(CK_SESSION_HANDLE sessionHandle, CK_USER_TYPE userType, ReadOnlySpan<byte> pinUtf8, ReadOnlySpan<byte> usernameUtf8)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(LoginUser), "C_LoginUser", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Credentials(userType, pinUtf8, usernameUtf8));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2471,24 +2614,39 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
     public void SignMessageBegin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter)
     {
-        EnsureInitialized();
-        CK_FUNCTION_LIST_3_0* functionList = GetFunctionList30();
-        EnsureFunctionAvailable((void*)functionList->C_SignMessageBegin, "C_SignMessageBegin");
-
-        CK_RV result;
-        if (parameter.IsEmpty)
+        Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(SignMessageBegin), "C_SignMessageBegin", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
         {
-            result = functionList->C_SignMessageBegin(sessionHandle, null, 0);
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
         }
-        else
+
+        try
         {
-            fixed (byte* parameterPointer = parameter)
+            EnsureInitialized();
+            CK_FUNCTION_LIST_3_0* functionList = GetFunctionList30();
+            EnsureFunctionAvailable((void*)functionList->C_SignMessageBegin, "C_SignMessageBegin");
+
+            CK_RV result;
+            if (parameter.IsEmpty)
             {
-                result = functionList->C_SignMessageBegin(sessionHandle, parameterPointer, (CK_ULONG)(nuint)parameter.Length);
+                result = functionList->C_SignMessageBegin(sessionHandle, null, 0);
             }
-        }
+            else
+            {
+                fixed (byte* parameterPointer = parameter)
+                {
+                    result = functionList->C_SignMessageBegin(sessionHandle, parameterPointer, (CK_ULONG)(nuint)parameter.Length);
+                }
+            }
 
-        ThrowIfFailed(result, "C_SignMessageBegin");
+            ThrowIfFailed(result, "C_SignMessageBegin");
+            telemetry.Succeeded(result);
+        }
+        catch (Exception ex)
+        {
+            telemetry.Failed(ex);
+            throw;
+        }
     }
 
     public bool TrySignMessageNext(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written)
@@ -2504,24 +2662,39 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
 
     public void VerifyMessageBegin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter)
     {
-        EnsureInitialized();
-        CK_FUNCTION_LIST_3_0* functionList = GetFunctionList30();
-        EnsureFunctionAvailable((void*)functionList->C_VerifyMessageBegin, "C_VerifyMessageBegin");
-
-        CK_RV result;
-        if (parameter.IsEmpty)
+        Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(VerifyMessageBegin), "C_VerifyMessageBegin", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
         {
-            result = functionList->C_VerifyMessageBegin(sessionHandle, null, 0);
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
         }
-        else
+
+        try
         {
-            fixed (byte* parameterPointer = parameter)
+            EnsureInitialized();
+            CK_FUNCTION_LIST_3_0* functionList = GetFunctionList30();
+            EnsureFunctionAvailable((void*)functionList->C_VerifyMessageBegin, "C_VerifyMessageBegin");
+
+            CK_RV result;
+            if (parameter.IsEmpty)
             {
-                result = functionList->C_VerifyMessageBegin(sessionHandle, parameterPointer, (CK_ULONG)(nuint)parameter.Length);
+                result = functionList->C_VerifyMessageBegin(sessionHandle, null, 0);
             }
-        }
+            else
+            {
+                fixed (byte* parameterPointer = parameter)
+                {
+                    result = functionList->C_VerifyMessageBegin(sessionHandle, parameterPointer, (CK_ULONG)(nuint)parameter.Length);
+                }
+            }
 
-        ThrowIfFailed(result, "C_VerifyMessageBegin");
+            ThrowIfFailed(result, "C_VerifyMessageBegin");
+            telemetry.Succeeded(result);
+        }
+        catch (Exception ex)
+        {
+            telemetry.Failed(ex);
+            throw;
+        }
     }
 
     public bool VerifyMessageNext(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature)
@@ -2586,6 +2759,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string operation)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(operation, operation, sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2616,12 +2794,20 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(operation, operation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.associatedData", associatedData));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.input", input));
+        }
+
         try
         {
             EnsureInitialized();
             EnsureFunctionAvailable((void*)invoke, operation);
             CK_ULONG outputLength = default;
             CK_RV result = InvokeMessage(sessionHandle, parameter, associatedData, input, null, &outputLength, invoke, operation);
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.output", ToInt32Checked(outputLength, outputName)));
             telemetry.Succeeded(result);
             return ToInt32Checked(outputLength, outputName);
         }
@@ -2644,6 +2830,14 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(operation, operation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.associatedData", associatedData));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.input", input));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.outputDestination", output.Length));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2656,11 +2850,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 if (result == Pkcs11ReturnValues.BufferTooSmall)
                 {
                     written = ToInt32Checked(outputLength, outputName);
+                    telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.output", written));
                     telemetry.ReturnedFalse(result);
                     return false;
                 }
 
                 ThrowIfFailed(result, operation);
+                telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.output", ToInt32Checked(outputLength, outputName)));
                 telemetry.Succeeded(result);
             }
 
@@ -2677,6 +2873,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     private void MessageBegin(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> associatedData, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, CK_RV> begin, string operation)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(operation, operation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.associatedData", associatedData));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2705,6 +2907,14 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     private bool TryMessageNext(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> input, Span<byte> output, CK_FLAGS flags, out int written, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_FLAGS, CK_RV> next, string operation, string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(operation, operation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.input", input));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.outputDestination", output.Length));
+            telemetry.AddField(Pkcs11TelemetryRedaction.SafeHex("message.flags", flags.Value));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2728,11 +2938,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 if (result == Pkcs11ReturnValues.BufferTooSmall)
                 {
                     written = ToInt32Checked(outputLength, outputName);
+                    telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.output", written));
                     telemetry.ReturnedFalse(result);
                     return false;
                 }
 
                 ThrowIfFailed(result, operation);
+                telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.output", ToInt32Checked(outputLength, outputName)));
                 telemetry.Succeeded(result);
             }
 
@@ -2767,12 +2979,19 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     private int GetSignMessageOutputLengthCore(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke, string operation)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(operation, operation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("data", data));
+        }
+
         try
         {
             EnsureInitialized();
             EnsureFunctionAvailable((void*)invoke, operation);
             CK_ULONG signatureLength = default;
             CK_RV result = InvokeSignMessage(sessionHandle, parameter, data, null, &signatureLength, invoke, operation);
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("signature", ToInt32Checked(signatureLength, "signature length")));
             telemetry.Succeeded(result);
             return ToInt32Checked(signatureLength, "signature length");
         }
@@ -2786,6 +3005,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     private bool TrySignMessageCore(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, Span<byte> signature, out int written, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG*, CK_RV> invoke, string operation)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(operation, operation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("data", data));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("signature.destination", signature.Length));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2798,11 +3024,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 if (result == Pkcs11ReturnValues.BufferTooSmall)
                 {
                     written = ToInt32Checked(signatureLength, "signature length");
+                    telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("signature", written));
                     telemetry.ReturnedFalse(result);
                     return false;
                 }
 
                 ThrowIfFailed(result, operation);
+                telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("signature", ToInt32Checked(signatureLength, "signature length")));
                 telemetry.Succeeded(result);
             }
 
@@ -2819,6 +3047,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
     private bool VerifyMessageCore(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<byte> parameter, ReadOnlySpan<byte> data, ReadOnlySpan<byte> signature, delegate* unmanaged[Cdecl]<CK_SESSION_HANDLE, void*, CK_ULONG, byte*, CK_ULONG, byte*, CK_ULONG, CK_RV> verify, string operation)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(operation, operation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("message.parameter", parameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("data", data));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("signature", signature));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2971,6 +3206,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(invokeOperation, invokeOperation, sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("input", input));
+        }
+
         try
         {
             EnsureInitialized();
@@ -2986,6 +3227,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 DrainActiveCryptOperation(sessionHandle, input, outputLength, invoke, invokeOperation, outputName);
             }
 
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output", ToInt32Checked(outputLength, outputName)));
             telemetry.Succeeded(CK_RV.Ok);
             return ToInt32Checked(outputLength, outputName);
         }
@@ -3008,6 +3250,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(invokeOperation, invokeOperation, sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("input", input));
+        }
+
         try
         {
             EnsureInitialized();
@@ -3023,6 +3271,7 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 DrainActiveCryptOperation(sessionHandle, input, outputLength, invoke, invokeOperation, outputName);
             }
 
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output", ToInt32Checked(outputLength, outputName)));
             telemetry.Succeeded(CK_RV.Ok);
             return ToInt32Checked(outputLength, outputName);
         }
@@ -3048,6 +3297,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(invokeOperation, invokeOperation, sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("input", input));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output.destination", output.Length));
+        }
+
         try
         {
             EnsureInitialized();
@@ -3071,12 +3327,14 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 {
                     written = ToInt32Checked(outputLength, outputName);
                     DrainActiveCryptOperation(sessionHandle, input, outputLength, invoke, invokeOperation, outputName);
+                    telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output", written));
                     telemetry.ReturnedFalse(result);
                     return false;
                 }
 
                 ThrowIfFailed(result, invokeOperation);
                 written = ToInt32Checked(outputLength, outputName);
+                telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output", written));
                 telemetry.Succeeded(result);
                 return true;
             }
@@ -3102,6 +3360,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(invokeOperation, invokeOperation, sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("input", input));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output.destination", output.Length));
+        }
+
         try
         {
             EnsureInitialized();
@@ -3125,12 +3390,14 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
                 {
                     written = ToInt32Checked(outputLength, outputName);
                     DrainActiveCryptOperation(sessionHandle, input, outputLength, invoke, invokeOperation, outputName);
+                    telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output", written));
                     telemetry.ReturnedFalse(result);
                     return false;
                 }
 
                 ThrowIfFailed(result, invokeOperation);
                 written = ToInt32Checked(outputLength, outputName);
+                telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output", written));
                 telemetry.Succeeded(result);
                 return true;
             }
@@ -3332,6 +3599,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string initOperation)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(initOperation, initOperation, sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+        }
+
         try
         {
             EnsureInitialized();
@@ -3364,6 +3636,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string initOperation)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(initOperation, initOperation, sessionHandle: sessionHandle, mechanismType: mechanismType);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.MechanismParameters(mechanismType, mechanismParameter));
+        }
+
         try
         {
             EnsureInitialized();
@@ -3428,6 +3705,12 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(updateOperation, updateOperation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("input", input));
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output.destination", output.Length));
+        }
+
         try
         {
             EnsureUpdateFunction(update, updateOperation);
@@ -3479,6 +3762,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(finalOperation, finalOperation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("output.destination", output.Length));
+        }
+
         try
         {
             EnsureFinalFunction(final, finalOperation);
@@ -3525,6 +3813,11 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         string outputName)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(invokeOperation, invokeOperation, sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddField(Pkcs11TelemetryRedaction.LengthOnly("input", input));
+        }
+
         try
         {
             EnsureUpdateFunction(invoke, invokeOperation);
