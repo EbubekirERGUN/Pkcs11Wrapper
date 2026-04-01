@@ -24,13 +24,13 @@
 | Multipart crypto + operation state | Supported | SoftHSM regression coverage |
 | Recover / combined update flows | Supported | Managed API + runtime coverage |
 | Function status / cancel | Capability-gated | Exposed; returns false on modules that report unsupported / non-parallel |
-| Interface discovery (`C_GetInterface*`) | Capability-gated | Optional export path; absent on current SoftHSM builds |
-| PKCS#11 v3 message APIs (`C_Message*`) | Capability-gated | Exposed through v3 interface list when the module provides it |
-| `C_LoginUser` / `C_SessionCancel` | Capability-gated | Routed through the discovered v3 interface |
+| Interface discovery (`C_GetInterface*`) | Supported | Runtime-covered on Linux via the deterministic v3 shim; SoftHSM remains the capability-absent reference |
+| PKCS#11 v3 message APIs (`C_Message*`) | Supported | Runtime-covered on Linux via the deterministic v3 shim; absent SoftHSM exports remain explicitly validated as capability-absent |
+| `C_LoginUser` / `C_SessionCancel` | Supported | Runtime-covered on Linux via the deterministic v3 shim |
 
 ## Known limitations
 
-- Current automated runtime validation does **not** include a module that exposes PKCS#11 v3 message APIs; those paths are validated by ABI/layout tests and capability-gated behavior today.
+- PKCS#11 v3 runtime validation currently uses a deterministic Linux-built shim rather than a vendor module, so it validates marshalling/runtime behavior but not vendor-specific semantics.
 - Windows does not yet have the same NativeAOT smoke depth as Linux; current Windows coverage includes fixture-backed runtime regression through SoftHSM-for-Windows plus the standard build/API/layout checks.
 - Mechanism parameter helpers are intentionally selective; uncommon mechanisms may still require raw parameter bytes.
 - Packaging discipline is defined in `docs/release.md`, but external package publication is still a maintainer action rather than an automated CI publish step.

@@ -24,7 +24,7 @@ dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 
 Notes:
 
-- `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
+- `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, builds a tiny PKCS#11 v3 runtime shim on Linux, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
 - `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation and now defaults to the `baseline-rsa-aes` vendor compatibility profile documented in `docs/vendor-regression.md`.
 - `eng/run-smoke-aot.sh` provisions its own temporary fixture, publishes `samples/Pkcs11Wrapper.Smoke` with `/p:PublishAot=true`, then executes the produced binary.
 - `eng/run-benchmarks.sh` provisions its own temporary fixture, runs the `BenchmarkDotNet` suite, and writes the latest benchmark summary under `artifacts/benchmarks/latest/summary.md`.
@@ -40,6 +40,7 @@ Notes:
 - API and shape checks - `ManagedApiSurfaceTests.cs` verifies that the intended managed surface exists.
 - Interop layout checks - `NativeTypeLayoutTests.cs` validates native type and function-list expectations.
 - SoftHSM-backed regressions - `SoftHsmCryptRegressionTests.cs` validates realistic runtime flows against a PKCS#11 module.
+- PKCS#11 v3 shim regressions - `Pkcs11V3ShimRuntimeTests.cs` validates interface discovery plus real v3 login/session-cancel/message-encrypt flows against a deterministic Linux-only shim.
 
 The SoftHSM regression layer currently exercises:
 
@@ -75,7 +76,7 @@ Notable current assumptions:
 - a separate optional CI lane can run regression tests against a configured non-SoftHSM vendor module
 - vendor validation distinguishes capability-gated skips from broken env/object-contract failures
 - provisioning regression for `InitToken` is intentionally opt-in and only runs when `PKCS11_PROVISIONING_REGRESSION=1` and `PKCS11_SO_PIN` are available
-- current SoftHSM builds used in CI do not export `C_GetInterface*`, so v3-specific runtime behavior remains capability-gated until an additional v3-capable module is added to validation
+- current SoftHSM builds used in CI do not export `C_GetInterface*`, so Linux regression now pairs SoftHSM capability-absent coverage with a deterministic v3 shim for runtime-present validation
 
 ## Runtime contracts
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using Pkcs11Wrapper.Native;
 using Pkcs11Wrapper.Native.Interop;
 
@@ -16,10 +17,7 @@ public sealed class Pkcs11Module : IDisposable
 
     private readonly Pkcs11NativeModule _nativeModule;
     private readonly object _lifecycleSync = new();
-    private readonly object _sessionStateLock = new();
-    private readonly Dictionary<Pkcs11SlotId, int> _slotSessionGenerations = [];
-    private int _sessionGeneration;
-    private bool _disposed;
+    private SessionState _sessionState = SessionState.Empty;
 
     private Pkcs11Module(Pkcs11NativeModule nativeModule) => _nativeModule = nativeModule;
 
@@ -88,10 +86,7 @@ public sealed class Pkcs11Module : IDisposable
 
             if (wasInitialized)
             {
-                lock (_sessionStateLock)
-                {
-                    _sessionGeneration++;
-                }
+                WriteSessionState(ReadSessionState().IncrementSessionGeneration());
             }
         }
     }
@@ -221,13 +216,9 @@ public sealed class Pkcs11Module : IDisposable
         {
             ThrowIfDisposed();
 
-            int generation;
-            int slotGeneration;
-            lock (_sessionStateLock)
-            {
-                generation = _sessionGeneration;
-                slotGeneration = _slotSessionGenerations.GetValueOrDefault(slotId);
-            }
+            SessionState sessionState = ReadSessionState();
+            int generation = sessionState.SessionGeneration;
+            int slotGeneration = sessionState.GetSlotGeneration(slotId);
 
             CK_SESSION_HANDLE sessionHandle = _nativeModule.OpenSession(slotId.NativeValue, readWrite);
             return new Pkcs11Session(this, generation, slotId, slotGeneration, sessionHandle, readWrite);
@@ -248,17 +239,13 @@ public sealed class Pkcs11Module : IDisposable
     {
         lock (_lifecycleSync)
         {
-            lock (_sessionStateLock)
+            SessionState sessionState = ReadSessionState();
+            if (sessionState.IsDisposed)
             {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                _disposed = true;
-                _sessionGeneration++;
+                return;
             }
 
+            WriteSessionState(sessionState.MarkDisposedAndIncrementSessionGeneration());
             _nativeModule.Dispose();
         }
     }
@@ -898,13 +885,11 @@ public sealed class Pkcs11Module : IDisposable
 
     private bool CanUseSession(int generation, Pkcs11SlotId slotId, int slotGeneration)
     {
-        lock (_sessionStateLock)
-        {
-            return !_disposed &&
-                   _nativeModule.IsInitialized &&
-                   generation == _sessionGeneration &&
-                   slotGeneration == _slotSessionGenerations.GetValueOrDefault(slotId);
-        }
+        SessionState sessionState = ReadSessionState();
+        return !sessionState.IsDisposed &&
+               _nativeModule.IsInitialized &&
+               generation == sessionState.SessionGeneration &&
+               slotGeneration == sessionState.GetSlotGeneration(slotId);
     }
 
     private void EnsureSessionIsUsable(int generation, Pkcs11SlotId slotId, int slotGeneration)
@@ -915,30 +900,53 @@ public sealed class Pkcs11Module : IDisposable
         }
     }
 
-    private int GetSlotSessionGeneration(Pkcs11SlotId slotId)
-    {
-        lock (_sessionStateLock)
-        {
-            return _slotSessionGenerations.GetValueOrDefault(slotId);
-        }
-    }
-
     private void IncrementSlotSessionGeneration(Pkcs11SlotId slotId)
     {
-        lock (_sessionStateLock)
-        {
-            _slotSessionGenerations[slotId] = _slotSessionGenerations.GetValueOrDefault(slotId) + 1;
-        }
+        WriteSessionState(ReadSessionState().IncrementSlotGeneration(slotId));
     }
 
     private void ThrowIfDisposed()
     {
-        lock (_sessionStateLock)
+        if (ReadSessionState().IsDisposed)
         {
-            if (_disposed)
-            {
-                throw new ObjectDisposedException(nameof(Pkcs11Module));
-            }
+            throw new ObjectDisposedException(nameof(Pkcs11Module));
+        }
+    }
+
+    private SessionState ReadSessionState() => Volatile.Read(ref _sessionState);
+
+    private void WriteSessionState(SessionState sessionState) => Volatile.Write(ref _sessionState, sessionState);
+
+    private sealed class SessionState
+    {
+        public static readonly SessionState Empty = new(false, 0, new Dictionary<Pkcs11SlotId, int>());
+
+        private readonly Dictionary<Pkcs11SlotId, int> _slotSessionGenerations;
+
+        private SessionState(bool isDisposed, int sessionGeneration, Dictionary<Pkcs11SlotId, int> slotSessionGenerations)
+        {
+            IsDisposed = isDisposed;
+            SessionGeneration = sessionGeneration;
+            _slotSessionGenerations = slotSessionGenerations;
+        }
+
+        public bool IsDisposed { get; }
+
+        public int SessionGeneration { get; }
+
+        public int GetSlotGeneration(Pkcs11SlotId slotId) => _slotSessionGenerations.GetValueOrDefault(slotId);
+
+        public SessionState IncrementSessionGeneration()
+            => new(IsDisposed, checked(SessionGeneration + 1), new Dictionary<Pkcs11SlotId, int>(_slotSessionGenerations));
+
+        public SessionState MarkDisposedAndIncrementSessionGeneration()
+            => new(true, checked(SessionGeneration + 1), new Dictionary<Pkcs11SlotId, int>(_slotSessionGenerations));
+
+        public SessionState IncrementSlotGeneration(Pkcs11SlotId slotId)
+        {
+            Dictionary<Pkcs11SlotId, int> slotSessionGenerations = new(_slotSessionGenerations);
+            slotSessionGenerations[slotId] = checked(slotSessionGenerations.GetValueOrDefault(slotId) + 1);
+            return new(IsDisposed, SessionGeneration, slotSessionGenerations);
         }
     }
 

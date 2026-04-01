@@ -53,13 +53,13 @@ jobs:
             **/*.csproj
 
       - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install -y softhsm2 opensc file
+        run: sudo apt-get update && sudo apt-get install -y build-essential softhsm2 opensc file
 
       - name: Prepare CI artifact directory
         run: mkdir -p "$CI_ARTIFACT_ROOT"
 
       - name: Make engineering scripts executable
-        run: chmod +x eng/setup-softhsm-fixture.sh eng/run-regression-tests.sh eng/run-smoke-aot.sh
+        run: chmod +x eng/build-pkcs11-v3-shim.sh eng/setup-softhsm-fixture.sh eng/run-regression-tests.sh eng/run-smoke-aot.sh
 
       - name: Restore
         run: dotnet restore Pkcs11Wrapper.sln
