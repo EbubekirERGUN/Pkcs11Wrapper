@@ -6,7 +6,7 @@
     <Description>Span-first .NET 10 PKCS#11 wrapper with NativeAOT-friendly interop.</Description>
     <PackageTags>pkcs11;cryptoki;hsm;smartcard;nativeaot</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>README.nuget.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
@@ -15,6 +15,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
+    <None Include="..\..\docs\nuget\README.nuget.md" Pack="true" PackagePath="" />
   </ItemGroup>
 </Project>

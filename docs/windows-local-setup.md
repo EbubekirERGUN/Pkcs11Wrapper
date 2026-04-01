@@ -2,7 +2,7 @@
 
 ## Goal
 
-This guide brings up a local Windows development/test environment that can run the real PKCS#11 regression suite and smoke sample against SoftHSM-for-Windows.
+This guide brings up a local Windows development/test environment that can run the real PKCS#11 regression suite, strict smoke validation, and the `win-x64` NativeAOT smoke sample against SoftHSM-for-Windows.
 
 ## Prerequisites
 
@@ -35,6 +35,7 @@ What this does:
 - initializes a token
 - provisions one AES key and one RSA keypair
 - writes a PowerShell env file with the `PKCS11_*` variables expected by the regression suite and smoke sample
+- logs the resolved SoftHSM and `pkcs11-tool.exe` paths so CI/local failures are easier to diagnose
 
 ## Run the regression suite
 
@@ -50,9 +51,22 @@ Or, if you want the script to set up the fixture automatically:
 
 ## Run the smoke sample
 
+Runtime smoke with strict output validation:
+
 ```powershell
-.\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1" -Strict
 ```
+
+NativeAOT smoke with strict output validation:
+
+```powershell
+.\eng\run-smoke-aot.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1" -Strict
+```
+
+Generated logs/artifacts land under:
+
+- `artifacts/smoke-runtime/windows/`
+- `artifacts/smoke-aot/win-x64/`
 
 ## Manual module path notes
 
@@ -68,11 +82,16 @@ If your installation differs, set `PKCS11_MODULE_PATH` explicitly before running
 ### `pkcs11-tool.exe` not found
 Install OpenSC or set `PKCS11_TOOL_PATH` explicitly.
 
+The setup helper now also searches common Chocolatey and OpenSC installation roots before failing.
+
 ### SoftHSM package not found
 Pass `-DownloadPortable` to the setup script or set `PKCS11_SOFTHSM_ROOT` to an existing SoftHSM-for-Windows installation root.
 
 ### DLL load failure
 This usually means the portable package dependencies are missing or the wrong architecture was chosen. Try the 64-bit package and confirm the Visual C++ runtime is installed.
+
+### NativeAOT publish fails
+The `win-x64` NativeAOT lane depends on the local Windows toolchain required by the .NET SDK. Confirm the pinned SDK from `global.json` is installed and retry from a Developer PowerShell / standard PowerShell with the expected Visual C++ build tools available.
 
 ### Want to keep the fixture around?
 Pass a stable path:

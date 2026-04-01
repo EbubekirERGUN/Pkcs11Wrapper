@@ -37,11 +37,11 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 ### Validation and engineering discipline
 
 - Fixture-backed SoftHSM regression suite
-- Windows runtime regression path with SoftHSM-for-Windows
+- Windows runtime + `win-x64` NativeAOT smoke validation with SoftHSM-for-Windows
 - NativeAOT smoke validation on Linux
-- BenchmarkDotNet performance baseline + periodic benchmark workflow
+- BenchmarkDotNet performance baseline + periodic benchmark workflow with allocation/regression reporting
 - Optional vendor regression lane
-- Release verification script and pack metadata
+- Release verification script, package-safe NuGet README, and SourceLink/symbol package validation
 
 ### Admin panel
 
@@ -59,7 +59,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 | Area | Status | Notes |
 | --- | --- | --- |
 | Linux | ✅ | deepest runtime validation path, fixture-backed regression + NativeAOT smoke |
-| Windows | ✅ | runtime regression path through SoftHSM-for-Windows + OpenSC |
+| Windows | ✅ | fixture-backed runtime regression + `win-x64` NativeAOT smoke through SoftHSM-for-Windows + OpenSC |
 | PKCS#11 v3 interface discovery | ✅ | capability-gated when not exported by the module |
 | PKCS#11 v3 message APIs | ✅ | managed/API support implemented; runtime depends on module support |
 | Admin panel | ✅ | functional Blazor Server management surface with auth, local users, config transfer, audit integrity, and PKCS#11 Lab |
@@ -119,7 +119,8 @@ Windows PowerShell:
 ```powershell
 .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
-.\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1" -Strict
+.\eng\run-smoke-aot.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1" -Strict
 .\eng\run-benchmarks.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 ```
 
@@ -138,23 +139,24 @@ Current benchmark coverage includes:
 
 Latest committed Linux + SoftHSM baseline (`docs/benchmarks/latest-linux-softhsm.md`):
 
-- Published benchmark date (UTC): **2026-03-31 10:57**
+- Published benchmark date (UTC): **2026-04-01 17:24**
 - Benchmark environment: **Arch Linux + SoftHSM + .NET SDK 10.0.201 / Runtime 10.0.5**
 
 | Benchmark | Baseline |
 | --- | ---: |
-| `LoadInitializeGetInfoFinalizeDispose` | `1.904 μs` |
-| `OpenReadOnlySessionAndGetInfo` | `232.799 ns` |
-| `GenerateRandom32` | `149.407 ns` |
-| `EncryptAesCbcPad_1KiB` | `6.249 μs` |
-| `VerifySha256RsaPkcs_1KiB` | `19.652 μs` |
-| `GenerateDestroyRsaKeyPair` | `26.19 ms` |
+| `LoadInitializeGetInfoFinalizeDispose` | `1.933 μs` |
+| `OpenReadOnlySessionAndGetInfo` | `235.345 ns` |
+| `GenerateRandom32` | `149.717 ns` |
+| `EncryptAesCbcPad_1KiB` | `6.723 μs` |
+| `VerifySha256RsaPkcs_1KiB` | `19.744 μs` |
+| `GenerateDestroyRsaKeyPair` | `23.579 ms` |
 
 Automated GitHub benchmark runs now publish a GitHub-friendly report per run with:
 
 - generated date/time (UTC)
 - runner environment (`OS`, architecture, SDK, runtime, PKCS#11 module)
 - headline benchmark numbers for the main reference operations
+- allocation figures and optional committed-baseline deltas for those headline benchmarks
 - downloadable artifacts containing `summary.md`, `summary.json`, and raw BenchmarkDotNet CSV/HTML/markdown outputs
 
 That workflow report shows the **latest executed run** on GitHub, while `docs/benchmarks/latest-linux-softhsm.md` remains the latest **reviewed and committed** baseline snapshot.
@@ -203,7 +205,7 @@ Current capabilities include:
 - Full PKCS#11 behavior still depends on the target token / HSM / vendor policy.
 - Some advanced operations (for example import/edit/copy overrides) may be rejected by token policy even when the wrapper supports the call surface.
 - The current admin auth/security model is intentionally local-host oriented; external IdP/IAM, MFA, and centralized secret governance are not part of the app yet.
-- Linux still has the deepest NativeAOT validation path.
+- Linux is still the primary benchmark/reference environment, even though Windows now also has fixture-backed NativeAOT smoke validation.
 - PKCS#11 v3 runtime behavior still depends on whether the target module actually exports the relevant v3 interface surface.
 
 ## Contributing

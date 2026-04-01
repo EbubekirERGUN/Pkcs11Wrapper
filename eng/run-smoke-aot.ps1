@@ -5,7 +5,6 @@ param(
     [string]$EnvFilePath = "",
     [string]$Pkcs11ToolPath = "",
     [string]$SoftHsmVersion = "2.5.0",
-    [switch]$NoBuild,
     [switch]$Strict
 )
 
@@ -39,29 +38,35 @@ if (-not $UseExistingEnv.IsPresent) {
 }
 
 . $EnvFilePath
+$env:PKCS11_STRICT_REQUIRED = '1'
 
-$publishDir = Join-Path $repoRoot 'artifacts/smoke-runtime/windows'
+$publishDir = Join-Path $repoRoot 'artifacts/smoke-aot/win-x64'
 $smokeLog = Join-Path $publishDir 'smoke.log'
-$runStrict = $Strict.IsPresent -or $env:PKCS11_STRICT_REQUIRED -eq '1' -or $env:CI -eq 'true'
-
 New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
 
-$runArgs = @('run', '--project', (Join-Path $repoRoot 'samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj'), '-c', 'Release')
-if ($NoBuild.IsPresent) {
-    $runArgs += '--no-build'
-}
-
-& dotnet @runArgs *>&1 | Tee-Object -FilePath $smokeLog
+Write-Host 'Publishing win-x64 NativeAOT smoke binary'
+& dotnet publish (Join-Path $repoRoot 'samples/Pkcs11Wrapper.Smoke/Pkcs11Wrapper.Smoke.csproj') -c Release -r win-x64 /p:PublishAot=true --self-contained true -o $publishDir
 if ($LASTEXITCODE -ne 0) {
-    throw "Smoke run failed with exit code $LASTEXITCODE."
+    throw "NativeAOT publish failed with exit code $LASTEXITCODE."
 }
 
-if ($runStrict) {
+$smokeBinary = Join-Path $publishDir 'Pkcs11Wrapper.Smoke.exe'
+if (-not (Test-Path -LiteralPath $smokeBinary -PathType Leaf)) {
+    throw "Expected published smoke entrypoint is missing: $smokeBinary"
+}
+
+Write-Host 'Running win-x64 NativeAOT smoke binary'
+& $smokeBinary *>&1 | Tee-Object -FilePath $smokeLog
+if ($LASTEXITCODE -ne 0) {
+    throw "NativeAOT smoke run failed with exit code $LASTEXITCODE."
+}
+
+if ($Strict.IsPresent -or $env:CI -eq 'true' -or $env:PKCS11_STRICT_REQUIRED -eq '1') {
     $python = Resolve-PythonCommand
     & $python $validatorScript $smokeLog
     if ($LASTEXITCODE -ne 0) {
-        throw "Smoke validation failed with exit code $LASTEXITCODE."
+        throw "NativeAOT smoke validation failed with exit code $LASTEXITCODE."
     }
 }
 
-Write-Host "Smoke summary: $smokeLog"
+Write-Host "NativeAOT smoke summary: $smokeLog"
