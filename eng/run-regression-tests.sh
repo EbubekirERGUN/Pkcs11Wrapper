@@ -49,8 +49,7 @@ require_env() {
   fi
 }
 
-apply_existing_env_defaults() {
-  export PKCS11_VENDOR_PROFILE="${PKCS11_VENDOR_PROFILE:-baseline-rsa-aes}"
+apply_rsa_aes_profile_defaults() {
   export PKCS11_FIND_CLASS="${PKCS11_FIND_CLASS:-secret}"
   export PKCS11_FIND_KEY_TYPE="${PKCS11_FIND_KEY_TYPE:-aes}"
   export PKCS11_REQUIRE_ENCRYPT="${PKCS11_REQUIRE_ENCRYPT:-true}"
@@ -64,6 +63,25 @@ apply_existing_env_defaults() {
   export PKCS11_VERIFY_FIND_CLASS="${PKCS11_VERIFY_FIND_CLASS:-public}"
   export PKCS11_VERIFY_FIND_KEY_TYPE="${PKCS11_VERIFY_FIND_KEY_TYPE:-rsa}"
   export PKCS11_VERIFY_REQUIRE_VERIFY="${PKCS11_VERIFY_REQUIRE_VERIFY:-true}"
+}
+
+apply_existing_env_defaults() {
+  export PKCS11_VENDOR_PROFILE="${PKCS11_VENDOR_PROFILE:-baseline-rsa-aes}"
+
+  case "$PKCS11_VENDOR_PROFILE" in
+    baseline-rsa-aes)
+      apply_rsa_aes_profile_defaults
+      ;;
+    luna-rsa-aes)
+      apply_rsa_aes_profile_defaults
+      ;;
+    *)
+      printf 'Unsupported PKCS#11 vendor profile: %s\n' "$PKCS11_VENDOR_PROFILE" >&2
+      printf 'Supported profiles: baseline-rsa-aes, luna-rsa-aes\n' >&2
+      exit 1
+      ;;
+  esac
+
   export PKCS11_PROVISIONING_REGRESSION="${PKCS11_PROVISIONING_REGRESSION:-0}"
 }
 
@@ -75,6 +93,10 @@ print_existing_env_summary() {
     "$PKCS11_SIGN_FIND_LABEL" "$PKCS11_SIGN_FIND_CLASS" "$PKCS11_SIGN_FIND_KEY_TYPE" "$PKCS11_SIGN_MECHANISM"
   printf '  Verify search: label=%s class=%s keyType=%s\n' \
     "$PKCS11_VERIFY_FIND_LABEL" "$PKCS11_VERIFY_FIND_CLASS" "$PKCS11_VERIFY_FIND_KEY_TYPE"
+
+  if [[ "$PKCS11_VENDOR_PROFILE" == "luna-rsa-aes" ]]; then
+    printf '  Luna notes: standard C_* partition/keyring validation only; PKCS#11 v3 remains unverified on Luna and CA_* extensions are out of scope\n'
+  fi
 
   if [[ "$PKCS11_PROVISIONING_REGRESSION" == "1" ]]; then
     printf '  Provisioning regression: enabled (SO PIN required)\n'
