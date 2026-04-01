@@ -5,8 +5,8 @@
 - `src/Pkcs11Wrapper` - managed API surface used by consumers
 - `src/Pkcs11Wrapper.Native` - low-level PKCS#11 function table and native interop layer
 - `tests/Pkcs11Wrapper.Native.Tests` - xUnit regression suite covering layout, API shape, and SoftHSM-backed behavior
-- `samples/Pkcs11Wrapper.Smoke` - executable smoke sample used both locally and by the AOT smoke flow
-- `eng` - engineering scripts for fixture setup, regression execution, and native AOT smoke
+- `samples/Pkcs11Wrapper.Smoke` - executable smoke sample used by runtime and NativeAOT validation paths
+- `eng` - engineering scripts for fixture setup, regression execution, smoke validation, benchmarks, release verification, and package inspection
 - `artifacts` - generated outputs such as `artifacts/smoke-aot/linux-x64`
 - `global.json` and `Directory.Build.props` - SDK pinning and shared build settings (`net10.0`, nullable, warnings-as-errors, AOT analyzers)
 
@@ -24,14 +24,15 @@ dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 
 Notes:
 
-- `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
+- `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, builds a tiny PKCS#11 v3 runtime shim on Linux, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
 - `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation and now defaults to the `baseline-rsa-aes` vendor compatibility profile documented in `docs/vendor-regression.md`.
-- `eng/run-smoke-aot.sh` provisions its own temporary fixture, publishes `samples/Pkcs11Wrapper.Smoke` with `/p:PublishAot=true`, then executes the produced binary.
-- `eng/run-benchmarks.sh` provisions its own temporary fixture, runs the `BenchmarkDotNet` suite, and writes the latest benchmark summary under `artifacts/benchmarks/latest/summary.md`.
-- `eng/run-benchmarks.sh --update-docs` additionally refreshes the committed Linux baseline file at `docs/benchmarks/latest-linux-softhsm.md` after a trustworthy rerun.
+- `eng/run-smoke-aot.sh` provisions its own temporary fixture, publishes `samples/Pkcs11Wrapper.Smoke` with `/p:PublishAot=true`, then executes the produced binary with strict output validation.
+- `eng/run-benchmarks.sh` provisions its own temporary fixture, runs the `BenchmarkDotNet` suite, and writes the latest benchmark summary under `artifacts/benchmarks/latest/summary.md` plus machine-readable JSON.
+- `eng/run-benchmarks.sh --update-docs` additionally refreshes the committed Linux baseline files at `docs/benchmarks/latest-linux-softhsm.md` and `docs/benchmarks/latest-linux-softhsm.json` after a trustworthy rerun.
 - If you want to inspect behavior interactively, create a fixture with `eng/setup-softhsm-fixture.sh`, `source` the generated env file, and run the smoke sample or targeted `dotnet test` commands manually.
-- Windows local development is supported for restore/build/test flows. The repository now also includes PowerShell helpers (`eng/setup-softhsm-fixture.ps1`, `eng/run-regression-tests.ps1`, `eng/run-smoke.ps1`) so Windows runtime checks can run against SoftHSM-for-Windows without relying on the Bash-only fixture path.
+- Windows local development is supported for restore/build/test flows. The repository also includes PowerShell helpers (`eng/setup-softhsm-fixture.ps1`, `eng/run-regression-tests.ps1`, `eng/run-smoke.ps1`, `eng/run-smoke-aot.ps1`) so Windows runtime and NativeAOT checks can run against SoftHSM-for-Windows without relying on the Bash-only fixture path.
 - Windows also has a matching benchmark entry point through `eng/run-benchmarks.ps1`.
+- `eng/verify-release.sh` now validates package contents, SourceLink-enabled symbols, and local package consumption in addition to build/test/smoke work.
 
 ## Test layers
 
@@ -40,6 +41,7 @@ Notes:
 - API and shape checks - `ManagedApiSurfaceTests.cs` verifies that the intended managed surface exists.
 - Interop layout checks - `NativeTypeLayoutTests.cs` validates native type and function-list expectations.
 - SoftHSM-backed regressions - `SoftHsmCryptRegressionTests.cs` validates realistic runtime flows against a PKCS#11 module.
+- PKCS#11 v3 shim regressions - `Pkcs11V3ShimRuntimeTests.cs` validates interface discovery plus real v3 login/session-cancel/message-encrypt flows against a deterministic Linux-only shim.
 
 The SoftHSM regression layer currently exercises:
 
@@ -65,17 +67,17 @@ The wrapper surface implemented through the current phase set includes:
 - optional PKCS#11 v3 interface discovery and message-based API surface
 - optional `C_LoginUser` / `C_SessionCancel` through the discovered v3 interface
 - administrative operations for session invalidation and token/PIN provisioning
-- native AOT smoke validation through the sample app
+- NativeAOT smoke validation through the sample app on Linux and Windows
 
 Notable current assumptions:
 
-- documented full fixture/smoke validation flow exists on Linux, and a parallel Windows runtime regression path exists through the PowerShell SoftHSM-for-Windows helpers
+- documented full fixture/smoke validation flow exists on Linux, and parallel Windows runtime + NativeAOT validation paths exist through the PowerShell SoftHSM-for-Windows helpers
 - SoftHSM is the reference module used by scripts, tests, and CI
-- GitHub Actions also runs a Windows SoftHSM runtime regression lane to keep cross-platform support from regressing
+- GitHub Actions runs a Windows SoftHSM runtime regression lane plus a Windows `win-x64` NativeAOT smoke lane to keep cross-platform support from regressing
 - a separate optional CI lane can run regression tests against a configured non-SoftHSM vendor module
 - vendor validation distinguishes capability-gated skips from broken env/object-contract failures
 - provisioning regression for `InitToken` is intentionally opt-in and only runs when `PKCS11_PROVISIONING_REGRESSION=1` and `PKCS11_SO_PIN` are available
-- current SoftHSM builds used in CI do not export `C_GetInterface*`, so v3-specific runtime behavior remains capability-gated until an additional v3-capable module is added to validation
+- current SoftHSM builds used in CI do not export `C_GetInterface*`, so Linux regression now pairs SoftHSM capability-absent coverage with a deterministic v3 shim for runtime-present validation
 
 ## Runtime contracts
 

@@ -26,12 +26,20 @@ internal static class BenchmarkSummaryWriter
                     continue;
                 }
 
+                long? allocatedBytesPerOperation = report.GcStats.GetBytesAllocatedPerOperation(report.BenchmarkCase);
+                long? totalAllocatedBytes = report.GcStats.GetTotalAllocatedBytes(excludeAllocationQuantumSideEffects: true);
+
                 entries.Add(new BenchmarkSummaryEntry(
                     Category: string.Join(", ", report.BenchmarkCase.Descriptor.Categories.OrderBy(static value => value, StringComparer.Ordinal)),
                     Suite: report.BenchmarkCase.Descriptor.Type.Name,
                     Benchmark: report.BenchmarkCase.Descriptor.WorkloadMethod.Name,
                     MeanNanoseconds: report.ResultStatistics.Mean,
-                    StandardDeviationNanoseconds: report.ResultStatistics.StandardDeviation));
+                    StandardDeviationNanoseconds: report.ResultStatistics.StandardDeviation,
+                    AllocatedBytesPerOperation: allocatedBytesPerOperation,
+                    TotalAllocatedBytes: totalAllocatedBytes,
+                    Gen0Collections: report.GcStats.Gen0Collections,
+                    Gen1Collections: report.GcStats.Gen1Collections,
+                    Gen2Collections: report.GcStats.Gen2Collections));
             }
         }
 
@@ -63,17 +71,30 @@ internal static class BenchmarkSummaryWriter
             Entries: entries);
 
         string markdown = BuildMarkdown(document);
+        string json = JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true });
         UTF8Encoding utf8 = new(encoderShouldEmitUTF8Identifier: false);
-        File.WriteAllText(Path.Combine(resultsRoot, "summary.md"), markdown, utf8);
-        File.WriteAllText(Path.Combine(resultsRoot, "summary.json"), JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true }), utf8);
 
-        string? canonicalResultsPath = Environment.GetEnvironmentVariable("PKCS11_BENCHMARK_CANONICAL_RESULTS_PATH");
-        if (!string.IsNullOrWhiteSpace(canonicalResultsPath))
+        File.WriteAllText(Path.Combine(resultsRoot, "summary.md"), markdown, utf8);
+        File.WriteAllText(Path.Combine(resultsRoot, "summary.json"), json, utf8);
+
+        string? canonicalMarkdownPath = Environment.GetEnvironmentVariable("PKCS11_BENCHMARK_CANONICAL_RESULTS_PATH");
+        if (!string.IsNullOrWhiteSpace(canonicalMarkdownPath))
         {
-            string canonicalDirectory = Path.GetDirectoryName(canonicalResultsPath)!;
-            Directory.CreateDirectory(canonicalDirectory);
-            File.WriteAllText(canonicalResultsPath, markdown, utf8);
+            WriteCanonicalFile(canonicalMarkdownPath, markdown, utf8);
         }
+
+        string? canonicalJsonPath = Environment.GetEnvironmentVariable("PKCS11_BENCHMARK_CANONICAL_JSON_PATH");
+        if (!string.IsNullOrWhiteSpace(canonicalJsonPath))
+        {
+            WriteCanonicalFile(canonicalJsonPath, json, utf8);
+        }
+    }
+
+    private static void WriteCanonicalFile(string path, string content, Encoding encoding)
+    {
+        string canonicalDirectory = Path.GetDirectoryName(path)!;
+        Directory.CreateDirectory(canonicalDirectory);
+        File.WriteAllText(path, content, encoding);
     }
 
     private static string BuildMarkdown(BenchmarkSummaryDocument document)
@@ -88,10 +109,10 @@ internal static class BenchmarkSummaryWriter
         builder.AppendLine($"- OS: {document.OperatingSystem}");
         builder.AppendLine($"- Architecture: {document.Architecture}");
         builder.AppendLine($"- PKCS#11 module: `{document.FixtureModulePath}`");
-        builder.AppendLine($"- Benchmark profile: BenchmarkDotNet ShortRun + MemoryDiagnoser");
+        builder.AppendLine("- Benchmark profile: BenchmarkDotNet ShortRun + MemoryDiagnoser");
         builder.AppendLine();
-        builder.AppendLine("| Category | Suite | Benchmark | Mean | StdDev | Allocated |" );
-        builder.AppendLine("| --- | --- | --- | ---: | ---: | ---: |");
+        builder.AppendLine("| Category | Suite | Benchmark | Mean | StdDev | Allocated | Gen0 | Gen1 | Gen2 |");
+        builder.AppendLine("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |");
 
         foreach (BenchmarkSummaryEntry entry in document.Entries)
         {
@@ -106,7 +127,13 @@ internal static class BenchmarkSummaryWriter
                 .Append(" | ")
                 .Append(FormatDuration(entry.StandardDeviationNanoseconds))
                 .Append(" | ")
-                .Append("n/a")
+                .Append(FormatAllocatedBytes(entry.AllocatedBytesPerOperation))
+                .Append(" | ")
+                .Append(entry.Gen0Collections)
+                .Append(" | ")
+                .Append(entry.Gen1Collections)
+                .Append(" | ")
+                .Append(entry.Gen2Collections)
                 .AppendLine(" |");
         }
 
@@ -128,6 +155,21 @@ internal static class BenchmarkSummaryWriter
         }
 
         return string.Create(CultureInfo.InvariantCulture, $"{nanoseconds:0.###} ns");
+    }
+
+    private static string FormatAllocatedBytes(long? bytes)
+    {
+        if (!bytes.HasValue)
+        {
+            return "n/a";
+        }
+
+        if (bytes.Value == 0)
+        {
+            return "0 B";
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"{bytes.Value:N0} B");
     }
 
     private static string ResolveRepoRoot()
@@ -167,5 +209,10 @@ internal static class BenchmarkSummaryWriter
         string Suite,
         string Benchmark,
         double MeanNanoseconds,
-        double StandardDeviationNanoseconds);
+        double StandardDeviationNanoseconds,
+        long? AllocatedBytesPerOperation,
+        long? TotalAllocatedBytes,
+        int Gen0Collections,
+        int Gen1Collections,
+        int Gen2Collections);
 }

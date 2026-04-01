@@ -36,21 +36,29 @@ AdminStorageOptions adminStorage = new()
 };
 Directory.CreateDirectory(adminStorage.DataRoot);
 
+AdminSessionRegistryOptions sessionOptions = builder.Configuration.GetSection("AdminSessionRegistry").Get<AdminSessionRegistryOptions>() ?? new();
+LocalAdminLoginThrottleOptions throttleOptions = builder.Configuration.GetSection("LocalAdminLoginThrottle").Get<LocalAdminLoginThrottleOptions>() ?? new();
+
 builder.Services.AddSingleton(adminStorage);
 builder.Services.AddSingleton<IOptions<AdminStorageOptions>>(Options.Create(adminStorage));
+builder.Services.AddSingleton(sessionOptions);
+builder.Services.AddSingleton(throttleOptions);
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(adminStorage.DataRoot, "keys")));
 builder.Services.AddSingleton<IDeviceProfileStore, JsonDeviceProfileStore>();
 builder.Services.AddSingleton<IAuditLogStore, JsonLineAuditLogStore>();
 builder.Services.AddSingleton<ProtectedPinStore>();
 builder.Services.AddSingleton<Pkcs11LabTemplateStore>();
+builder.Services.AddSingleton<IDeviceDependencyCleanupService, DeviceDependencyCleanupService>();
 builder.Services.AddSingleton<DeviceProfileService>();
-builder.Services.AddSingleton<AdminSessionRegistry>();
+builder.Services.AddSingleton(sp => new AdminSessionRegistry(sp.GetRequiredService<AdminSessionRegistryOptions>()));
 builder.Services.AddSingleton<LocalAdminUserStore>();
+builder.Services.AddSingleton(sp => new LocalAdminLoginThrottleService(sp.GetRequiredService<LocalAdminLoginThrottleOptions>()));
 builder.Services.AddScoped<IAdminActorContext, HttpContextAdminActorContext>();
 builder.Services.AddScoped<IAdminAuthorizationService, HttpContextAdminAuthorizationService>();
 builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddScoped<LocalAdminSecurityService>();
+builder.Services.AddScoped<LocalAdminLoginService>();
 builder.Services.AddScoped<HsmAdminService>();
 
 var app = builder.Build();

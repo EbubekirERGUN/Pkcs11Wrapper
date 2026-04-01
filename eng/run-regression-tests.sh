@@ -5,6 +5,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 setup_script="$script_dir/setup-softhsm-fixture.sh"
+build_v3_shim_script="$script_dir/build-pkcs11-v3-shim.sh"
 fixture_root=""
 fixture_env=""
 use_existing_env=false
@@ -84,6 +85,12 @@ print_existing_env_summary() {
 
 require_command dotnet
 require_command pkcs11-tool
+
+if [[ "$(uname -s)" == "Linux" ]]; then
+  chmod +x "$build_v3_shim_script"
+  export PKCS11_V3_SHIM_PATH="$($build_v3_shim_script)"
+  printf 'Built PKCS#11 v3 runtime shim: %s\n' "$PKCS11_V3_SHIM_PATH"
+fi
 
 if [[ "$use_existing_env" == "true" ]]; then
   printf 'Using existing PKCS#11 environment (SoftHSM fixture setup skipped)\n'

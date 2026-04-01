@@ -9,7 +9,7 @@ using Pkcs11Wrapper.Native;
 
 namespace Pkcs11Wrapper.Admin.Application.Services;
 
-public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization)
+public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization, IDeviceDependencyCleanupService? dependencyCleanup = null)
 {
     private const string DestroyConfirmationPrefix = "DESTROY ";
     private const string ConfigurationFormat = "Pkcs11Wrapper.Admin.Configuration";
@@ -69,7 +69,12 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         List<string> Notes,
         Pkcs11LabArtifactKind ArtifactKind = Pkcs11LabArtifactKind.None,
         string? ArtifactHex = null,
-        string? CreatedHandleText = null)
+        string? CreatedHandleText = null,
+        string? CreatedLabel = null,
+        string? CreatedIdHex = null,
+        string? CreatedObjectClass = null,
+        string? CreatedKeyType = null,
+        bool CreatedObjectPersistsAcrossSessions = false)
     {
         public static implicit operator LabExecutionPayload((string Summary, string OutputText, List<string> Notes) value)
             => new(value.Summary, value.OutputText, value.Notes);
@@ -81,18 +86,33 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return deviceProfiles.GetAllAsync(cancellationToken);
     }
 
-    public Task<HsmDeviceProfile> SaveDeviceAsync(Guid? id, HsmDeviceProfileInput input, CancellationToken cancellationToken = default)
+    public async Task<HsmDeviceProfile> SaveDeviceAsync(Guid? id, HsmDeviceProfileInput input, CancellationToken cancellationToken = default)
     {
         authorization.DemandAdmin();
-        return deviceProfiles.UpsertAsync(id, input, cancellationToken);
+
+        HsmDeviceProfile? existing = id.HasValue ? await deviceProfiles.GetAsync(id.Value, cancellationToken) : null;
+        HsmDeviceProfile saved = await deviceProfiles.UpsertAsync(id, input, cancellationToken);
+
+        if (RequiresDependentStateReconciliation(existing, saved))
+        {
+            DeviceDependencyCleanupSummary cleanup = await ReconcileDependentStateAsync([saved.Id], $"Device profile '{saved.Name}' changed and dependent runtime/local state was invalidated.", "DeviceConfigChanged", cancellationToken);
+            await auditLog.WriteAsync("Device", existing is null ? "Create" : "Update", saved.Name, "Success", $"Device profile {(existing is null ? "created" : "updated")}.{cleanup.ToAuditSuffix()}", cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await auditLog.WriteAsync("Device", existing is null ? "Create" : "Update", saved.Name, "Success", $"Device profile {(existing is null ? "created" : "updated")}.", cancellationToken: cancellationToken);
+        }
+
+        return saved;
     }
 
     public async Task DeleteDeviceAsync(Guid id, CancellationToken cancellationToken = default)
     {
         authorization.DemandAdmin();
-        HsmDeviceProfile? existing = await deviceProfiles.GetAsync(id, cancellationToken);
+        HsmDeviceProfile existing = await RequireDeviceAsync(id, cancellationToken);
         await deviceProfiles.DeleteAsync(id, cancellationToken);
-        await auditLog.WriteAsync("Device", "Delete", existing?.Name ?? id.ToString(), "Success", "Device profile removed.", cancellationToken: cancellationToken);
+        DeviceDependencyCleanupSummary cleanup = await ReconcileDependentStateAsync([id], $"Device profile '{existing.Name}' was deleted.", "DeleteDevice", cancellationToken);
+        await auditLog.WriteAsync("Device", "Delete", existing.Name, "Success", $"Device profile removed.{cleanup.ToAuditSuffix()}", cancellationToken: cancellationToken);
     }
 
     public IReadOnlyList<AdminSessionSnapshot> GetSessions()
@@ -107,10 +127,10 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return auditLog.GetRecentAsync(take, cancellationToken);
     }
 
-    public Task<AuditIntegrityStatus> GetAuditIntegrityAsync(CancellationToken cancellationToken = default)
+    public Task<AuditIntegrityStatus> GetAuditIntegrityAsync(bool forceVerification = false, CancellationToken cancellationToken = default)
     {
         authorization.DemandViewer();
-        return auditLog.VerifyIntegrityAsync(cancellationToken);
+        return auditLog.VerifyIntegrityAsync(forceVerification, cancellationToken);
     }
 
     public async Task<DashboardSummary> GetDashboardAsync(CancellationToken cancellationToken = default)
@@ -119,7 +139,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         IReadOnlyList<HsmDeviceProfile> devices = await deviceProfiles.GetAllAsync(cancellationToken);
         IReadOnlyList<AdminAuditLogEntry> logs = await auditLog.GetRecentAsync(25, cancellationToken);
         IReadOnlyList<AdminSessionSnapshot> sessions = sessionRegistry.GetSnapshots();
-        AuditIntegrityStatus integrity = await auditLog.VerifyIntegrityAsync(cancellationToken);
+        AuditIntegrityStatus integrity = await auditLog.VerifyIntegrityAsync(forceVerification: false, cancellationToken);
 
         return new DashboardSummary(
             devices.Count,
@@ -191,8 +211,11 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             }
 
             ValidateConfigurationBundle(bundle);
+            IReadOnlyList<HsmDeviceProfile> beforeImport = await deviceProfiles.GetAllAsync(cancellationToken);
             AdminConfigurationImportResult importResult = await deviceProfiles.ImportAsync(bundle.DeviceProfiles, mode, cancellationToken);
+            IReadOnlyList<HsmDeviceProfile> afterImport = await deviceProfiles.GetAllAsync(cancellationToken);
 
+            DeviceDependencyCleanupSummary cleanup = await ReconcileDependentStateForImportAsync(beforeImport, afterImport, mode, cancellationToken);
             List<string> warnings = [.. importResult.Warnings];
             string currentVersion = GetCurrentProductVersion();
             if (!string.IsNullOrWhiteSpace(bundle.ProductVersion) && !string.Equals(bundle.ProductVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
@@ -212,7 +235,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 "Import",
                 importTarget,
                 "Success",
-                $"{result.Summary}{warningSuffix}",
+                $"{result.Summary}{cleanup.ToAuditSuffix()}{warningSuffix}",
                 cancellationToken: cancellationToken);
 
             return result;
@@ -263,7 +286,21 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
             stopwatch.Stop();
             await auditLog.WriteAsync("Lab", request.Operation.ToString(), target, "Success", execution.Summary, cancellationToken: cancellationToken);
-            return new(request.Operation.ToString(), true, execution.Summary, execution.OutputText, execution.Notes, stopwatch.ElapsedMilliseconds, execution.ArtifactKind, execution.ArtifactHex, execution.CreatedHandleText);
+            return new(
+                request.Operation.ToString(),
+                true,
+                execution.Summary,
+                execution.OutputText,
+                execution.Notes,
+                stopwatch.ElapsedMilliseconds,
+                execution.ArtifactKind,
+                execution.ArtifactHex,
+                execution.CreatedHandleText,
+                execution.CreatedLabel,
+                execution.CreatedIdHex,
+                execution.CreatedObjectClass,
+                execution.CreatedKeyType,
+                execution.CreatedObjectPersistsAcrossSessions);
         }
         catch (Exception ex)
         {
@@ -271,7 +308,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             string summary = $"{request.Operation} failed: {ex.Message}";
             string output = $"{ex.GetType().Name}: {ex.Message}";
             await auditLog.WriteAsync("Lab", request.Operation.ToString(), target, "Failure", ex.Message, cancellationToken: cancellationToken);
-            return new(request.Operation.ToString(), false, summary, output, [], stopwatch.ElapsedMilliseconds, Pkcs11LabArtifactKind.None, null, null);
+            return new(request.Operation.ToString(), false, summary, output, [], stopwatch.ElapsedMilliseconds, Pkcs11LabArtifactKind.None, null, null, null, null, null, null, false);
         }
     }
 
@@ -358,10 +395,28 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         string pinNote = LoginIfProvided(session, userPin);
         Pkcs11ObjectSearchParameters search = new(label: string.IsNullOrWhiteSpace(labelFilter) ? default : Encoding.UTF8.GetBytes(labelFilter));
-        List<Pkcs11ObjectHandle> handles = EnumerateObjectHandles(session, search);
-        List<HsmKeyObjectSummary> keys = handles.Select(handle => ReadObjectSummary(deviceId, slotIdValue, session, handle)).ToList();
+        List<Pkcs11ObjectHandle> handles = HsmAdminObjectCatalog.EnumerateObjectHandles(session, search);
+        List<HsmKeyObjectSummary> keys = handles.Select(handle => HsmAdminObjectCatalog.ReadObjectSummary(deviceId, slotIdValue, session, handle)).ToList();
         await auditLog.WriteAsync("Key", "List", $"{device.Name}/slot-{slotIdValue}", "Success", $"Loaded {keys.Count} key/object record(s) via {pinNote}.", cancellationToken: cancellationToken);
         return keys;
+    }
+
+    public async Task<HsmKeyObjectPage> GetKeyPageAsync(Guid deviceId, nuint slotIdValue, KeyObjectPageRequest request, string? userPin, CancellationToken cancellationToken = default)
+    {
+        authorization.DemandViewer();
+        ValidateKeyObjectPageRequest(request);
+
+        HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
+        using Pkcs11Module module = CreateInitializedModule(device);
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
+        string pinNote = LoginIfProvided(session, userPin);
+
+        HsmKeyObjectPage page = HsmAdminKeyPageBrowser.ReadPage(deviceId, slotIdValue, session, request);
+        string detail = page.UsedStreamingCursor
+            ? $"streamed {page.Items.Count} object(s) with {page.SummaryReadCount} summary read(s)"
+            : $"sorted {page.Items.Count} object(s) after scanning {page.SummaryReadCount} summary record(s)";
+        await auditLog.WriteAsync("Key", "ListPage", $"{device.Name}/slot-{slotIdValue}", "Success", $"Loaded key page via {pinNote}; {detail}.", cancellationToken: cancellationToken);
+        return page;
     }
 
     public async Task<HsmObjectDetail> GetObjectDetailAsync(Guid deviceId, nuint slotIdValue, nuint handleValue, string? userPin, CancellationToken cancellationToken = default)
@@ -372,7 +427,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
         string pinNote = LoginIfProvided(session, userPin);
 
-        HsmObjectDetail detail = ReadObjectDetail(deviceId, slotIdValue, session, new Pkcs11ObjectHandle(handleValue));
+        HsmObjectDetail detail = HsmAdminObjectCatalog.ReadObjectDetail(deviceId, slotIdValue, session, new Pkcs11ObjectHandle(handleValue));
         await auditLog.WriteAsync("Key", "Detail", $"{device.Name}/slot-{slotIdValue}/handle-{handleValue}", "Success", $"Loaded object detail via {pinNote}.", cancellationToken: cancellationToken);
         return detail;
     }
@@ -916,6 +971,34 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             ? $"{DestroyConfirmationPrefix}{handle}"
             : $"{DestroyConfirmationPrefix}{handle} {label.Trim()}";
 
+    public static void ValidateKeyObjectPageRequest(KeyObjectPageRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.PageSize is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Page size must be between 1 and 100.");
+        }
+
+        string classFilter = request.ClassFilter.ToLowerInvariant();
+        if (classFilter is not ("all" or "secretkey" or "privatekey" or "publickey" or "data"))
+        {
+            throw new ArgumentException("Unsupported class filter.", nameof(request));
+        }
+
+        string capabilityFilter = request.CapabilityFilter.ToLowerInvariant();
+        if (capabilityFilter is not ("all" or "encrypt" or "decrypt" or "sign" or "verify" or "wrap" or "unwrap"))
+        {
+            throw new ArgumentException("Unsupported capability filter.", nameof(request));
+        }
+
+        string sortMode = request.SortMode.ToLowerInvariant();
+        if (sortMode is not ("handle" or "label" or "class" or "capability"))
+        {
+            throw new ArgumentException("Unsupported sort mode.", nameof(request));
+        }
+    }
+
     private static bool OperationRequiresSlot(Pkcs11LabOperation operation)
         => operation is Pkcs11LabOperation.MechanismList
             or Pkcs11LabOperation.MechanismInfo
@@ -1262,7 +1345,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11ObjectHandle handle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
-        HsmObjectDetail detail = ReadObjectDetail(deviceId, request.SlotId.Value, session, handle);
+        HsmObjectDetail detail = HsmAdminObjectCatalog.ReadObjectDetail(deviceId, request.SlotId.Value, session, handle);
 
         if (string.IsNullOrWhiteSpace(request.UserPin))
         {
@@ -1347,7 +1430,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 encrypt: request.UnwrapAllowEncrypt,
                 decrypt: request.UnwrapAllowDecrypt));
 
-        HsmObjectDetail detail = ReadObjectDetail(deviceId, request.SlotId.Value, session, unwrappedHandle);
+        HsmObjectDetail detail = HsmAdminObjectCatalog.ReadObjectDetail(deviceId, request.SlotId.Value, session, unwrappedHandle);
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
@@ -1371,7 +1454,18 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
 
         notes.Add("This lab currently limits unwrap target templates to AES secret keys so the result stays inspectable and constrained.");
-        return new($"Unwrapped an AES secret key into handle {unwrappedHandle.Value} using {DescribeMechanismType(mechanismType)}.", output.ToString(), notes, Pkcs11LabArtifactKind.None, null, unwrappedHandle.Value.ToString(CultureInfo.InvariantCulture));
+        return new(
+            $"Unwrapped an AES secret key into handle {unwrappedHandle.Value} using {DescribeMechanismType(mechanismType)}.",
+            output.ToString(),
+            notes,
+            Pkcs11LabArtifactKind.None,
+            null,
+            unwrappedHandle.Value.ToString(CultureInfo.InvariantCulture),
+            detail.Label,
+            detail.IdHex,
+            detail.ObjectClass,
+            detail.KeyType,
+            request.UnwrapTokenObject);
     }
 
     private static (string Summary, string OutputText, List<string> Notes) ExecuteReadAttributeLab(Pkcs11Module module, Pkcs11LabRequest request)
@@ -1404,7 +1498,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
         Pkcs11ObjectClass? objectClass = ResolveLabObjectClass(request.ObjectClassFilter);
         Pkcs11ObjectSearchParameters search = new(label, id, objectClass);
-        List<Pkcs11ObjectHandle> handles = EnumerateObjectHandles(session, search, request.MaxObjects, out bool truncated);
+        List<Pkcs11ObjectHandle> handles = HsmAdminObjectCatalog.EnumerateObjectHandles(session, search, request.MaxObjects, out bool truncated);
 
         if (label.Length == 0 && id.Length == 0 && objectClass is null)
         {
@@ -1427,8 +1521,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         foreach (Pkcs11ObjectHandle handle in handles)
         {
-            HsmKeyObjectSummary summary = ReadObjectSummary(deviceId, request.SlotId.Value, session, handle);
-            output.AppendLine($"- Handle={summary.Handle} | Label={summary.Label ?? "<null>"} | Id={summary.IdHex ?? "<null>"} | Class={summary.ObjectClass} | KeyType={summary.KeyType} | Caps={DescribeCapabilities(summary)}");
+            HsmKeyObjectSummary summary = HsmAdminObjectCatalog.ReadObjectSummary(deviceId, request.SlotId.Value, session, handle);
+            output.AppendLine($"- Handle={summary.Handle} | Label={summary.Label ?? "<null>"} | Id={summary.IdHex ?? "<null>"} | Class={summary.ObjectClass} | KeyType={summary.KeyType} | Caps={HsmAdminObjectCatalog.DescribeCapabilities(summary)}");
         }
 
         string summaryText = truncated
@@ -1566,7 +1660,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         Pkcs11ObjectClass? objectClass = ResolveLabObjectClassText(objectClassText);
         Pkcs11KeyType? keyType = ResolveLabKeyTypeText(keyTypeText);
         Pkcs11ObjectSearchParameters search = new(labelBytes, idBytes, objectClass, keyType);
-        List<Pkcs11ObjectHandle> matches = EnumerateObjectHandles(session, search, 3, out bool truncated);
+        List<Pkcs11ObjectHandle> matches = HsmAdminObjectCatalog.EnumerateObjectHandles(session, search, 3, out bool truncated);
         if (matches.Count == 1)
         {
             return matches[0];
@@ -2529,6 +2623,58 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         Pkcs11Module module = Pkcs11Module.Load(device.ModulePath);
         module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
         return module;
+    }
+
+    private static bool RequiresDependentStateReconciliation(HsmDeviceProfile? existing, HsmDeviceProfile updated)
+        => existing is not null && (!string.Equals(existing.ModulePath, updated.ModulePath, StringComparison.Ordinal) || existing.IsEnabled != updated.IsEnabled);
+
+    private async Task<DeviceDependencyCleanupSummary> ReconcileDependentStateAsync(IReadOnlyCollection<Guid> affectedDeviceIds, string reason, string operation, CancellationToken cancellationToken)
+    {
+        int invalidatedSessions = 0;
+        foreach (Guid deviceId in affectedDeviceIds.Distinct())
+        {
+            invalidatedSessions += await sessionRegistry.InvalidateAndReleaseForDeviceAsync(deviceId, reason, operation);
+        }
+
+        DeviceDependencyCleanupSummary dependencyCleanupSummary = dependencyCleanup is null
+            ? new DeviceDependencyCleanupSummary(0, 0, 0)
+            : await dependencyCleanup.CleanupForDevicesAsync(affectedDeviceIds, cancellationToken);
+
+        return dependencyCleanupSummary with { InvalidatedTrackedSessions = invalidatedSessions };
+    }
+
+    private async Task<DeviceDependencyCleanupSummary> ReconcileDependentStateForImportAsync(IReadOnlyList<HsmDeviceProfile> beforeImport, IReadOnlyList<HsmDeviceProfile> afterImport, AdminConfigurationImportMode mode, CancellationToken cancellationToken)
+    {
+        HashSet<Guid> retainedIds = [.. afterImport.Select(device => device.Id)];
+        HashSet<Guid> changedIds = [];
+
+        Dictionary<Guid, HsmDeviceProfile> beforeById = beforeImport.ToDictionary(device => device.Id);
+        foreach (HsmDeviceProfile current in afterImport)
+        {
+            if (beforeById.TryGetValue(current.Id, out HsmDeviceProfile? previous) && RequiresDependentStateReconciliation(previous, current))
+            {
+                changedIds.Add(current.Id);
+            }
+        }
+
+        DeviceDependencyCleanupSummary changedCleanup = changedIds.Count == 0
+            ? new DeviceDependencyCleanupSummary(0, 0, 0)
+            : await ReconcileDependentStateAsync(changedIds, "Device profile configuration changed during import.", "ImportConfiguration", cancellationToken);
+
+        if (mode != AdminConfigurationImportMode.ReplaceAll)
+        {
+            return changedCleanup;
+        }
+
+        int invalidatedMissingSessions = await sessionRegistry.InvalidateAndReleaseMissingDevicesAsync(retainedIds, "Device profile was removed by replace-all configuration import.", "ImportConfiguration");
+        DeviceDependencyCleanupSummary missingCleanup = dependencyCleanup is null
+            ? new DeviceDependencyCleanupSummary(0, 0, 0)
+            : await dependencyCleanup.CleanupForMissingDevicesAsync(retainedIds, cancellationToken);
+
+        return new DeviceDependencyCleanupSummary(
+            changedCleanup.InvalidatedTrackedSessions + invalidatedMissingSessions,
+            changedCleanup.RemovedProtectedPinEntries + missingCleanup.RemovedProtectedPinEntries,
+            changedCleanup.RemovedLabTemplates + missingCleanup.RemovedLabTemplates);
     }
 
     private async Task<HsmDeviceProfile> RequireDeviceAsync(Guid deviceId, CancellationToken cancellationToken)

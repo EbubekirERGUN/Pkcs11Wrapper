@@ -53,13 +53,13 @@ jobs:
             **/*.csproj
 
       - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install -y softhsm2 opensc file
+        run: sudo apt-get update && sudo apt-get install -y build-essential softhsm2 opensc file
 
       - name: Prepare CI artifact directory
         run: mkdir -p "$CI_ARTIFACT_ROOT"
 
       - name: Make engineering scripts executable
-        run: chmod +x eng/setup-softhsm-fixture.sh eng/run-regression-tests.sh eng/run-smoke-aot.sh
+        run: chmod +x eng/build-pkcs11-v3-shim.sh eng/setup-softhsm-fixture.sh eng/run-regression-tests.sh eng/run-smoke-aot.sh
 
       - name: Restore
         run: dotnet restore Pkcs11Wrapper.sln
@@ -115,13 +115,13 @@ jobs:
         shell: pwsh
         run: choco install opensc -y --no-progress
 
-      - name: Setup Windows SoftHSM fixture
-        shell: pwsh
-        run: .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1"
-
       - name: Prepare CI artifact directory
         shell: pwsh
         run: New-Item -ItemType Directory -Force -Path $env:CI_ARTIFACT_ROOT | Out-Null
+
+      - name: Setup Windows SoftHSM fixture
+        shell: pwsh
+        run: .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" 2>&1 | Tee-Object -FilePath (Join-Path $env:CI_ARTIFACT_ROOT 'fixture-setup.log')
 
       - name: Restore
         run: dotnet restore Pkcs11Wrapper.sln
@@ -135,14 +135,21 @@ jobs:
 
       - name: Windows smoke runtime
         shell: pwsh
-        run: .\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoBuild 2>&1 | Tee-Object -FilePath (Join-Path $env:CI_ARTIFACT_ROOT 'smoke.log')
+        run: .\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoBuild -Strict 2>&1 | Tee-Object -FilePath (Join-Path $env:CI_ARTIFACT_ROOT 'smoke.log')
+
+      - name: Windows NativeAOT smoke
+        shell: pwsh
+        run: .\eng\run-smoke-aot.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -Strict 2>&1 | Tee-Object -FilePath (Join-Path $env:CI_ARTIFACT_ROOT 'smoke-aot.log')
 
       - name: Upload Windows CI artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pkcs11wrapper-ci-windows-run-${{ github.run_number }}
-          path: artifacts/ci/windows
+          path: |
+            artifacts/ci/windows
+            artifacts/smoke-aot/win-x64
+            artifacts/smoke-runtime/windows
           if-no-files-found: warn
           retention-days: 14
 

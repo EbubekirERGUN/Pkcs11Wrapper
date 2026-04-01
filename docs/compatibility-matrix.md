@@ -5,9 +5,9 @@
 | Area | Status | Notes |
 | --- | --- | --- |
 | OS | Linux | Primary runtime validation target (fixture-backed regression + NativeAOT smoke) |
-| OS | Windows | Supported for build/API/layout validation and fixture-backed runtime regression through SoftHSM-for-Windows |
+| OS | Windows | Supported for fixture-backed runtime regression and `win-x64` NativeAOT smoke through SoftHSM-for-Windows |
 | Runtime | .NET 10 | Pinned via `global.json` |
-| NativeAOT | Supported | Validated by `eng/run-smoke-aot.sh` |
+| NativeAOT | Supported | Validated by `eng/run-smoke-aot.sh` on Linux and `eng/run-smoke-aot.ps1` on Windows |
 | Reference module | SoftHSM v2 | Default local + CI regression target |
 | Optional vendor lane | Supported | Via `eng/run-regression-tests.sh --use-existing-env` and `docs/vendor-regression.md` |
 
@@ -24,13 +24,13 @@
 | Multipart crypto + operation state | Supported | SoftHSM regression coverage |
 | Recover / combined update flows | Supported | Managed API + runtime coverage |
 | Function status / cancel | Capability-gated | Exposed; returns false on modules that report unsupported / non-parallel |
-| Interface discovery (`C_GetInterface*`) | Capability-gated | Optional export path; absent on current SoftHSM builds |
-| PKCS#11 v3 message APIs (`C_Message*`) | Capability-gated | Exposed through v3 interface list when the module provides it |
-| `C_LoginUser` / `C_SessionCancel` | Capability-gated | Routed through the discovered v3 interface |
+| Interface discovery (`C_GetInterface*`) | Supported | Runtime-covered on Linux via the deterministic v3 shim; SoftHSM remains the capability-absent reference |
+| PKCS#11 v3 message APIs (`C_Message*`) | Supported | Runtime-covered on Linux via the deterministic v3 shim; absent SoftHSM exports remain explicitly validated as capability-absent |
+| `C_LoginUser` / `C_SessionCancel` | Supported | Runtime-covered on Linux via the deterministic v3 shim |
 
 ## Known limitations
 
-- Current automated runtime validation does **not** include a module that exposes PKCS#11 v3 message APIs; those paths are validated by ABI/layout tests and capability-gated behavior today.
-- Windows does not yet have the same NativeAOT smoke depth as Linux; current Windows coverage includes fixture-backed runtime regression through SoftHSM-for-Windows plus the standard build/API/layout checks.
+- PKCS#11 v3 runtime validation now uses a deterministic Linux-built shim rather than a vendor module, so it validates marshalling/runtime behavior but not vendor-specific semantics.
+- Windows NativeAOT validation now exists, but Linux still remains the deepest day-to-day validation environment because it is the primary benchmark baseline and the most feature-complete local automation path.
 - Mechanism parameter helpers are intentionally selective; uncommon mechanisms may still require raw parameter bytes.
 - Packaging discipline is defined in `docs/release.md`, but external package publication is still a maintainer action rather than an automated CI publish step.

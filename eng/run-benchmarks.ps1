@@ -33,11 +33,12 @@ New-Item -ItemType Directory -Force -Path $resultsRoot | Out-Null
 $env:PKCS11_BENCHMARK_REPO_ROOT = $repoRoot
 $env:PKCS11_BENCHMARK_RESULTS_ROOT = $resultsRoot
 $env:PKCS11_BENCHMARK_SDK_VERSION = (& dotnet --version)
-$runtimeMatches = (& dotnet --list-runtimes) | Select-String 'Microsoft\.AspNetCore\.App '
+$runtimeMatches = (& dotnet --list-runtimes) | Select-String 'Microsoft\.NETCore\.App '
 $env:PKCS11_BENCHMARK_RUNTIME_VERSION = ($runtimeMatches | Select-Object -Last 1).ToString().Split(' ')[1]
 
 if ($UpdateDocs.IsPresent) {
     $env:PKCS11_BENCHMARK_CANONICAL_RESULTS_PATH = Join-Path $repoRoot 'docs/benchmarks/latest-windows-softhsm.md'
+    $env:PKCS11_BENCHMARK_CANONICAL_JSON_PATH = Join-Path $repoRoot 'docs/benchmarks/latest-windows-softhsm.json'
 }
 
 & dotnet run --project (Join-Path $repoRoot 'benchmarks/Pkcs11Wrapper.Benchmarks/Pkcs11Wrapper.Benchmarks.csproj') -c Release -- --filter '*'

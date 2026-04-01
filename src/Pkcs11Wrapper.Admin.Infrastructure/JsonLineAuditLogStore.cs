@@ -1,5 +1,5 @@
-using System.Text;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
@@ -9,6 +9,7 @@ namespace Pkcs11Wrapper.Admin.Infrastructure;
 public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditLogStore
 {
     private readonly SemaphoreSlim _mutex = new(1, 1);
+    private AuditTailState? _tailState;
 
     public async Task AppendAsync(AdminAuditLogEntry entry, CancellationToken cancellationToken = default)
     {
@@ -17,9 +18,19 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
         {
             string path = GetPath();
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            AdminAuditLogEntry normalized = await CreateNormalizedEntryAsync(path, entry, cancellationToken);
+
+            _tailState ??= await ReadTailStateAsync(path, cancellationToken);
+            AdminAuditLogEntry normalized = CreateNormalizedEntry(entry, _tailState);
             string line = JsonSerializer.Serialize(normalized, AdminJsonContext.Default.AdminAuditLogEntry) + Environment.NewLine;
-            await File.AppendAllTextAsync(path, line, Encoding.UTF8, cancellationToken);
+
+            await using FileStream stream = new(path, FileMode.Append, FileAccess.Write, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough);
+            await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+            await writer.WriteAsync(line.AsMemory(), cancellationToken);
+            await writer.FlushAsync(cancellationToken);
+            await stream.FlushAsync(cancellationToken);
+            stream.Flush(flushToDisk: true);
+
+            _tailState = new AuditTailState(normalized.Sequence, normalized.EntryHash);
         }
         finally
         {
@@ -38,13 +49,8 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
                 return [];
             }
 
-            string[] lines = await File.ReadAllLinesAsync(path, cancellationToken);
-            return lines
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Reverse()
-                .Take(Math.Max(1, take))
-                .Select(line => JsonSerializer.Deserialize(line, AdminJsonContext.Default.AdminAuditLogEntry))
-                .OfType<AdminAuditLogEntry>()
+            return (await ReadTailLinesAsync(path, Math.Max(1, take), cancellationToken))
+                .Select(line => DeserializeEntry(line, path))
                 .ToArray();
         }
         finally
@@ -64,16 +70,26 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
                 return new AuditIntegrityStatus(true, 0, null, "Audit log is empty.", null);
             }
 
-            string[] lines = await File.ReadAllLinesAsync(path, cancellationToken);
+            await using FileStream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using StreamReader reader = new(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             AdminAuditLogEntry? previous = null;
             int checkedEntries = 0;
 
-            foreach (string line in lines.Where(x => !string.IsNullOrWhiteSpace(x)))
+            while (await reader.ReadLineAsync(cancellationToken) is { } line)
             {
-                AdminAuditLogEntry? entry = JsonSerializer.Deserialize(line, AdminJsonContext.Default.AdminAuditLogEntry);
-                if (entry is null)
+                if (string.IsNullOrWhiteSpace(line))
                 {
-                    return new AuditIntegrityStatus(false, checkedEntries, previous?.Sequence.ToString(), "Audit chain contains an unreadable entry.", "Unreadable audit JSON line.");
+                    continue;
+                }
+
+                AdminAuditLogEntry entry;
+                try
+                {
+                    entry = DeserializeEntry(line, path);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return new AuditIntegrityStatus(false, checkedEntries, previous?.Sequence.ToString(), "Audit chain contains an unreadable entry.", ex.Message);
                 }
 
                 checkedEntries++;
@@ -92,6 +108,7 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
                 previous = entry;
             }
 
+            _tailState = previous is null ? null : new AuditTailState(previous.Sequence, previous.EntryHash);
             return new AuditIntegrityStatus(true, checkedEntries, previous?.Sequence.ToString(), $"Verified {checkedEntries} chained audit entr{(checkedEntries == 1 ? "y" : "ies") }.", null);
         }
         finally
@@ -102,19 +119,8 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
 
     private string GetPath() => Path.Combine(options.DataRoot, options.AuditLogFileName);
 
-    private static async Task<AdminAuditLogEntry> CreateNormalizedEntryAsync(string path, AdminAuditLogEntry entry, CancellationToken cancellationToken)
+    private static AdminAuditLogEntry CreateNormalizedEntry(AdminAuditLogEntry entry, AuditTailState? previous)
     {
-        AdminAuditLogEntry? previous = null;
-        if (File.Exists(path))
-        {
-            string[] lines = await File.ReadAllLinesAsync(path, cancellationToken);
-            string? lastLine = lines.LastOrDefault(x => !string.IsNullOrWhiteSpace(x));
-            if (!string.IsNullOrWhiteSpace(lastLine))
-            {
-                previous = JsonSerializer.Deserialize(lastLine, AdminJsonContext.Default.AdminAuditLogEntry);
-            }
-        }
-
         AdminAuditLogEntry candidate = entry with
         {
             Sequence = (previous?.Sequence ?? 0) + 1,
@@ -124,6 +130,112 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
         };
 
         return candidate with { EntryHash = ComputeHash(candidate) };
+    }
+
+    private static AdminAuditLogEntry DeserializeEntry(string line, string path)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(line, AdminJsonContext.Default.AdminAuditLogEntry)
+                ?? throw new InvalidOperationException($"Audit log '{path}' contains an unreadable JSON line.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Audit log '{path}' contains an unreadable JSON line.", ex);
+        }
+    }
+
+    private static async Task<AuditTailState?> ReadTailStateAsync(string path, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        IReadOnlyList<string> lines = await ReadTailLinesAsync(path, 1, cancellationToken);
+        if (lines.Count == 0)
+        {
+            return null;
+        }
+
+        AdminAuditLogEntry lastEntry = DeserializeEntry(lines[0], path);
+        return new AuditTailState(lastEntry.Sequence, lastEntry.EntryHash);
+    }
+
+    private static async Task<IReadOnlyList<string>> ReadTailLinesAsync(string path, int take, CancellationToken cancellationToken)
+    {
+        List<string> lines = [];
+        await using FileStream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (stream.Length == 0)
+        {
+            return lines;
+        }
+
+        long position = stream.Length;
+        byte[] buffer = new byte[4096];
+        StringBuilder reversed = new();
+        bool skippedTrailingNewline = false;
+
+        while (position > 0 && lines.Count < take)
+        {
+            int bytesToRead = (int)Math.Min(buffer.Length, position);
+            position -= bytesToRead;
+            stream.Position = position;
+            int read = await stream.ReadAsync(buffer.AsMemory(0, bytesToRead), cancellationToken);
+
+            for (int index = read - 1; index >= 0; index--)
+            {
+                char current = (char)buffer[index];
+                if (current == '\n')
+                {
+                    if (!skippedTrailingNewline && reversed.Length == 0)
+                    {
+                        skippedTrailingNewline = true;
+                        continue;
+                    }
+
+                    AddCompletedLine(lines, reversed);
+                    if (lines.Count >= take)
+                    {
+                        break;
+                    }
+
+                    skippedTrailingNewline = true;
+                }
+                else
+                {
+                    reversed.Append(current);
+                }
+            }
+        }
+
+        if (lines.Count < take && reversed.Length > 0)
+        {
+            AddCompletedLine(lines, reversed);
+        }
+
+        return lines;
+    }
+
+    private static void AddCompletedLine(List<string> lines, StringBuilder reversed)
+    {
+        if (reversed.Length == 0)
+        {
+            return;
+        }
+
+        char[] chars = new char[reversed.Length];
+        for (int i = 0; i < reversed.Length; i++)
+        {
+            chars[i] = reversed[reversed.Length - 1 - i];
+        }
+
+        string line = new string(chars).TrimEnd('\r');
+        reversed.Clear();
+        if (!string.IsNullOrWhiteSpace(line))
+        {
+            lines.Add(line);
+        }
     }
 
     private static string ComputeHash(AdminAuditLogEntry entry)
@@ -148,4 +260,6 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
+
+    private sealed record AuditTailState(long Sequence, string EntryHash);
 }

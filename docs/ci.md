@@ -4,13 +4,13 @@
 
 `.github/workflows/ci.yml` defines:
 
-- `build-test-aot` (default SoftHSM lane)
-- `build-test-windows` (Windows SoftHSM runtime lane)
+- `build-test-aot` (default SoftHSM Linux lane)
+- `build-test-windows` (Windows SoftHSM runtime + NativeAOT lane)
 - `vendor-regression` (optional non-SoftHSM lane, manual dispatch only)
 
 `.github/workflows/benchmarks.yml` defines:
 
-- `linux-softhsm-benchmarks` (weekly/manual benchmark lane plus targeted push/PR validation for benchmark/reporting changes)
+- `linux-softhsm-benchmarks` (weekly/manual benchmark lane plus targeted push/PR validation for benchmark/reporting and performance-sensitive source changes)
 
 Triggers:
 
@@ -24,6 +24,7 @@ Benchmark workflow triggers:
 - `workflow_dispatch`
 - push to `main` / `master` when benchmark workflow/reporting inputs change
 - pull requests that change benchmark workflow/reporting inputs
+- targeted source changes in `benchmarks/**`, `src/Pkcs11Wrapper/**`, `src/Pkcs11Wrapper.Native/**`, `tests/Pkcs11Wrapper.Native.Tests/**`, `samples/Pkcs11Wrapper.Smoke/**`, benchmark scripts, and committed benchmark baselines
 
 Workflow-level behavior:
 
@@ -36,14 +37,28 @@ Ordered Linux steps:
 
 - checkout the repository
 - install the SDK pinned by `global.json`
-- install native dependencies: `softhsm2`, `opensc`, `file`
+- install native dependencies: `build-essential`, `softhsm2`, `opensc`, `file`
 - create a CI artifact directory
 - mark engineering scripts executable
 - `dotnet restore Pkcs11Wrapper.sln`
 - `dotnet build Pkcs11Wrapper.sln -c Release --no-restore`
-- `./eng/run-regression-tests.sh`
+- `./eng/run-regression-tests.sh` (this now also builds the Linux PKCS#11 v3 runtime shim before `dotnet test`)
 - `./eng/run-smoke-aot.sh`
 - upload captured CI logs plus the Linux NativeAOT publish output as Actions artifacts
+
+Ordered Windows steps:
+
+- checkout the repository
+- install the SDK pinned by `global.json`
+- install OpenSC via Chocolatey
+- create a CI artifact directory before fixture setup so bootstrap logs are always captured
+- provision a SoftHSM-for-Windows fixture with `eng/setup-softhsm-fixture.ps1 -DownloadPortable`
+- `dotnet restore Pkcs11Wrapper.sln`
+- `dotnet build Pkcs11Wrapper.sln -c Release --no-restore`
+- `./eng/run-regression-tests.ps1`
+- `./eng/run-smoke.ps1 -Strict`
+- `./eng/run-smoke-aot.ps1 -Strict`
+- upload fixture, regression, runtime-smoke, and NativeAOT-smoke artifacts
 
 Job-level env:
 
@@ -58,14 +73,15 @@ Regression coverage from `eng/run-regression-tests.sh` guarantees that:
 - solution restore/build/test stays healthy on the pinned SDK
 - the SoftHSM fixture contract is still valid
 - the seeded AES and RSA objects are discoverable before tests start
-- the xUnit suite still covers managed API shape, native layout assumptions, crypto flows, object lifecycle, and admin operations
+- the xUnit suite still covers managed API shape, native layout assumptions, crypto flows, object lifecycle, admin operations, and PKCS#11 v3 runtime-present behavior through the Linux shim
+- SoftHSM capability-absent coverage stays distinct from v3-runtime-present failures because both paths run in the same Linux regression lane
 
 Native AOT coverage from `eng/run-smoke-aot.sh` guarantees that:
 
-- `samples/Pkcs11Wrapper.Smoke` still publishes as native AOT for `linux-x64`
+- `samples/Pkcs11Wrapper.Smoke` still publishes as NativeAOT for `linux-x64`
 - the published entrypoint exists and is executable
 - the smoke binary still completes key runtime paths against the fixture
-- expected success lines remain present for login, encrypt/decrypt, sign/verify, object destroy, and logout
+- strict success-marker validation still holds for login, crypto, lifecycle, generation, wrap/unwrap, derive, and logout paths
 
 Optional vendor regression coverage from `vendor-regression` guarantees that, when explicitly enabled and configured:
 
@@ -79,14 +95,15 @@ Windows runtime coverage from `build-test-windows` guarantees that:
 - the solution still restores/builds on `windows-latest`
 - a real SoftHSM-for-Windows fixture can be provisioned in CI
 - the full regression suite still runs on Windows against a PKCS#11 module
-- the smoke sample still executes successfully on Windows with the fixture env
-- regression/smoke console logs are captured as downloadable Actions artifacts
+- the smoke sample still executes successfully on Windows with the fixture env and strict marker validation
+- the smoke sample also publishes and runs successfully as a `win-x64` NativeAOT binary with the same strict validation contract
+- fixture/regression/smoke console logs are captured as downloadable Actions artifacts
 
 Benchmark coverage from `benchmarks.yml` guarantees that, whenever the workflow runs:
 
 - the benchmark project still restores and executes on the pinned SDK
 - a real SoftHSM fixture can still be provisioned for performance measurement
-- the latest benchmark run emits a GitHub-friendly job summary with date, environment, and headline numbers
+- the latest benchmark run emits a GitHub-friendly job summary with date, environment, headline numbers, allocation figures, and optional committed-baseline deltas
 - the latest benchmark summary plus raw BenchmarkDotNet exports/logs are published as an Actions artifact
 - performance tracking stays repeatable instead of ad-hoc
 
@@ -142,7 +159,7 @@ Guard behavior:
 
 ## Local CI parity
 
-Closest local equivalent:
+Closest local Linux equivalent:
 
 ```bash
 sudo apt-get update
@@ -194,7 +211,8 @@ Windows local equivalent:
 ```powershell
 .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
-.\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
+.\eng\run-smoke.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1" -Strict
+.\eng\run-smoke-aot.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1" -Strict
 .\eng\run-benchmarks.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
 ```
 
