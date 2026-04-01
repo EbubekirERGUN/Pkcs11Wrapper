@@ -186,6 +186,31 @@ public sealed class HsmAdminServiceTests
     }
 
     [Fact]
+    public void ValidateKeyObjectPageRequestRejectsUnsupportedSortMode()
+    {
+        KeyObjectPageRequest request = new()
+        {
+            SortMode = "random",
+            PageSize = 25
+        };
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => HsmAdminService.ValidateKeyObjectPageRequest(request));
+        Assert.Contains("sort mode", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateKeyObjectPageRequestRejectsOversizedPage()
+    {
+        KeyObjectPageRequest request = new()
+        {
+            SortMode = "handle",
+            PageSize = 101
+        };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => HsmAdminService.ValidateKeyObjectPageRequest(request));
+    }
+
+    [Fact]
     public void LoginUserToleratingAlreadyLoggedInSwallowsAlreadyLoggedInReturnValue()
     {
         MethodInfo method = GetLoginUserToleratingAlreadyLoggedInActionOverload();

@@ -2237,6 +2237,59 @@ public sealed class SoftHsmCryptRegressionTests
             CkrOperationNotInitialized or
             CkrArgumentsBad;
 
+    [Fact]
+    public void BatchedAttributeReadsReturnMixedReadableAndInvalidAttributes()
+    {
+        if (!TryCreateCryptContext(out TestContext? context))
+        {
+            return;
+        }
+
+        using TestContext activeContext = context!;
+        using Pkcs11Session session = activeContext.Module.OpenSession(activeContext.SlotId, readWrite: true);
+        LoginUser(session, activeContext.PinUtf8);
+
+        byte[] label = Encoding.UTF8.GetBytes("batch-attr-test");
+        TryDestroyDataObjectByLabel(session, label);
+
+        Pkcs11ObjectHandle handle = session.CreateObject(
+        [
+            Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.Data),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Token, false),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Private, false),
+            Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Modifiable, true),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, label),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Application, Encoding.UTF8.GetBytes("pkcs11-batch-test")),
+            Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Value, new byte[] { 0x01, 0x02, 0x03, 0x04 })
+        ]);
+
+        try
+        {
+            IReadOnlyList<Pkcs11AttributeValue> values = session.GetAttributeValues(handle,
+            [
+                Pkcs11AttributeTypes.Class,
+                Pkcs11AttributeTypes.Label,
+                Pkcs11AttributeTypes.Token,
+                Pkcs11AttributeTypes.KeyType
+            ]);
+
+            Assert.Equal(4, values.Count);
+            Assert.Equal(Pkcs11AttributeReadStatus.Success, values[0].Result.Status);
+            Assert.Equal(Pkcs11ObjectClasses.Data.NativeValue.Value, IntPtr.Size == sizeof(uint)
+                ? BitConverter.ToUInt32(values[0].Value!)
+                : BitConverter.ToUInt64(values[0].Value!));
+            Assert.Equal("batch-attr-test", Encoding.UTF8.GetString(values[1].Value!));
+            Assert.Equal(new byte[] { 0 }, values[2].Value);
+            Assert.Equal(Pkcs11AttributeReadStatus.TypeInvalid, values[3].Result.Status);
+            Assert.Null(values[3].Value);
+        }
+        finally
+        {
+            TryDestroyObject(session, handle);
+            session.Logout();
+        }
+    }
+
     private static byte[] GetRequiredAttributeBytes(Pkcs11Session session, Pkcs11ObjectHandle handle, Pkcs11AttributeType attributeType)
     {
         Pkcs11AttributeReadResult info = session.GetAttributeValueInfo(handle, attributeType);

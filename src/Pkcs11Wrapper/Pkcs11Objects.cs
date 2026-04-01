@@ -138,6 +138,11 @@ public readonly record struct Pkcs11AttributeReadResult(Pkcs11AttributeReadStatu
     public bool IsReadable => Status == Pkcs11AttributeReadStatus.Success && Length != nuint.MaxValue;
 }
 
+public readonly record struct Pkcs11AttributeValue(Pkcs11AttributeType Type, Pkcs11AttributeReadResult Result, byte[]? Value)
+{
+    public bool IsReadable => Result.IsReadable && Value is not null;
+}
+
 public readonly struct Pkcs11ObjectAttribute
 {
     private readonly ReadOnlyMemory<byte> _bytes;

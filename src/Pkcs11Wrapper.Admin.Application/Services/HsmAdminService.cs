@@ -358,10 +358,28 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         string pinNote = LoginIfProvided(session, userPin);
         Pkcs11ObjectSearchParameters search = new(label: string.IsNullOrWhiteSpace(labelFilter) ? default : Encoding.UTF8.GetBytes(labelFilter));
-        List<Pkcs11ObjectHandle> handles = EnumerateObjectHandles(session, search);
-        List<HsmKeyObjectSummary> keys = handles.Select(handle => ReadObjectSummary(deviceId, slotIdValue, session, handle)).ToList();
+        List<Pkcs11ObjectHandle> handles = HsmAdminObjectCatalog.EnumerateObjectHandles(session, search);
+        List<HsmKeyObjectSummary> keys = handles.Select(handle => HsmAdminObjectCatalog.ReadObjectSummary(deviceId, slotIdValue, session, handle)).ToList();
         await auditLog.WriteAsync("Key", "List", $"{device.Name}/slot-{slotIdValue}", "Success", $"Loaded {keys.Count} key/object record(s) via {pinNote}.", cancellationToken: cancellationToken);
         return keys;
+    }
+
+    public async Task<HsmKeyObjectPage> GetKeyPageAsync(Guid deviceId, nuint slotIdValue, KeyObjectPageRequest request, string? userPin, CancellationToken cancellationToken = default)
+    {
+        authorization.DemandViewer();
+        ValidateKeyObjectPageRequest(request);
+
+        HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
+        using Pkcs11Module module = CreateInitializedModule(device);
+        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
+        string pinNote = LoginIfProvided(session, userPin);
+
+        HsmKeyObjectPage page = HsmAdminKeyPageBrowser.ReadPage(deviceId, slotIdValue, session, request);
+        string detail = page.UsedStreamingCursor
+            ? $"streamed {page.Items.Count} object(s) with {page.SummaryReadCount} summary read(s)"
+            : $"sorted {page.Items.Count} object(s) after scanning {page.SummaryReadCount} summary record(s)";
+        await auditLog.WriteAsync("Key", "ListPage", $"{device.Name}/slot-{slotIdValue}", "Success", $"Loaded key page via {pinNote}; {detail}.", cancellationToken: cancellationToken);
+        return page;
     }
 
     public async Task<HsmObjectDetail> GetObjectDetailAsync(Guid deviceId, nuint slotIdValue, nuint handleValue, string? userPin, CancellationToken cancellationToken = default)
@@ -372,7 +390,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
         string pinNote = LoginIfProvided(session, userPin);
 
-        HsmObjectDetail detail = ReadObjectDetail(deviceId, slotIdValue, session, new Pkcs11ObjectHandle(handleValue));
+        HsmObjectDetail detail = HsmAdminObjectCatalog.ReadObjectDetail(deviceId, slotIdValue, session, new Pkcs11ObjectHandle(handleValue));
         await auditLog.WriteAsync("Key", "Detail", $"{device.Name}/slot-{slotIdValue}/handle-{handleValue}", "Success", $"Loaded object detail via {pinNote}.", cancellationToken: cancellationToken);
         return detail;
     }
@@ -916,6 +934,34 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             ? $"{DestroyConfirmationPrefix}{handle}"
             : $"{DestroyConfirmationPrefix}{handle} {label.Trim()}";
 
+    public static void ValidateKeyObjectPageRequest(KeyObjectPageRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.PageSize is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Page size must be between 1 and 100.");
+        }
+
+        string classFilter = request.ClassFilter.ToLowerInvariant();
+        if (classFilter is not ("all" or "secretkey" or "privatekey" or "publickey" or "data"))
+        {
+            throw new ArgumentException("Unsupported class filter.", nameof(request));
+        }
+
+        string capabilityFilter = request.CapabilityFilter.ToLowerInvariant();
+        if (capabilityFilter is not ("all" or "encrypt" or "decrypt" or "sign" or "verify" or "wrap" or "unwrap"))
+        {
+            throw new ArgumentException("Unsupported capability filter.", nameof(request));
+        }
+
+        string sortMode = request.SortMode.ToLowerInvariant();
+        if (sortMode is not ("handle" or "label" or "class" or "capability"))
+        {
+            throw new ArgumentException("Unsupported sort mode.", nameof(request));
+        }
+    }
+
     private static bool OperationRequiresSlot(Pkcs11LabOperation operation)
         => operation is Pkcs11LabOperation.MechanismList
             or Pkcs11LabOperation.MechanismInfo
@@ -1262,7 +1308,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11ObjectHandle handle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
-        HsmObjectDetail detail = ReadObjectDetail(deviceId, request.SlotId.Value, session, handle);
+        HsmObjectDetail detail = HsmAdminObjectCatalog.ReadObjectDetail(deviceId, request.SlotId.Value, session, handle);
 
         if (string.IsNullOrWhiteSpace(request.UserPin))
         {
@@ -1347,7 +1393,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 encrypt: request.UnwrapAllowEncrypt,
                 decrypt: request.UnwrapAllowDecrypt));
 
-        HsmObjectDetail detail = ReadObjectDetail(deviceId, request.SlotId.Value, session, unwrappedHandle);
+        HsmObjectDetail detail = HsmAdminObjectCatalog.ReadObjectDetail(deviceId, request.SlotId.Value, session, unwrappedHandle);
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
@@ -1404,7 +1450,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
         Pkcs11ObjectClass? objectClass = ResolveLabObjectClass(request.ObjectClassFilter);
         Pkcs11ObjectSearchParameters search = new(label, id, objectClass);
-        List<Pkcs11ObjectHandle> handles = EnumerateObjectHandles(session, search, request.MaxObjects, out bool truncated);
+        List<Pkcs11ObjectHandle> handles = HsmAdminObjectCatalog.EnumerateObjectHandles(session, search, request.MaxObjects, out bool truncated);
 
         if (label.Length == 0 && id.Length == 0 && objectClass is null)
         {
@@ -1427,8 +1473,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         foreach (Pkcs11ObjectHandle handle in handles)
         {
-            HsmKeyObjectSummary summary = ReadObjectSummary(deviceId, request.SlotId.Value, session, handle);
-            output.AppendLine($"- Handle={summary.Handle} | Label={summary.Label ?? "<null>"} | Id={summary.IdHex ?? "<null>"} | Class={summary.ObjectClass} | KeyType={summary.KeyType} | Caps={DescribeCapabilities(summary)}");
+            HsmKeyObjectSummary summary = HsmAdminObjectCatalog.ReadObjectSummary(deviceId, request.SlotId.Value, session, handle);
+            output.AppendLine($"- Handle={summary.Handle} | Label={summary.Label ?? "<null>"} | Id={summary.IdHex ?? "<null>"} | Class={summary.ObjectClass} | KeyType={summary.KeyType} | Caps={HsmAdminObjectCatalog.DescribeCapabilities(summary)}");
         }
 
         string summaryText = truncated
@@ -1566,7 +1612,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         Pkcs11ObjectClass? objectClass = ResolveLabObjectClassText(objectClassText);
         Pkcs11KeyType? keyType = ResolveLabKeyTypeText(keyTypeText);
         Pkcs11ObjectSearchParameters search = new(labelBytes, idBytes, objectClass, keyType);
-        List<Pkcs11ObjectHandle> matches = EnumerateObjectHandles(session, search, 3, out bool truncated);
+        List<Pkcs11ObjectHandle> matches = HsmAdminObjectCatalog.EnumerateObjectHandles(session, search, 3, out bool truncated);
         if (matches.Count == 1)
         {
             return matches[0];
