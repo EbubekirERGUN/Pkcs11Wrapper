@@ -126,7 +126,7 @@ function Download-SoftHsmPortable {
 
 function Resolve-SoftHsmRoot {
     param(
-        [Parameter(Mandatory = $true)][string]$RequestedRoot,
+        [AllowEmptyString()][string]$RequestedRoot,
         [Parameter(Mandatory = $true)][string]$RequestedVersion,
         [Parameter(Mandatory = $true)][bool]$ShouldDownload,
         [Parameter(Mandatory = $true)][string]$WorkspaceRoot
@@ -161,7 +161,7 @@ function Resolve-SoftHsmRoot {
 }
 
 function Resolve-Pkcs11ToolPath {
-    param([Parameter(Mandatory = $true)][string]$RequestedPath)
+    param([AllowEmptyString()][string]$RequestedPath)
 
     $candidates = @()
     foreach ($candidate in @(
