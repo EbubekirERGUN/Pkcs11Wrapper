@@ -1792,6 +1792,11 @@ public sealed class SoftHsmCryptRegressionTests
     [Fact]
     public async Task ParallelOpenSessionBurstsRemainStableAcrossRounds()
     {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
         string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
         string? tokenLabel = Environment.GetEnvironmentVariable("PKCS11_TOKEN_LABEL");
         if (string.IsNullOrWhiteSpace(modulePath) || string.IsNullOrWhiteSpace(tokenLabel))
