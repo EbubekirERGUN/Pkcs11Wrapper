@@ -1,4 +1,6 @@
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using Pkcs11Wrapper.Native;
 
@@ -9,13 +11,27 @@ namespace Pkcs11Wrapper.Benchmarks;
 public class SessionAndObjectBenchmarks : SoftHsmBenchmarkBase
 {
     private const nuint CkrUserAlreadyLoggedIn = 0x00000100u;
+    private const int ConcurrentIterationsPerWorker = 256;
+
     private int _sequence;
+    private Pkcs11Session[] _concurrentSessions8 = [];
+    private Pkcs11Session[] _concurrentSessions32 = [];
 
     [GlobalSetup]
-    public void GlobalSetup() => InitializeEnvironment();
+    public void GlobalSetup()
+    {
+        InitializeEnvironment();
+        _concurrentSessions8 = OpenConcurrentSessions(workerCount: 8);
+        _concurrentSessions32 = OpenConcurrentSessions(workerCount: 32);
+    }
 
     [GlobalCleanup]
-    public void GlobalCleanup() => DisposeEnvironment();
+    public void GlobalCleanup()
+    {
+        DisposeSessions(_concurrentSessions32);
+        DisposeSessions(_concurrentSessions8);
+        DisposeEnvironment();
+    }
 
     [Benchmark(Baseline = true)]
     [BenchmarkCategory("Session")]
@@ -31,18 +47,20 @@ public class SessionAndObjectBenchmarks : SoftHsmBenchmarkBase
     {
         using Pkcs11Session session = Environment.Module.OpenSession(Environment.SlotId, readWrite: true);
 
-        try
-        {
-            session.Login(Pkcs11UserType.User, Environment.UserPin);
-        }
-        catch (Pkcs11Exception ex) when (ex.Result.Value == CkrUserAlreadyLoggedIn)
-        {
-        }
+        TryLoginUser(session);
 
         Pkcs11SessionInfo info = session.GetInfo();
         session.Logout();
         return info;
     }
+
+    [Benchmark]
+    [BenchmarkCategory("Concurrent")]
+    public long GetSessionInfoBurst8Workers() => RunGetInfoBurst(_concurrentSessions8);
+
+    [Benchmark]
+    [BenchmarkCategory("Concurrent")]
+    public long GetSessionInfoBurst32Workers() => RunGetInfoBurst(_concurrentSessions32);
 
     [Benchmark]
     [BenchmarkCategory("Object")]
@@ -142,5 +160,57 @@ public class SessionAndObjectBenchmarks : SoftHsmBenchmarkBase
             Environment.Session.DestroyObject(pair.PrivateKeyHandle);
             Environment.Session.DestroyObject(pair.PublicKeyHandle);
         }
+    }
+
+    private Pkcs11Session[] OpenConcurrentSessions(int workerCount)
+    {
+        Pkcs11Session[] sessions = new Pkcs11Session[workerCount];
+        for (int i = 0; i < sessions.Length; i++)
+        {
+            sessions[i] = Environment.Module.OpenSession(Environment.SlotId);
+        }
+
+        return sessions;
+    }
+
+    private void TryLoginUser(Pkcs11Session session)
+    {
+        try
+        {
+            session.Login(Pkcs11UserType.User, Environment.UserPin);
+        }
+        catch (Pkcs11Exception ex) when (ex.Result.Value == CkrUserAlreadyLoggedIn)
+        {
+        }
+    }
+
+    private static void DisposeSessions(Pkcs11Session[] sessions)
+    {
+        for (int i = sessions.Length - 1; i >= 0; i--)
+        {
+            sessions[i].Dispose();
+        }
+    }
+
+    private static long RunGetInfoBurst(Pkcs11Session[] sessions)
+    {
+        long total = 0;
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: sessions.Length,
+            localInit: static () => 0L,
+            body: (index, _, local) =>
+            {
+                Pkcs11Session session = sessions[index];
+                for (int iteration = 0; iteration < ConcurrentIterationsPerWorker; iteration++)
+                {
+                    local += (long)session.GetInfo().SlotId.Value;
+                }
+
+                return local;
+            },
+            localFinally: local => Interlocked.Add(ref total, local));
+
+        return total;
     }
 }

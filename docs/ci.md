@@ -36,12 +36,12 @@ Ordered Linux steps:
 
 - checkout the repository
 - install the SDK pinned by `global.json`
-- install native dependencies: `softhsm2`, `opensc`, `file`
+- install native dependencies: `build-essential`, `softhsm2`, `opensc`, `file`
 - create a CI artifact directory
 - mark engineering scripts executable
 - `dotnet restore Pkcs11Wrapper.sln`
 - `dotnet build Pkcs11Wrapper.sln -c Release --no-restore`
-- `./eng/run-regression-tests.sh`
+- `./eng/run-regression-tests.sh` (this now also builds the Linux PKCS#11 v3 runtime shim before `dotnet test`)
 - `./eng/run-smoke-aot.sh`
 - upload captured CI logs plus the Linux NativeAOT publish output as Actions artifacts
 
@@ -58,7 +58,8 @@ Regression coverage from `eng/run-regression-tests.sh` guarantees that:
 - solution restore/build/test stays healthy on the pinned SDK
 - the SoftHSM fixture contract is still valid
 - the seeded AES and RSA objects are discoverable before tests start
-- the xUnit suite still covers managed API shape, native layout assumptions, crypto flows, object lifecycle, and admin operations
+- the xUnit suite still covers managed API shape, native layout assumptions, crypto flows, object lifecycle, admin operations, and PKCS#11 v3 runtime-present behavior through the Linux shim
+- SoftHSM capability-absent coverage stays distinct from v3-runtime-present failures because both paths run in the same Linux regression lane
 
 Native AOT coverage from `eng/run-smoke-aot.sh` guarantees that:
 
