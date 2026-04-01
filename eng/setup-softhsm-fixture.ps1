@@ -133,8 +133,8 @@ function Download-OpenScPortable {
 
     $downloadDir = Join-Path $DestinationRoot 'downloads'
     $assetCandidates = @(
-        "OpenSC-${Version}_x64.zip",
-        "OpenSC-${Version}-Light_x64.zip"
+        "OpenSC-${Version}_x64-dbg.zip",
+        "OpenSC-${Version}-Light_x64-dbg.zip"
     )
 
     New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
