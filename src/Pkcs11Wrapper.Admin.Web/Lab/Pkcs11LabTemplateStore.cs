@@ -84,24 +84,99 @@ public sealed class Pkcs11LabTemplateStore(IOptions<AdminStorageOptions> options
         }
     }
 
-    private async Task<List<Pkcs11LabSavedTemplate>> ReadUnsafeAsync(CancellationToken cancellationToken)
+    public async Task<int> DeleteForDeviceAsync(Guid deviceId, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            List<Pkcs11LabSavedTemplate> templates = await ReadUnsafeAsync(cancellationToken);
+            int removed = templates.RemoveAll(template => template.Request.DeviceId == deviceId);
+            if (removed > 0)
+            {
+                await SaveUnsafeAsync(templates, cancellationToken);
+            }
+
+            return removed;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<int> DeleteMissingDevicesAsync(IReadOnlyCollection<Guid> retainedDeviceIds, CancellationToken cancellationToken = default)
+    {
+        HashSet<Guid> retained = [.. retainedDeviceIds];
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            List<Pkcs11LabSavedTemplate> templates = await ReadUnsafeAsync(cancellationToken);
+            int removed = templates.RemoveAll(template => template.Request.DeviceId != Guid.Empty && !retained.Contains(template.Request.DeviceId));
+            if (removed > 0)
+            {
+                await SaveUnsafeAsync(templates, cancellationToken);
+            }
+
+            return removed;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private Task<List<Pkcs11LabSavedTemplate>> ReadUnsafeAsync(CancellationToken cancellationToken)
+        => ReadUnsafeCoreAsync(cancellationToken);
+
+    private async Task<List<Pkcs11LabSavedTemplate>> ReadUnsafeCoreAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(TemplateFilePath))
         {
             return [];
         }
 
-        await using FileStream stream = File.OpenRead(TemplateFilePath);
-        Pkcs11LabSavedTemplate[]? templates = await JsonSerializer.DeserializeAsync<Pkcs11LabSavedTemplate[]>(stream, SerializerOptions, cancellationToken);
-        return templates?.ToList() ?? [];
+        try
+        {
+            await using FileStream stream = File.OpenRead(TemplateFilePath);
+            Pkcs11LabSavedTemplate[]? templates = await JsonSerializer.DeserializeAsync<Pkcs11LabSavedTemplate[]>(stream, SerializerOptions, cancellationToken);
+            return templates?.ToList() ?? throw new InvalidOperationException($"Admin data file '{TemplateFilePath}' is unreadable or corrupt. Recover from backup '{CrashSafeFileStore.GetBackupPath(TemplateFilePath)}' or replace the file with a valid export.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Admin data file '{TemplateFilePath}' is unreadable or corrupt. Recover from backup '{CrashSafeFileStore.GetBackupPath(TemplateFilePath)}' or replace the file with a valid export.", ex);
+        }
     }
 
     private async Task SaveUnsafeAsync(IReadOnlyList<Pkcs11LabSavedTemplate> templates, CancellationToken cancellationToken)
     {
+        string tempPath = $"{TemplateFilePath}.tmp-{Guid.NewGuid():N}";
         Directory.CreateDirectory(StorageRoot);
-        await using FileStream stream = File.Create(TemplateFilePath);
-        await JsonSerializer.SerializeAsync(stream, templates.ToArray(), SerializerOptions, cancellationToken);
-        await stream.FlushAsync(cancellationToken);
+        try
+        {
+            await using (FileStream stream = new(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await JsonSerializer.SerializeAsync(stream, templates.ToArray(), SerializerOptions, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+                stream.Flush(flushToDisk: true);
+            }
+
+            if (File.Exists(TemplateFilePath))
+            {
+                File.Replace(tempPath, TemplateFilePath, CrashSafeFileStore.GetBackupPath(TemplateFilePath), ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(tempPath, TemplateFilePath);
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
     }
 
     private static string NormalizeName(string? name)
@@ -140,7 +215,15 @@ public sealed class Pkcs11LabTemplateStore(IOptions<AdminStorageOptions> options
             RsaOaepSourceHex = request.RsaOaepSourceHex,
             PssSaltLength = request.PssSaltLength,
             KeyHandleText = request.KeyHandleText,
+            KeyLabel = request.KeyLabel,
+            KeyIdHex = request.KeyIdHex,
+            KeyObjectClass = request.KeyObjectClass,
+            KeyType = request.KeyType,
             SecondaryKeyHandleText = request.SecondaryKeyHandleText,
+            SecondaryKeyLabel = request.SecondaryKeyLabel,
+            SecondaryKeyIdHex = request.SecondaryKeyIdHex,
+            SecondaryKeyObjectClass = request.SecondaryKeyObjectClass,
+            SecondaryKeyType = request.SecondaryKeyType,
             DigestAlgorithm = request.DigestAlgorithm,
             PayloadEncoding = request.PayloadEncoding,
             TextInput = request.TextInput,

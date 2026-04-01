@@ -1,8 +1,10 @@
+using System.Text.Json.Serialization;
+
 namespace Pkcs11Wrapper.Admin.Infrastructure;
 
 public sealed record ProtectedPinRecord(
     Guid DeviceId,
-    nuint SlotId,
+    [property: JsonConverter(typeof(NUIntJsonConverter))] nuint SlotId,
     string Purpose,
     string Ciphertext,
     DateTimeOffset UpdatedUtc,

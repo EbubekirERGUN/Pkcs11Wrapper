@@ -49,6 +49,27 @@ public sealed class DeviceProfileServiceTests
         await Assert.ThrowsAsync<ArgumentException>(() => service.UpsertAsync(null, new HsmDeviceProfileInput { Name = "HSM", ModulePath = "" }));
     }
 
+    [Fact]
+    public async Task UpsertAsyncRejectsDuplicateNamesCaseInsensitive()
+    {
+        InMemoryDeviceProfileStore store = new();
+        DeviceProfileService service = new(store);
+        await service.UpsertAsync(null, new HsmDeviceProfileInput { Name = "Primary", ModulePath = "/tmp/a.so", IsEnabled = true });
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpsertAsync(null, new HsmDeviceProfileInput { Name = "primary", ModulePath = "/tmp/b.so", IsEnabled = true }));
+        Assert.Contains("already assigned", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeleteAsyncRejectsUnknownDevice()
+    {
+        InMemoryDeviceProfileStore store = new();
+        DeviceProfileService service = new(store);
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAsync(Guid.NewGuid()));
+        Assert.Contains("was not found", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class InMemoryDeviceProfileStore : IDeviceProfileStore
     {
         private List<HsmDeviceProfile> _devices = [];

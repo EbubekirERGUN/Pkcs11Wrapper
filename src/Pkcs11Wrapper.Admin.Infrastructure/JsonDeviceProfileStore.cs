@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
 
@@ -14,13 +13,7 @@ public sealed class JsonDeviceProfileStore(AdminStorageOptions options) : IDevic
         try
         {
             string path = GetPath();
-            if (!File.Exists(path))
-            {
-                return [];
-            }
-
-            await using FileStream stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync(stream, AdminJsonContext.Default.ListHsmDeviceProfile, cancellationToken) ?? [];
+            return await CrashSafeFileStore.ReadJsonAsync(path, AdminJsonContext.Default.ListHsmDeviceProfile, cancellationToken) ?? [];
         }
         finally
         {
@@ -33,10 +26,7 @@ public sealed class JsonDeviceProfileStore(AdminStorageOptions options) : IDevic
         await _mutex.WaitAsync(cancellationToken);
         try
         {
-            string path = GetPath();
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            await using FileStream stream = File.Create(path);
-            await JsonSerializer.SerializeAsync(stream, devices.ToList(), AdminJsonContext.Default.ListHsmDeviceProfile, cancellationToken);
+            await CrashSafeFileStore.WriteJsonAsync(GetPath(), devices.ToList(), AdminJsonContext.Default.ListHsmDeviceProfile, cancellationToken);
         }
         finally
         {

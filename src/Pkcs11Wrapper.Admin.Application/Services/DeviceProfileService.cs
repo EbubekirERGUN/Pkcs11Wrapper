@@ -14,10 +14,15 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
     public async Task<HsmDeviceProfile> UpsertAsync(Guid? id, HsmDeviceProfileInput input, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(input);
-        Validate(input);
 
         List<HsmDeviceProfile> devices = [.. await store.GetAllAsync(cancellationToken)];
+        string normalizedName = ValidateName(input.Name);
+        string normalizedModulePath = ValidateModulePath(input.ModulePath);
+        string? normalizedTokenLabel = Normalize(input.DefaultTokenLabel);
+        string? normalizedNotes = Normalize(input.Notes);
         DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        EnsureUniqueName(devices, normalizedName, id);
 
         if (id is Guid existingId)
         {
@@ -30,10 +35,10 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
             HsmDeviceProfile current = devices[index];
             HsmDeviceProfile updated = current with
             {
-                Name = input.Name.Trim(),
-                ModulePath = input.ModulePath.Trim(),
-                DefaultTokenLabel = Normalize(input.DefaultTokenLabel),
-                Notes = Normalize(input.Notes),
+                Name = normalizedName,
+                ModulePath = normalizedModulePath,
+                DefaultTokenLabel = normalizedTokenLabel,
+                Notes = normalizedNotes,
                 IsEnabled = input.IsEnabled,
                 UpdatedUtc = now
             };
@@ -45,10 +50,10 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
 
         HsmDeviceProfile created = new(
             Guid.NewGuid(),
-            input.Name.Trim(),
-            input.ModulePath.Trim(),
-            Normalize(input.DefaultTokenLabel),
-            Normalize(input.Notes),
+            normalizedName,
+            normalizedModulePath,
+            normalizedTokenLabel,
+            normalizedNotes,
             input.IsEnabled,
             now,
             now);
@@ -124,31 +129,63 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         List<HsmDeviceProfile> devices = [.. await store.GetAllAsync(cancellationToken)];
-        devices.RemoveAll(x => x.Id == id);
+        int removed = devices.RemoveAll(x => x.Id == id);
+        if (removed == 0)
+        {
+            throw new InvalidOperationException($"Device profile '{id}' was not found.");
+        }
+
         await store.SaveAllAsync(devices, cancellationToken);
     }
 
-    private static void Validate(HsmDeviceProfileInput input)
+    private static string ValidateName(string? value)
     {
-        if (string.IsNullOrWhiteSpace(input.Name))
+        string name = value?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
         {
-            throw new ArgumentException("Device name is required.", nameof(input));
+            throw new ArgumentException("Device name is required.", nameof(value));
         }
 
-        if (string.IsNullOrWhiteSpace(input.ModulePath))
+        if (name.Length > 128)
         {
-            throw new ArgumentException("PKCS#11 module path is required.", nameof(input));
+            throw new ArgumentException("Device name must be 128 characters or fewer.", nameof(value));
+        }
+
+        return name;
+    }
+
+    private static string ValidateModulePath(string? value)
+    {
+        string modulePath = value?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(modulePath))
+        {
+            throw new ArgumentException("PKCS#11 module path is required.", nameof(value));
+        }
+
+        if (modulePath.Length > 4096)
+        {
+            throw new ArgumentException("PKCS#11 module path is unexpectedly long.", nameof(value));
+        }
+
+        return modulePath;
+    }
+
+    private static void EnsureUniqueName(IEnumerable<HsmDeviceProfile> devices, string name, Guid? currentId)
+    {
+        HsmDeviceProfile? conflict = devices.FirstOrDefault(device =>
+            string.Equals(device.Name, name, StringComparison.OrdinalIgnoreCase)
+            && (!currentId.HasValue || device.Id != currentId.Value));
+
+        if (conflict is not null)
+        {
+            throw new InvalidOperationException($"Device name '{name}' is already assigned to '{conflict.Id}'.");
         }
     }
 
     private static HsmDeviceProfile NormalizeImported(HsmDeviceProfile profile, DateTimeOffset now)
     {
-        string name = string.IsNullOrWhiteSpace(profile.Name)
-            ? throw new ArgumentException("Imported device name is required.", nameof(profile))
-            : profile.Name.Trim();
-        string modulePath = string.IsNullOrWhiteSpace(profile.ModulePath)
-            ? throw new ArgumentException($"Imported module path is required for device '{name}'.", nameof(profile))
-            : profile.ModulePath.Trim();
+        string name = ValidateName(profile.Name);
+        string modulePath = ValidateModulePath(profile.ModulePath);
 
         Guid id = profile.Id == Guid.Empty ? Guid.NewGuid() : profile.Id;
         DateTimeOffset createdUtc = profile.CreatedUtc == default ? now : profile.CreatedUtc;

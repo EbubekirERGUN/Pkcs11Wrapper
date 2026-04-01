@@ -80,7 +80,7 @@
 <div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-xl-2 col-lg-3 col-md-6">
-            <button class="btn btn-primary" @onclick="LoadAsync">Refresh</button>
+            <button class="btn btn-primary" @onclick="() => LoadAsync(true)">Refresh + Verify</button>
         </div>
         <div class="col-xl-4 col-lg-5 col-md-6">
             <label class="form-label">Search</label>
@@ -209,10 +209,10 @@ else
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(bool forceVerify = false)
     {
         _logs = await Admin.GetAuditLogsAsync();
-        _integrity = await Admin.GetAuditIntegrityAsync();
+        _integrity = await Admin.GetAuditIntegrityAsync(forceVerify);
         _pageIndex = 1;
     }
 

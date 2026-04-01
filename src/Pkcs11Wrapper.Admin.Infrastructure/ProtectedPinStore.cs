@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 
 namespace Pkcs11Wrapper.Admin.Infrastructure;
@@ -53,6 +52,48 @@ public sealed class ProtectedPinStore(AdminStorageOptions options, IDataProtecti
         }
     }
 
+    public async Task<int> DeleteForDeviceAsync(Guid deviceId, CancellationToken cancellationToken = default)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            List<ProtectedPinRecord> records = await ReadAllCoreAsync(cancellationToken);
+            int removed = records.RemoveAll(x => x.DeviceId == deviceId);
+            if (removed > 0)
+            {
+                await WriteAllCoreAsync(records, cancellationToken);
+            }
+
+            return removed;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async Task<int> DeleteMissingDevicesAsync(IReadOnlyCollection<Guid> retainedDeviceIds, CancellationToken cancellationToken = default)
+    {
+        HashSet<Guid> retained = [.. retainedDeviceIds];
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            List<ProtectedPinRecord> records = await ReadAllCoreAsync(cancellationToken);
+            int removed = records.RemoveAll(x => x.DeviceId != Guid.Empty && !retained.Contains(x.DeviceId));
+            if (removed > 0)
+            {
+                await WriteAllCoreAsync(records, cancellationToken);
+            }
+
+            return removed;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<ProtectedPinRecord>> GetMetadataAsync(CancellationToken cancellationToken = default)
     {
         await _mutex.WaitAsync(cancellationToken);
@@ -67,24 +108,10 @@ public sealed class ProtectedPinStore(AdminStorageOptions options, IDataProtecti
     }
 
     private async Task<List<ProtectedPinRecord>> ReadAllCoreAsync(CancellationToken cancellationToken)
-    {
-        string path = GetPath();
-        if (!File.Exists(path))
-        {
-            return [];
-        }
+        => await CrashSafeFileStore.ReadJsonAsync(GetPath(), AdminJsonContext.Default.ListProtectedPinRecord, cancellationToken) ?? [];
 
-        await using FileStream stream = File.OpenRead(path);
-        return await JsonSerializer.DeserializeAsync(stream, AdminJsonContext.Default.ListProtectedPinRecord, cancellationToken) ?? [];
-    }
-
-    private async Task WriteAllCoreAsync(List<ProtectedPinRecord> records, CancellationToken cancellationToken)
-    {
-        string path = GetPath();
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await using FileStream stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, records, AdminJsonContext.Default.ListProtectedPinRecord, cancellationToken);
-    }
+    private Task WriteAllCoreAsync(List<ProtectedPinRecord> records, CancellationToken cancellationToken)
+        => CrashSafeFileStore.WriteJsonAsync(GetPath(), records, AdminJsonContext.Default.ListProtectedPinRecord, cancellationToken);
 
     private string GetPath() => Path.Combine(options.DataRoot, "protected-pins.json");
 
