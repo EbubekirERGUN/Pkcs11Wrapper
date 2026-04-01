@@ -94,7 +94,7 @@ Windows runtime coverage from `build-test-windows` guarantees that:
 
 - the solution still restores/builds on `windows-latest`
 - a real SoftHSM-for-Windows fixture can be provisioned in CI
-- the full regression suite still runs on Windows against a PKCS#11 module
+- the Windows lane still runs managed/admin regression coverage, while the crash-prone `SoftHsmCryptRegressionTests` native stress suite remains Linux-only
 - the smoke sample still executes successfully on Windows with the fixture env and strict marker validation
 - the smoke sample also publishes and runs successfully as a `win-x64` NativeAOT binary with the same strict validation contract
 - fixture/regression/smoke console logs are captured as downloadable Actions artifacts
