@@ -25,7 +25,7 @@ dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 Notes:
 
 - `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, builds a tiny PKCS#11 v3 runtime shim on Linux, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
-- `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation and now defaults to the `baseline-rsa-aes` vendor compatibility profile documented in `docs/vendor-regression.md`.
+- `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation and now supports the default `baseline-rsa-aes` profile plus the documented `luna-rsa-aes` Thales Luna profile in `docs/vendor-regression.md`.
 - `eng/run-smoke-aot.sh` provisions its own temporary fixture, publishes `samples/Pkcs11Wrapper.Smoke` with `/p:PublishAot=true`, then executes the produced binary with strict output validation.
 - `eng/run-benchmarks.sh` provisions its own temporary fixture, runs the `BenchmarkDotNet` suite, and writes the latest benchmark summary under `artifacts/benchmarks/latest/summary.md` plus machine-readable JSON.
 - `eng/run-benchmarks.sh --update-docs` additionally refreshes the committed Linux baseline files at `docs/benchmarks/latest-linux-softhsm.md` and `docs/benchmarks/latest-linux-softhsm.json` after a trustworthy rerun.
@@ -99,5 +99,6 @@ Notable current assumptions:
 - CI behavior: `docs/ci.md`
 - Smoke sample usage: `docs/smoke.md`
 - Compatibility matrix: `docs/compatibility-matrix.md`
+- Thales Luna audit: `docs/luna-compatibility-audit.md`
 - Release discipline: `docs/release.md`
 - Performance baselines: `docs/benchmarks.md`

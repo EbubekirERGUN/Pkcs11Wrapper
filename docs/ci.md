@@ -136,6 +136,7 @@ The vendor lane is opt-in and never runs on normal push/PR events.
 Enablement path:
 
 1. In GitHub repository settings, define Variables:
+   - optional `VENDOR_PKCS11_PROFILE` (`baseline-rsa-aes` by default, set `luna-rsa-aes` for the documented Thales Luna manual profile)
    - `VENDOR_PKCS11_MODULE_PATH`
    - `VENDOR_PKCS11_TOKEN_LABEL`
    - `VENDOR_PKCS11_FIND_LABEL`
@@ -146,7 +147,9 @@ Enablement path:
    - `VENDOR_PKCS11_SO_PIN`
 4. Optional Variable if you want a distinct verify-key search label:
    - `VENDOR_PKCS11_VERIFY_FIND_LABEL`
-5. Run **Actions -> ci -> Run workflow** with:
+5. If the chosen backend needs proprietary/native runtime setup (for example a Luna client install), pass it through:
+   - `vendor_dependency_install_command` when manually dispatching the workflow
+6. Run **Actions -> ci -> Run workflow** with:
    - `run_vendor_lane=true`
    - optional `vendor_dependency_install_command` if your module needs extra installation/runtime setup
 
@@ -154,6 +157,7 @@ Guard behavior:
 
 - if `run_vendor_lane` is `false`, vendor lane is not scheduled
 - if `run_vendor_lane` is `true` but required config is missing, `vendor-regression` exits early with a clear job summary and no restore/build/test work
+- when provided, `VENDOR_PKCS11_PROFILE` is echoed into the job summary so you can tell whether you ran the generic baseline contract or the Luna-oriented profile
 - default contributors do not need vendor secrets to run or contribute through standard PR CI
 
 ## Local CI parity
@@ -190,6 +194,8 @@ export PKCS11_FIND_LABEL='existing-aes-label'
 export PKCS11_SIGN_FIND_LABEL='existing-rsa-label'
 ./eng/run-regression-tests.sh --use-existing-env
 ```
+
+If the target is Thales Luna, set `PKCS11_VENDOR_PROFILE=luna-rsa-aes` and follow the documented env template at `eng/vendor-profiles/luna-rsa-aes.env.example`.
 
 See `docs/vendor-regression.md` for the defaulted search contract and the optional provisioning/admin path.
 
