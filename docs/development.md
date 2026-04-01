@@ -100,5 +100,6 @@ Notable current assumptions:
 - Smoke sample usage: `docs/smoke.md`
 - Compatibility matrix: `docs/compatibility-matrix.md`
 - Thales Luna audit: `docs/luna-compatibility-audit.md`
+- Thales Luna vendor-extension design: `docs/luna-vendor-extension-design.md`
 - Release discipline: `docs/release.md`
 - Performance baselines: `docs/benchmarks.md`

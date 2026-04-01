@@ -195,6 +195,7 @@ Current capabilities include:
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - local admin-panel operations and recovery runbook
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract
 - [docs/luna-compatibility-audit.md](docs/luna-compatibility-audit.md) - public-doc audit of Thales Luna standard compatibility vs current wrapper/admin/runtime scope
+- [docs/luna-vendor-extension-design.md](docs/luna-vendor-extension-design.md) - proposed package/boundary/loading/test strategy for future Luna-only `CA_*` support
 - [docs/smoke.md](docs/smoke.md) - smoke sample behavior and troubleshooting
 - [docs/release.md](docs/release.md) - release checklist and packaging discipline
 - [docs/versioning.md](docs/versioning.md) - centralized versioning model and tag strategy
