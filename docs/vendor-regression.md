@@ -1,5 +1,7 @@
 # Vendor regression lane
 
+See also: `docs/luna-compatibility-audit.md` for the current Thales Luna-specific scope boundary and extension-gap audit.
+
 ## Purpose
 
 The vendor regression lane is the non-SoftHSM validation path for pre-provisioned PKCS#11 modules. It is intentionally opt-in and is meant to prove that the wrapper still behaves correctly against a real or vendor-specific backend without assuming SoftHSM-only semantics.

@@ -183,6 +183,7 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - güncel commitlenmiş Linux benchmark baseline'ı
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - lokal admin-panel operasyon ve recovery rehberi
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor uyumluluk profili ve env sözleşmesi
+- [docs/luna-compatibility-audit.md](docs/luna-compatibility-audit.md) - Thales Luna genel dokümantasyonuna göre mevcut wrapper/admin/runtime kapsamı uyumluluk denetimi
 - [docs/smoke.md](docs/smoke.md) - smoke sample davranışı ve troubleshooting
 - [docs/release.md](docs/release.md) - release checklist ve packaging disiplini
 - [docs/versioning.md](docs/versioning.md) - merkezi versioning modeli ve tag stratejisi
