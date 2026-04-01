@@ -99,6 +99,7 @@ Notable current assumptions:
 - CI behavior: `docs/ci.md`
 - Smoke sample usage: `docs/smoke.md`
 - Compatibility matrix: `docs/compatibility-matrix.md`
+- Thales Luna integration guide: `docs/luna-integration.md`
 - Thales Luna audit: `docs/luna-compatibility-audit.md`
 - Thales Luna vendor-extension design: `docs/luna-vendor-extension-design.md`
 - Release discipline: `docs/release.md`

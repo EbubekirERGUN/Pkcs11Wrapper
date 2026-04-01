@@ -1,5 +1,11 @@
 # Thales Luna PKCS#11 compatibility audit
 
+See also:
+
+- `docs/luna-integration.md` for the practical current setup path
+- `docs/vendor-regression.md` for the Luna-oriented standard vendor lane
+- `docs/luna-vendor-extension-design.md` for the future `CA_*` extension-layer plan
+
 ## Scope
 
 This document audits **publicly documented Thales Luna PKCS#11 compatibility** against the current `Pkcs11Wrapper` repository.
@@ -296,7 +302,7 @@ If deeper Luna support becomes a product goal later, the clean next steps would 
 
 1. add optional `CA_GetFunctionList` loading and a scoped Luna extension interop layer (now designed in `docs/luna-vendor-extension-design.md`)
 2. add named constants/helpers for the Luna-public mechanisms that are already reachable through standard `C_*` calls
-3. add a Luna-specific vendor regression profile or sample env contract once a real Luna-backed CI/manual lane exists
+3. keep the practical integration guidance aligned with the shipped Luna vendor profile, admin-panel path, and smoke/runtime expectations in `docs/luna-integration.md`
 
 ## Conclusion
 

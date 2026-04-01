@@ -1,5 +1,6 @@
 # Vendor regression lane
 
+See also: `docs/luna-integration.md` for the practical Luna client/module setup path across wrapper, admin panel, smoke, and vendor regression.
 See also: `docs/luna-compatibility-audit.md` for the current Thales Luna-specific scope boundary and extension-gap audit.
 See also: `docs/luna-vendor-extension-design.md` for the proposed package/boundary/loading strategy for future Luna-only `CA_*` support.
 
