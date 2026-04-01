@@ -395,6 +395,35 @@ public sealed class Pkcs11Module : IDisposable
         return success;
     }
 
+    internal IReadOnlyList<Pkcs11AttributeValue> GetAttributeValues(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle objectHandle, ReadOnlySpan<Pkcs11AttributeType> attributeTypes)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+
+        if (attributeTypes.IsEmpty)
+        {
+            return [];
+        }
+
+        CK_ATTRIBUTE_TYPE[] nativeAttributeTypes = new CK_ATTRIBUTE_TYPE[attributeTypes.Length];
+        for (int i = 0; i < attributeTypes.Length; i++)
+        {
+            nativeAttributeTypes[i] = attributeTypes[i].NativeValue;
+        }
+
+        Pkcs11NativeAttributeValue[] nativeValues = _nativeModule.GetAttributeValues(sessionHandle, objectHandle.NativeValue, nativeAttributeTypes);
+        Pkcs11AttributeValue[] values = new Pkcs11AttributeValue[nativeValues.Length];
+        for (int i = 0; i < nativeValues.Length; i++)
+        {
+            Pkcs11NativeAttributeValue nativeValue = nativeValues[i];
+            values[i] = new Pkcs11AttributeValue(
+                new Pkcs11AttributeType((nuint)nativeValue.Type),
+                MapAttributeQueryResult(nativeValue.Query),
+                nativeValue.Value);
+        }
+
+        return values;
+    }
+
     internal Pkcs11ObjectHandle CreateObject(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, ReadOnlySpan<Pkcs11ObjectAttribute> attributes)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);

@@ -162,6 +162,12 @@ public sealed class Pkcs11Session : IDisposable
         return _module.TryGetAttributeValue(_sessionHandle, _generation, SlotId, _slotGeneration, objectHandle, attributeType, destination, out written, out result);
     }
 
+    public IReadOnlyList<Pkcs11AttributeValue> GetAttributeValues(Pkcs11ObjectHandle objectHandle, ReadOnlySpan<Pkcs11AttributeType> attributeTypes)
+    {
+        ThrowIfDisposed();
+        return _module.GetAttributeValues(_sessionHandle, _generation, SlotId, _slotGeneration, objectHandle, attributeTypes);
+    }
+
     public bool TryGetAttributeBoolean(Pkcs11ObjectHandle objectHandle, Pkcs11AttributeType attributeType, out bool value, out Pkcs11AttributeReadResult result)
     {
         ThrowIfDisposed();

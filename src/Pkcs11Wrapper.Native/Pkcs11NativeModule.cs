@@ -750,6 +750,111 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         return true;
     }
 
+    public unsafe Pkcs11NativeAttributeValue[] GetAttributeValues(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE objectHandle, ReadOnlySpan<CK_ATTRIBUTE_TYPE> attributeTypes)
+    {
+        EnsureInitialized();
+        EnsureFunctionAvailable((void*)FunctionList->C_GetAttributeValue, "C_GetAttributeValue");
+
+        if (attributeTypes.IsEmpty)
+        {
+            return [];
+        }
+
+        CK_ATTRIBUTE[] template = new CK_ATTRIBUTE[attributeTypes.Length];
+        for (int i = 0; i < attributeTypes.Length; i++)
+        {
+            template[i] = new CK_ATTRIBUTE
+            {
+                Type = attributeTypes[i],
+                Value = null,
+                ValueLength = 0,
+            };
+        }
+
+        CK_RV queryResult;
+        fixed (CK_ATTRIBUTE* templatePointer = template)
+        {
+            queryResult = FunctionList->C_GetAttributeValue(sessionHandle, objectHandle, templatePointer, (CK_ULONG)(nuint)template.Length);
+        }
+
+        ThrowIfBatchedAttributeQueryFailed(queryResult, "C_GetAttributeValue");
+
+        int[] lengths = new int[template.Length];
+        int[] offsets = new int[template.Length];
+        int totalLength = 0;
+        for (int i = 0; i < template.Length; i++)
+        {
+            if (!IsReadableAttributeLength(template[i].ValueLength))
+            {
+                continue;
+            }
+
+            int length = ToInt32Checked(template[i].ValueLength, "attribute length");
+            lengths[i] = length;
+            offsets[i] = totalLength;
+            totalLength = checked(totalLength + length);
+        }
+
+        byte[] buffer = new byte[totalLength];
+        CK_ATTRIBUTE[] readTemplate = new CK_ATTRIBUTE[template.Length];
+        for (int i = 0; i < template.Length; i++)
+        {
+            readTemplate[i] = new CK_ATTRIBUTE
+            {
+                Type = template[i].Type,
+                Value = null,
+                ValueLength = template[i].ValueLength,
+            };
+        }
+
+        CK_RV readResult;
+        fixed (CK_ATTRIBUTE* templatePointer = readTemplate)
+        fixed (byte* bufferPointer = buffer)
+        {
+            for (int i = 0; i < readTemplate.Length; i++)
+            {
+                if (!IsReadableAttributeLength(readTemplate[i].ValueLength))
+                {
+                    continue;
+                }
+
+                if (lengths[i] == 0)
+                {
+                    readTemplate[i].Value = buffer.Length == 0 ? null : bufferPointer;
+                    readTemplate[i].ValueLength = 0;
+                    continue;
+                }
+
+                readTemplate[i].Value = bufferPointer + offsets[i];
+                readTemplate[i].ValueLength = (CK_ULONG)(nuint)lengths[i];
+            }
+
+            readResult = FunctionList->C_GetAttributeValue(sessionHandle, objectHandle, templatePointer, (CK_ULONG)(nuint)readTemplate.Length);
+        }
+
+        ThrowIfBatchedAttributeQueryFailed(readResult, "C_GetAttributeValue");
+
+        Pkcs11NativeAttributeValue[] values = new Pkcs11NativeAttributeValue[readTemplate.Length];
+        for (int i = 0; i < readTemplate.Length; i++)
+        {
+            Pkcs11NativeAttributeQuery valueQuery = CreateBatchedAttributeQuery(queryResult, readResult, template[i].ValueLength, readTemplate[i].ValueLength, lengths[i]);
+            byte[]? value = null;
+            if (valueQuery.IsReadable)
+            {
+                int written = ToInt32Checked(readTemplate[i].ValueLength, "attribute length");
+                value = new byte[written];
+                if (written != 0)
+                {
+                    Buffer.BlockCopy(buffer, offsets[i], value, 0, written);
+                }
+            }
+
+            values[i] = new Pkcs11NativeAttributeValue(readTemplate[i].Type, valueQuery, value);
+        }
+
+        return values;
+    }
+
     public CK_OBJECT_HANDLE CreateObject(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<CK_ATTRIBUTE> template)
     {
         EnsureInitialized();
@@ -2865,6 +2970,45 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         ThrowIfFailed(result, operation);
     }
 
+    private static void ThrowIfBatchedAttributeQueryFailed(CK_RV result, string operation)
+    {
+        if (result == CK_RV.Ok ||
+            result == Pkcs11ReturnValues.AttributeSensitive ||
+            result == Pkcs11ReturnValues.AttributeTypeInvalid ||
+            result == Pkcs11ReturnValues.BufferTooSmall)
+        {
+            return;
+        }
+
+        ThrowIfFailed(result, operation);
+    }
+
+    private static bool IsReadableAttributeLength(CK_ULONG valueLength)
+        => (nuint)valueLength != Pkcs11NativeAttributeQuery.UnavailableInformation;
+
+    private static Pkcs11NativeAttributeQuery CreateBatchedAttributeQuery(CK_RV queryResult, CK_RV readResult, CK_ULONG queriedLength, CK_ULONG readLength, int requestedLength)
+    {
+        nuint queriedLengthValue = (nuint)queriedLength;
+        nuint readLengthValue = (nuint)readLength;
+
+        if (queriedLengthValue == Pkcs11NativeAttributeQuery.UnavailableInformation || readLengthValue == Pkcs11NativeAttributeQuery.UnavailableInformation)
+        {
+            CK_RV result = queryResult == Pkcs11ReturnValues.AttributeTypeInvalid || readResult == Pkcs11ReturnValues.AttributeTypeInvalid
+                ? Pkcs11ReturnValues.AttributeTypeInvalid
+                : queryResult == Pkcs11ReturnValues.AttributeSensitive || readResult == Pkcs11ReturnValues.AttributeSensitive
+                    ? Pkcs11ReturnValues.AttributeSensitive
+                    : CK_RV.Ok;
+            return new Pkcs11NativeAttributeQuery(result, Pkcs11NativeAttributeQuery.UnavailableInformation);
+        }
+
+        if (readResult == Pkcs11ReturnValues.BufferTooSmall && requestedLength < ToInt32Checked(readLength, "attribute length"))
+        {
+            return new Pkcs11NativeAttributeQuery(Pkcs11ReturnValues.BufferTooSmall, readLengthValue);
+        }
+
+        return new Pkcs11NativeAttributeQuery(CK_RV.Ok, readLengthValue);
+    }
+
     internal static void ThrowIfFailed(CK_RV result, string operation)
     {
         if (!result.IsSuccess)
@@ -2873,6 +3017,22 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
             throw new Pkcs11Exception(operation, result, metadata);
         }
     }
+}
+
+public readonly struct Pkcs11NativeAttributeValue
+{
+    public Pkcs11NativeAttributeValue(CK_ATTRIBUTE_TYPE type, Pkcs11NativeAttributeQuery query, byte[]? value)
+    {
+        Type = type;
+        Query = query;
+        Value = value;
+    }
+
+    public CK_ATTRIBUTE_TYPE Type { get; }
+
+    public Pkcs11NativeAttributeQuery Query { get; }
+
+    public byte[]? Value { get; }
 }
 
 public readonly struct Pkcs11NativeAttributeQuery
