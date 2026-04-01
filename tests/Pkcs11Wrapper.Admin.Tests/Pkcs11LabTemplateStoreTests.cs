@@ -21,6 +21,15 @@ public sealed class Pkcs11LabTemplateStoreTests : IDisposable
             UserPin = "123456",
             MechanismTypeText = "0x40",
             KeyHandleText = "77",
+            KeyLabel = "ci-rsa",
+            KeyIdHex = "B2",
+            KeyObjectClass = "PrivateKey",
+            KeyType = "RSA",
+            SecondaryKeyHandleText = "88",
+            SecondaryKeyLabel = "wrap-key",
+            SecondaryKeyIdHex = "A1",
+            SecondaryKeyObjectClass = "SecretKey",
+            SecondaryKeyType = "AES",
             TextInput = "hello"
         };
 
@@ -32,6 +41,14 @@ public sealed class Pkcs11LabTemplateStoreTests : IDisposable
         Assert.Equal("sign-demo", all[0].Name);
         Assert.Null(all[0].Request.UserPin);
         Assert.Equal("hello", all[0].Request.TextInput);
+        Assert.Equal("ci-rsa", all[0].Request.KeyLabel);
+        Assert.Equal("B2", all[0].Request.KeyIdHex);
+        Assert.Equal("PrivateKey", all[0].Request.KeyObjectClass);
+        Assert.Equal("RSA", all[0].Request.KeyType);
+        Assert.Equal("wrap-key", all[0].Request.SecondaryKeyLabel);
+        Assert.Equal("A1", all[0].Request.SecondaryKeyIdHex);
+        Assert.Equal("SecretKey", all[0].Request.SecondaryKeyObjectClass);
+        Assert.Equal("AES", all[0].Request.SecondaryKeyType);
     }
 
     [Fact]

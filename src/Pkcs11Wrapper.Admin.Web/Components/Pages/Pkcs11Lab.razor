@@ -643,8 +643,19 @@
                     @if (!string.IsNullOrWhiteSpace(_lastResult.CreatedHandleText))
                     {
                         <div class="alert alert-success small">
-                            Created handle: <code>@_lastResult.CreatedHandleText</code>
-                            <button type="button" class="btn btn-sm btn-outline-success ms-2" @onclick="OpenInspectForCreatedHandleAsync">Inspect</button>
+                            <div>Created handle: <code>@_lastResult.CreatedHandleText</code></div>
+                            @if (!string.IsNullOrWhiteSpace(GetCreatedObjectLocatorSummary(_lastResult)))
+                            {
+                                <div class="mt-1 text-muted">Session-safe locator: <code>@GetCreatedObjectLocatorSummary(_lastResult)</code></div>
+                            }
+                            @if (Pkcs11LabRequestReuse.CanInspectCreated(_lastResult))
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-success mt-2" @onclick="OpenInspectForCreatedHandleAsync">Inspect</button>
+                            }
+                            else if (!_lastResult.CreatedObjectPersistsAcrossSessions)
+                            {
+                                <div class="mt-2 text-muted">This object was created as a transient session object, so a fresh-session inspect handoff is intentionally unavailable.</div>
+                            }
                         </div>
                     }
 
@@ -720,7 +731,7 @@
                                         {
                                             <button type="button" class="btn btn-sm btn-outline-warning" @onclick="() => PrepareUnwrapFromHistoryAsync(item)">Prepare unwrap</button>
                                         }
-                                        @if (!string.IsNullOrWhiteSpace(item.Result.CreatedHandleText))
+                                        @if (CanInspectCreated(item))
                                         {
                                             <button type="button" class="btn btn-sm btn-outline-dark" @onclick="() => PrepareInspectCreatedHandleAsync(item)">Inspect created</button>
                                         }
@@ -734,3 +745,4 @@
         </div>
     </div>
 </div>
+
