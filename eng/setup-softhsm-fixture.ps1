@@ -4,6 +4,7 @@ param(
     [string]$FixtureRoot = "",
     [string]$SoftHsmRoot = "",
     [string]$SoftHsmVersion = "2.5.0",
+    [string]$OpenScVersion = "0.27.1",
     [switch]$DownloadPortable,
     [string]$Pkcs11ToolPath = ""
 )
@@ -124,6 +125,57 @@ function Download-SoftHsmPortable {
     return (Resolve-SoftHsmPortableRoot -DestinationRoot $DestinationRoot)
 }
 
+function Download-OpenScPortable {
+    param(
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)][string]$DestinationRoot
+    )
+
+    $downloadDir = Join-Path $DestinationRoot 'downloads'
+    $assetCandidates = @(
+        "OpenSC-$Version_x64.zip",
+        "OpenSC-$Version-Light_x64.zip"
+    )
+
+    New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+
+    foreach ($assetName in $assetCandidates) {
+        $downloadUrl = "https://github.com/OpenSC/OpenSC/releases/download/$Version/$assetName"
+        $zipPath = Join-Path $downloadDir $assetName
+        $extractRoot = Join-Path $DestinationRoot ([System.IO.Path]::GetFileNameWithoutExtension($assetName))
+
+        if (-not (Test-Path -LiteralPath $zipPath)) {
+            try {
+                Write-Host "Downloading OpenSC portable package from $downloadUrl"
+                Invoke-DownloadFile -Uri $downloadUrl -OutFile $zipPath
+            }
+            catch {
+                Write-Warning "Failed to download $downloadUrl"
+                continue
+            }
+        }
+
+        if (Test-Path -LiteralPath $extractRoot) {
+            Remove-Item -LiteralPath $extractRoot -Recurse -Force
+        }
+
+        try {
+            Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force
+        }
+        catch {
+            Write-Warning "Failed to extract $zipPath"
+            continue
+        }
+
+        $discoveredToolPath = Find-FileRecursively -Root $extractRoot -LeafName 'pkcs11-tool.exe'
+        if (-not [string]::IsNullOrWhiteSpace($discoveredToolPath)) {
+            return $discoveredToolPath
+        }
+    }
+
+    throw "Unable to download a portable OpenSC package containing pkcs11-tool.exe for version '$Version'."
+}
+
 function Resolve-SoftHsmRoot {
     param(
         [AllowEmptyString()][string]$RequestedRoot,
@@ -161,7 +213,12 @@ function Resolve-SoftHsmRoot {
 }
 
 function Resolve-Pkcs11ToolPath {
-    param([AllowEmptyString()][string]$RequestedPath)
+    param(
+        [AllowEmptyString()][string]$RequestedPath,
+        [Parameter(Mandatory = $true)][string]$RequestedVersion,
+        [Parameter(Mandatory = $true)][bool]$ShouldDownload,
+        [Parameter(Mandatory = $true)][string]$WorkspaceRoot
+    )
 
     $candidates = @()
     foreach ($candidate in @(
@@ -187,6 +244,12 @@ function Resolve-Pkcs11ToolPath {
         if (Test-Path -LiteralPath $candidate) {
             return $candidate
         }
+    }
+
+    if ($ShouldDownload) {
+        $downloadRoot = Join-Path $WorkspaceRoot 'artifacts/opensc-windows'
+        New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+        return (Download-OpenScPortable -Version $RequestedVersion -DestinationRoot $downloadRoot)
     }
 
     throw 'Unable to resolve pkcs11-tool.exe. Install OpenSC or set PKCS11_TOOL_PATH.'
@@ -217,7 +280,7 @@ $softhsmUtilPath = Join-Path $softHsmRoot 'bin/softhsm2-util.exe'
 $softhsmBinPath = Join-Path $softHsmRoot 'bin'
 $softhsmLibPath = Join-Path $softHsmRoot 'lib'
 $modulePath = Join-Path $softHsmRoot 'lib/softhsm2-x64.dll'
-$pkcs11ToolPath = Resolve-Pkcs11ToolPath -RequestedPath $Pkcs11ToolPath
+$pkcs11ToolPath = Resolve-Pkcs11ToolPath -RequestedPath $Pkcs11ToolPath -RequestedVersion $OpenScVersion -ShouldDownload:$DownloadPortable.IsPresent -WorkspaceRoot $repoRoot
 
 Require-File -Path $softhsmUtilPath -Description 'SoftHSM utility'
 Require-File -Path $modulePath -Description 'SoftHSM PKCS#11 module'
