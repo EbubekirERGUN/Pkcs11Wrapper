@@ -27,7 +27,16 @@ public sealed class Pkcs11Module : IDisposable
 
     public bool SupportsInterfaceDiscovery => _nativeModule.SupportsInterfaceDiscovery;
 
+    public IPkcs11OperationTelemetryListener? TelemetryListener
+    {
+        get => _nativeModule.TelemetryListener;
+        set => _nativeModule.TelemetryListener = value;
+    }
+
     public static Pkcs11Module Load(string libraryPath) => new(Pkcs11NativeModule.Load(libraryPath));
+
+    public static Pkcs11Module Load(string libraryPath, IPkcs11OperationTelemetryListener? telemetryListener)
+        => new(Pkcs11NativeModule.Load(libraryPath, telemetryListener));
 
     public void Initialize() => Initialize(default);
 

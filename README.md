@@ -95,6 +95,40 @@ int slotCount = module.GetSlotCount();
 Console.WriteLine($"Discovered {slotCount} slot(s).");
 ```
 
+### Structured operation telemetry
+
+Telemetry is opt-in and disabled by default. When you attach a listener, the wrapper emits a compact structured event after each major PKCS#11 wrapper operation with:
+
+- operation name + native PKCS#11 function name
+- elapsed duration
+- success / returned-false / failure status
+- native return value when available
+- optional slot, session, and mechanism context
+- captured exception for faulted operations
+
+Listener failures are swallowed so observational code does not break the underlying PKCS#11 call flow.
+
+```csharp
+using Pkcs11Wrapper;
+using Pkcs11Wrapper.Native;
+
+sealed class ConsoleTelemetryListener : IPkcs11OperationTelemetryListener
+{
+    public void OnOperationCompleted(in Pkcs11OperationTelemetryEvent operationEvent)
+    {
+        Console.WriteLine(
+            $"{operationEvent.OperationName} ({operationEvent.NativeOperationName}) " +
+            $"status={operationEvent.Status} duration={operationEvent.Duration.TotalMilliseconds:F3}ms " +
+            $"slot={operationEvent.SlotId} session={operationEvent.SessionHandle} mechanism={operationEvent.MechanismType}");
+    }
+}
+
+using Pkcs11Module module = Pkcs11Module.Load("/path/to/pkcs11/module", new ConsoleTelemetryListener());
+module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
+```
+
+You can also swap the listener at runtime through `Pkcs11Module.TelemetryListener`.
+
 ### 2) Run the admin panel
 
 ```bash

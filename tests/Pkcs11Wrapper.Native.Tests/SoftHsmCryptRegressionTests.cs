@@ -10,6 +10,7 @@ using Pkcs11Wrapper.Native.Interop;
 
 namespace Pkcs11Wrapper.Native.Tests;
 
+[Collection(Pkcs11RuntimeCollection.Name)]
 public sealed class SoftHsmCryptRegressionTests
 {
     private static readonly Pkcs11AttributeType SignRecoverAttributeType = new(0x00000109u);
