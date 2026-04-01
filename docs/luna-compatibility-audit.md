@@ -294,7 +294,7 @@ Current documentation should point readers to this audit whenever “vendor comp
 
 If deeper Luna support becomes a product goal later, the clean next steps would be separate issues such as:
 
-1. add optional `CA_GetFunctionList` loading and a scoped Luna extension interop layer
+1. add optional `CA_GetFunctionList` loading and a scoped Luna extension interop layer (now designed in `docs/luna-vendor-extension-design.md`)
 2. add named constants/helpers for the Luna-public mechanisms that are already reachable through standard `C_*` calls
 3. add a Luna-specific vendor regression profile or sample env contract once a real Luna-backed CI/manual lane exists
 
