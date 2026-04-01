@@ -62,7 +62,7 @@ The generated env file also enables smoke/test defaults for:
 
 ## Environment contract
 
-Variables written by the script are the fixture contract used by `eng/run-regression-tests.sh`, `eng/run-smoke-aot.sh`, `samples/Pkcs11Wrapper.Smoke/Program.cs`, and `tests/Pkcs11Wrapper.Native.Tests/SoftHsmCryptRegressionTests.cs`.
+Variables written by the script are the fixture contract used by `eng/run-regression-tests.sh`, `eng/run-smoke-aot.sh`, `eng/run-smoke.ps1`, `eng/run-smoke-aot.ps1`, `samples/Pkcs11Wrapper.Smoke/Program.cs`, and `tests/Pkcs11Wrapper.Native.Tests/SoftHsmCryptRegressionTests.cs`.
 
 Key variables:
 
@@ -97,7 +97,7 @@ These only affect fixture creation. Consumers should load the generated env file
 
 - Running the script again without arguments creates a new temp fixture and does not reuse a prior token store.
 - Passing an explicit env file path makes reruns predictable because the fixture root becomes that file's parent directory.
-- `eng/run-regression-tests.sh` and `eng/run-smoke-aot.sh` always create their own temp roots and remove them on exit.
+- `eng/run-regression-tests.sh`, `eng/run-smoke-aot.sh`, `eng/run-smoke.ps1`, and `eng/run-smoke-aot.ps1` always create or consume fixture roots explicitly and remove temporary ones when they own them.
 - Manual fixture directories are not auto-removed unless a wrapper script owns them; delete the fixture root when finished.
 
 ## Provisioning regression note

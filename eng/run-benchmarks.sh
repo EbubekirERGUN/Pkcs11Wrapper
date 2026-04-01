@@ -76,10 +76,11 @@ mkdir -p "$results_root"
 export PKCS11_BENCHMARK_REPO_ROOT="$repo_root"
 export PKCS11_BENCHMARK_RESULTS_ROOT="$results_root"
 export PKCS11_BENCHMARK_SDK_VERSION="$(dotnet --version)"
-export PKCS11_BENCHMARK_RUNTIME_VERSION="$(dotnet --list-runtimes | awk '/Microsoft\.AspNetCore\.App / { version=$2 } END { print version }')"
+export PKCS11_BENCHMARK_RUNTIME_VERSION="$(dotnet --list-runtimes | awk '/Microsoft\.NETCore\.App / { version=$2 } END { print version }')"
 
 if [[ "$update_docs" == "true" ]]; then
   export PKCS11_BENCHMARK_CANONICAL_RESULTS_PATH="$repo_root/docs/benchmarks/latest-linux-softhsm.md"
+  export PKCS11_BENCHMARK_CANONICAL_JSON_PATH="$repo_root/docs/benchmarks/latest-linux-softhsm.json"
 fi
 
 printf 'Running BenchmarkDotNet suite with PKCS#11-backed environment\n'

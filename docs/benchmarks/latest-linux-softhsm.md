@@ -9,31 +9,31 @@
 - PKCS#11 module: `/usr/lib64/softhsm/libsofthsm2.so`
 - Benchmark profile: BenchmarkDotNet ShortRun + MemoryDiagnoser
 
-| Category | Suite | Benchmark | Mean | StdDev | Allocated |
-| --- | --- | --- | ---: | ---: | ---: |
-| Concurrent | SessionAndObjectBenchmarks | GetSessionInfoBurst8Workers | 23.659 μs | 66.811 ns | n/a |
-| Concurrent | SessionAndObjectBenchmarks | GetSessionInfoBurst32Workers | 57.605 μs | 907.795 ns | n/a |
-| Crypto | CryptoBenchmarks | GenerateRandom32 | 143.994 ns | 0.961 ns | n/a |
-| Crypto | CryptoBenchmarks | DigestSha256_1KiB | 770.642 ns | 2.327 ns | n/a |
-| Crypto | CryptoBenchmarks | DigestSha256Multipart_1KiB | 882.574 ns | 1.075 ns | n/a |
-| Crypto | CryptoBenchmarks | DecryptAesCbcPad_1KiB | 5.487 μs | 2.853 ns | n/a |
-| Crypto | CryptoBenchmarks | EncryptAesCbcPad_1KiB | 6.31 μs | 33.703 ns | n/a |
-| Crypto | CryptoBenchmarks | VerifySha256RsaPkcs_1KiB | 19.675 μs | 18.88 ns | n/a |
-| Crypto | CryptoBenchmarks | SignSha256RsaPkcs_1KiB | 333.909 μs | 39.242 ns | n/a |
-| Managed | ManagedTemplateBenchmarks | CreateAesEncryptDecryptTemplate | 20.356 ns | 0.03 ns | n/a |
-| Managed | ManagedTemplateBenchmarks | CreateRsaSignVerifyTemplate | 32.441 ns | 0.093 ns | n/a |
-| Managed | ManagedTemplateBenchmarks | CreateEcSignVerifyTemplate | 33.007 ns | 0.345 ns | n/a |
-| Module | ModuleLifecycleBenchmarks | GetSlotCount | 46.959 ns | 0.417 ns | n/a |
-| Module | ModuleLifecycleBenchmarks | EnumerateSlots | 107.307 ns | 0.213 ns | n/a |
-| Module | ModuleLifecycleBenchmarks | EnumerateMechanisms | 132.158 ns | 0.338 ns | n/a |
-| Module | ModuleLifecycleBenchmarks | GetAesCbcPadMechanismFlags | 1.81 μs | 0.759 ns | n/a |
-| Module | ModuleLifecycleBenchmarks | LoadInitializeGetInfoFinalizeDispose | 1.919 μs | 4.016 ns | n/a |
-| Object | SessionAndObjectBenchmarks | CreateUpdateDestroyDataObject | 3.634 μs | 13.564 ns | n/a |
-| Object | SessionAndObjectBenchmarks | FindAesKeyByLabel | 10.861 μs | 22.677 ns | n/a |
-| Object | SessionAndObjectBenchmarks | GenerateDestroyAesKey | 12.494 μs | 38.994 ns | n/a |
-| Object | SessionAndObjectBenchmarks | ReadAesKeyLabelAttribute | 15.545 μs | 6.073 ns | n/a |
-| Object | SessionAndObjectBenchmarks | GenerateDestroyRsaKeyPair | 23.949 ms | 1.993 ms | n/a |
-| Session | SessionAndObjectBenchmarks | OpenReadOnlySessionAndGetInfo | 275.525 ns | 0.534 ns | n/a |
-| Session | SessionAndObjectBenchmarks | OpenReadWriteLoginLogoutSession | 292.005 μs | 324.444 ns | n/a |
+| Category | Suite | Benchmark | Mean | StdDev | Allocated | Gen0 | Gen1 | Gen2 |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Concurrent | SessionAndObjectBenchmarks | GetSessionInfoBurst8Workers | 23.659 μs | 66.811 ns | 0 B | 0 | 0 | 0 |
+| Concurrent | SessionAndObjectBenchmarks | GetSessionInfoBurst32Workers | 57.605 μs | 907.795 ns | 0 B | 0 | 0 | 0 |
+| Crypto | CryptoBenchmarks | GenerateRandom32 | 149.717 ns | 0.138 ns | 0 B | 0 | 0 | 0 |
+| Crypto | CryptoBenchmarks | DigestSha256_1KiB | 780.351 ns | 2.345 ns | 0 B | 0 | 0 | 0 |
+| Crypto | CryptoBenchmarks | DigestSha256Multipart_1KiB | 1.061 μs | 47.917 ns | 0 B | 0 | 0 | 0 |
+| Crypto | CryptoBenchmarks | DecryptAesCbcPad_1KiB | 5.497 μs | 17.007 ns | 0 B | 0 | 0 | 0 |
+| Crypto | CryptoBenchmarks | EncryptAesCbcPad_1KiB | 6.723 μs | 57.318 ns | 0 B | 0 | 0 | 0 |
+| Crypto | CryptoBenchmarks | VerifySha256RsaPkcs_1KiB | 19.744 μs | 49.236 ns | 0 B | 0 | 0 | 0 |
+| Crypto | CryptoBenchmarks | SignSha256RsaPkcs_1KiB | 334.979 μs | 241.146 ns | 0 B | 0 | 0 | 0 |
+| Managed | ManagedTemplateBenchmarks | CreateAesEncryptDecryptTemplate | 20.326 ns | 0.072 ns | 544 B | 363 | 0 | 0 |
+| Managed | ManagedTemplateBenchmarks | CreateRsaSignVerifyTemplate | 32.155 ns | 0.122 ns | 880 B | 294 | 0 | 0 |
+| Managed | ManagedTemplateBenchmarks | CreateEcSignVerifyTemplate | 33.485 ns | 0.396 ns | 888 B | 296 | 0 | 0 |
+| Module | ModuleLifecycleBenchmarks | GetSlotCount | 46.424 ns | 0.151 ns | 0 B | 0 | 0 | 0 |
+| Module | ModuleLifecycleBenchmarks | EnumerateSlots | 107.66 ns | 0.067 ns | 0 B | 0 | 0 | 0 |
+| Module | ModuleLifecycleBenchmarks | EnumerateMechanisms | 134.489 ns | 2.41 ns | 0 B | 0 | 0 | 0 |
+| Module | ModuleLifecycleBenchmarks | GetAesCbcPadMechanismFlags | 1.8 μs | 1.678 ns | 0 B | 0 | 0 | 0 |
+| Module | ModuleLifecycleBenchmarks | LoadInitializeGetInfoFinalizeDispose | 1.933 μs | 5.099 ns | 384 B | 2 | 0 | 0 |
+| Object | SessionAndObjectBenchmarks | CreateUpdateDestroyDataObject | 3.675 μs | 60.045 ns | 784 B | 4 | 0 | 0 |
+| Object | SessionAndObjectBenchmarks | FindAesKeyByLabel | 10.646 μs | 117.607 ns | 0 B | 0 | 0 | 0 |
+| Object | SessionAndObjectBenchmarks | GenerateDestroyAesKey | 11.97 μs | 572.997 ns | 312 B | 0 | 0 | 0 |
+| Object | SessionAndObjectBenchmarks | ReadAesKeyLabelAttribute | 15.448 μs | 35.234 ns | 32 B | 0 | 0 | 0 |
+| Object | SessionAndObjectBenchmarks | GenerateDestroyRsaKeyPair | 23.579 ms | 2.14 ms | 1,226 B | 0 | 0 | 0 |
+| Session | SessionAndObjectBenchmarks | OpenReadOnlySessionAndGetInfo | 235.345 ns | 0.9 ns | 56 B | 4 | 0 | 0 |
+| Session | SessionAndObjectBenchmarks | OpenReadWriteLoginLogoutSession | 265.725 μs | 2.533 μs | 56 B | 0 | 0 | 0 |
 
 > Trend note: compare this file across commits or benchmark workflow artifacts to track whether changes improved or regressed the wrapper over time.

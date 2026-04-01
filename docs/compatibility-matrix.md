@@ -5,9 +5,9 @@
 | Area | Status | Notes |
 | --- | --- | --- |
 | OS | Linux | Primary runtime validation target (fixture-backed regression + NativeAOT smoke) |
-| OS | Windows | Supported for build/API/layout validation and fixture-backed runtime regression through SoftHSM-for-Windows |
+| OS | Windows | Supported for fixture-backed runtime regression and `win-x64` NativeAOT smoke through SoftHSM-for-Windows |
 | Runtime | .NET 10 | Pinned via `global.json` |
-| NativeAOT | Supported | Validated by `eng/run-smoke-aot.sh` |
+| NativeAOT | Supported | Validated by `eng/run-smoke-aot.sh` on Linux and `eng/run-smoke-aot.ps1` on Windows |
 | Reference module | SoftHSM v2 | Default local + CI regression target |
 | Optional vendor lane | Supported | Via `eng/run-regression-tests.sh --use-existing-env` and `docs/vendor-regression.md` |
 
@@ -30,7 +30,7 @@
 
 ## Known limitations
 
-- PKCS#11 v3 runtime validation currently uses a deterministic Linux-built shim rather than a vendor module, so it validates marshalling/runtime behavior but not vendor-specific semantics.
-- Windows does not yet have the same NativeAOT smoke depth as Linux; current Windows coverage includes fixture-backed runtime regression through SoftHSM-for-Windows plus the standard build/API/layout checks.
+- PKCS#11 v3 runtime validation now uses a deterministic Linux-built shim rather than a vendor module, so it validates marshalling/runtime behavior but not vendor-specific semantics.
+- Windows NativeAOT validation now exists, but Linux still remains the deepest day-to-day validation environment because it is the primary benchmark baseline and the most feature-complete local automation path.
 - Mechanism parameter helpers are intentionally selective; uncommon mechanisms may still require raw parameter bytes.
 - Packaging discipline is defined in `docs/release.md`, but external package publication is still a maintainer action rather than an automated CI publish step.

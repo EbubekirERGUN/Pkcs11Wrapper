@@ -6,11 +6,11 @@
     <Description>Low-level NativeAOT-friendly PKCS#11 interop layer for Pkcs11Wrapper.</Description>
     <PackageTags>pkcs11;cryptoki;interop;nativeaot</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>README.nuget.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
+    <None Include="..\..\docs\nuget\README.nuget.md" Pack="true" PackagePath="" />
   </ItemGroup>
 </Project>

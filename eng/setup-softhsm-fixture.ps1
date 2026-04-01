@@ -36,6 +36,64 @@ function Get-CommandPathOrNull {
     }
 }
 
+function Find-FileRecursively {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$LeafName
+    )
+
+    if (-not (Test-Path -LiteralPath $Root)) {
+        return $null
+    }
+
+    return Get-ChildItem -Path $Root -Filter $LeafName -File -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+
+function Invoke-DownloadFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$OutFile
+    )
+
+    try {
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile
+        return
+    }
+    catch {
+        $curlPath = Get-CommandPathOrNull -CommandName 'curl.exe'
+        if ($null -eq $curlPath) {
+            throw
+        }
+
+        Write-Warning "Invoke-WebRequest failed, retrying with curl.exe"
+        & $curlPath --location --fail --silent --show-error --output $OutFile $Uri
+        if ($LASTEXITCODE -ne 0) {
+            throw "curl.exe failed to download $Uri"
+        }
+    }
+}
+
+function Resolve-SoftHsmPortableRoot {
+    param([Parameter(Mandatory = $true)][string]$DestinationRoot)
+
+    $candidates = @((Join-Path $DestinationRoot 'SoftHSM2'))
+    $discoveredUtilPath = Find-FileRecursively -Root $DestinationRoot -LeafName 'softhsm2-util.exe'
+    if (-not [string]::IsNullOrWhiteSpace($discoveredUtilPath)) {
+        $candidates += (Split-Path -Parent (Split-Path -Parent $discoveredUtilPath))
+    }
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and
+            (Test-Path -LiteralPath (Join-Path $candidate 'bin/softhsm2-util.exe')) -and
+            (Test-Path -LiteralPath (Join-Path $candidate 'lib/softhsm2-x64.dll'))) {
+            return $candidate
+        }
+    }
+
+    throw "Portable SoftHSM extraction under '$DestinationRoot' did not contain the expected bin/lib layout."
+}
+
 function Download-SoftHsmPortable {
     param(
         [Parameter(Mandatory = $true)][string]$Version,
@@ -47,14 +105,14 @@ function Download-SoftHsmPortable {
     $downloadUrl = "https://github.com/disig/SoftHSM2-for-Windows/releases/download/$releaseTag/$zipName"
     $downloadDir = Join-Path $DestinationRoot 'downloads'
     $zipPath = Join-Path $downloadDir $zipName
-    $extractRoot = Join-Path $DestinationRoot 'SoftHSM2'
 
     New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
     if (-not (Test-Path -LiteralPath $zipPath)) {
         Write-Host "Downloading SoftHSM portable package from $downloadUrl"
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath
+        Invoke-DownloadFile -Uri $downloadUrl -OutFile $zipPath
     }
 
+    $extractRoot = Join-Path $DestinationRoot 'SoftHSM2'
     if (-not (Test-Path -LiteralPath (Join-Path $extractRoot 'bin/softhsm2-util.exe'))) {
         if (Test-Path -LiteralPath $extractRoot) {
             Remove-Item -LiteralPath $extractRoot -Recurse -Force
@@ -63,7 +121,7 @@ function Download-SoftHsmPortable {
         Expand-Archive -LiteralPath $zipPath -DestinationPath $DestinationRoot -Force
     }
 
-    return $extractRoot
+    return (Resolve-SoftHsmPortableRoot -DestinationRoot $DestinationRoot)
 }
 
 function Resolve-SoftHsmRoot {
@@ -110,6 +168,7 @@ function Resolve-Pkcs11ToolPath {
         $RequestedPath,
         $env:PKCS11_TOOL_PATH,
         (Get-CommandPathOrNull -CommandName 'pkcs11-tool.exe'),
+        'C:\ProgramData\chocolatey\bin\pkcs11-tool.exe',
         'C:\Program Files\OpenSC Project\OpenSC\pkcs11-tool.exe',
         'C:\Program Files\OpenSC Project\OpenSC\tools\pkcs11-tool.exe')) {
         if (-not [string]::IsNullOrWhiteSpace($candidate)) {
@@ -117,7 +176,14 @@ function Resolve-Pkcs11ToolPath {
         }
     }
 
-    foreach ($candidate in $candidates) {
+    foreach ($root in @('C:\ProgramData\chocolatey\lib', 'C:\Program Files\OpenSC Project')) {
+        $discovered = Find-FileRecursively -Root $root -LeafName 'pkcs11-tool.exe'
+        if (-not [string]::IsNullOrWhiteSpace($discovered)) {
+            $candidates += $discovered
+        }
+    }
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
         if (Test-Path -LiteralPath $candidate) {
             return $candidate
         }
@@ -178,8 +244,13 @@ $env:SOFTHSM2_CONF = $softHsmConf
 $env:PATH = $softhsmBinPath + ';' + $softhsmLibPath + ';' + $env:PATH
 
 Write-Host "Creating Windows SoftHSM fixture in $fixtureRoot"
+Write-Host "Using SoftHSM root $softHsmRoot"
 Write-Host "Using PKCS#11 module $modulePath"
 Write-Host "Using pkcs11-tool $pkcs11ToolPath"
+Write-Host "SoftHSM utility version:"
+& $softhsmUtilPath --version | Out-Host
+Write-Host "OpenSC pkcs11-tool version:"
+& $pkcs11ToolPath --version | Out-Host
 
 & $softhsmUtilPath --init-token --free --label $tokenLabel --so-pin $soPin --pin $userPin | Out-Host
 & $pkcs11ToolPath --module $modulePath --token-label $tokenLabel --login --pin $userPin --keygen --key-type AES:32 --label $aesLabel --id $aesIdHex --usage-decrypt --usage-wrap | Out-Host
