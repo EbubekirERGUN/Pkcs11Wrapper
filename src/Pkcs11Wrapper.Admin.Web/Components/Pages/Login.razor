@@ -38,14 +38,14 @@
 
         <div class="mb-3">
             <label class="form-label">Username</label>
-            <input class="form-control" name="username" autocomplete="username" />
+            <input class="form-control" name="username" autocomplete="username" data-testid="login-username" />
         </div>
         <div class="mb-3">
             <label class="form-label">Password</label>
-            <input class="form-control" type="password" name="password" autocomplete="current-password" />
+            <input class="form-control" type="password" name="password" autocomplete="current-password" data-testid="login-password" />
         </div>
 
-        <button class="btn btn-primary w-100" type="submit">Sign in</button>
+        <button class="btn btn-primary w-100" type="submit" data-testid="login-submit">Sign in</button>
 
         <div class="form-text mt-3">
             On first run, bootstrap credentials are written to <code>App_Data/bootstrap-admin.txt</code>.

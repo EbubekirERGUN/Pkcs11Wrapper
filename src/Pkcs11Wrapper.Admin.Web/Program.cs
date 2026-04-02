@@ -30,19 +30,27 @@ builder.Services.AddAuthorizationBuilder()
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-AdminStorageOptions adminStorage = new()
+AdminStorageOptions adminStorage = builder.Configuration.GetSection("AdminStorage").Get<AdminStorageOptions>() ?? new();
+if (string.IsNullOrWhiteSpace(adminStorage.DataRoot))
 {
-    DataRoot = Path.Combine(builder.Environment.ContentRootPath, "App_Data")
-};
+    adminStorage.DataRoot = Path.Combine(builder.Environment.ContentRootPath, "App_Data");
+}
+
 Directory.CreateDirectory(adminStorage.DataRoot);
 
 AdminSessionRegistryOptions sessionOptions = builder.Configuration.GetSection("AdminSessionRegistry").Get<AdminSessionRegistryOptions>() ?? new();
 LocalAdminLoginThrottleOptions throttleOptions = builder.Configuration.GetSection("LocalAdminLoginThrottle").Get<LocalAdminLoginThrottleOptions>() ?? new();
+LocalAdminBootstrapOptions bootstrapOptions = builder.Configuration.GetSection("LocalAdminBootstrap").Get<LocalAdminBootstrapOptions>() ?? new();
+AdminRuntimeOptions runtimeOptions = builder.Configuration.GetSection("AdminRuntime").Get<AdminRuntimeOptions>() ?? new();
 
 builder.Services.AddSingleton(adminStorage);
 builder.Services.AddSingleton<IOptions<AdminStorageOptions>>(Options.Create(adminStorage));
 builder.Services.AddSingleton(sessionOptions);
 builder.Services.AddSingleton(throttleOptions);
+builder.Services.AddSingleton(bootstrapOptions);
+builder.Services.AddSingleton<IOptions<LocalAdminBootstrapOptions>>(Options.Create(bootstrapOptions));
+builder.Services.AddSingleton(runtimeOptions);
+builder.Services.AddSingleton<IOptions<AdminRuntimeOptions>>(Options.Create(runtimeOptions));
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(adminStorage.DataRoot, "keys")));
 builder.Services.AddSingleton<IDeviceProfileStore, JsonDeviceProfileStore>();
@@ -74,7 +82,11 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseStatusCodePagesWithReExecute("/not-found");
-app.UseHttpsRedirection();
+if (!runtimeOptions.DisableHttpsRedirection)
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();

@@ -47,7 +47,7 @@
                 <div class="app-nav-section-title">Inventory</div>
 
                 <div class="app-nav-item">
-                    <NavLink class="app-nav-link" href="devices">
+                    <NavLink class="app-nav-link" href="devices" data-testid="nav-devices">
                         <span class="app-nav-icon">H</span>
                         <span class="app-nav-copy">
                             <span class="app-nav-title">Devices</span>
@@ -57,7 +57,7 @@
                 </div>
 
                 <div class="app-nav-item">
-                    <NavLink class="app-nav-link" href="slots">
+                    <NavLink class="app-nav-link" href="slots" data-testid="nav-slots">
                         <span class="app-nav-icon">S</span>
                         <span class="app-nav-copy">
                             <span class="app-nav-title">Slots</span>
@@ -67,7 +67,7 @@
                 </div>
 
                 <div class="app-nav-item">
-                    <NavLink class="app-nav-link" href="keys">
+                    <NavLink class="app-nav-link" href="keys" data-testid="nav-keys">
                         <span class="app-nav-icon">K</span>
                         <span class="app-nav-copy">
                             <span class="app-nav-title">Keys & Objects</span>
@@ -83,7 +83,7 @@
                 <AuthorizeView Roles="operator,admin">
                     <Authorized Context="operatorContext">
                         <div class="app-nav-item">
-                            <NavLink class="app-nav-link" href="lab">
+                            <NavLink class="app-nav-link" href="lab" data-testid="nav-lab">
                                 <span class="app-nav-icon">L</span>
                                 <span class="app-nav-copy">
                                     <span class="app-nav-title">PKCS#11 Lab</span>
@@ -95,7 +95,7 @@
                 </AuthorizeView>
 
                 <div class="app-nav-item">
-                    <NavLink class="app-nav-link" href="telemetry">
+                    <NavLink class="app-nav-link" href="telemetry" data-testid="nav-telemetry">
                         <span class="app-nav-icon">P</span>
                         <span class="app-nav-copy">
                             <span class="app-nav-title">PKCS#11 Telemetry</span>

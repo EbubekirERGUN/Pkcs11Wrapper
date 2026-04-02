@@ -165,7 +165,16 @@ cd src/Pkcs11Wrapper.Admin.Web
 dotnet run
 ```
 
-On first run, the panel seeds a local bootstrap admin credential file under `App_Data/bootstrap-admin.txt`.
+By default, first run seeds a local bootstrap admin credential file under `App_Data/bootstrap-admin.txt`.
+
+For CI/automation you can override the runtime storage root and bootstrap credential without changing the default local behavior:
+
+```bash
+export AdminStorage__DataRoot=/tmp/pkcs11wrapper-admin-data
+export LocalAdminBootstrap__UserName=ci-admin
+export LocalAdminBootstrap__Password='AdminE2E!Pass123'
+export AdminRuntime__DisableHttpsRedirection=true
+```
 
 ### 3) Run validation
 
@@ -173,6 +182,7 @@ Linux:
 
 ```bash
 ./eng/run-regression-tests.sh
+./eng/run-admin-e2e.sh
 ./eng/run-smoke-aot.sh
 ./eng/run-benchmarks.sh
 ```

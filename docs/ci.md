@@ -5,6 +5,7 @@
 `.github/workflows/ci.yml` defines:
 
 - `build-test-aot` (default SoftHSM Linux lane)
+- `admin-runtime-e2e` (Linux Playwright-backed admin runtime lane)
 - `build-test-windows` (Windows SoftHSM runtime + NativeAOT lane)
 - `vendor-regression` (optional non-SoftHSM lane, manual dispatch only)
 
@@ -46,6 +47,18 @@ Ordered Linux steps:
 - `./eng/run-smoke-aot.sh`
 - upload captured CI logs plus the Linux NativeAOT publish output as Actions artifacts
 
+Ordered admin runtime E2E steps:
+
+- checkout the repository
+- install the SDK pinned by `global.json`
+- install baseline native dependencies (`build-essential`, `softhsm2`, `opensc`, `file`)
+- create a dedicated admin-E2E artifact directory
+- mark `eng/setup-softhsm-fixture.sh` and `eng/run-admin-e2e.sh` executable
+- `dotnet restore Pkcs11Wrapper.sln`
+- `dotnet build Pkcs11Wrapper.sln -c Release --no-restore`
+- `./eng/run-admin-e2e.sh --no-restore --no-build`
+- upload browser traces/screenshots plus runtime/server logs as Actions artifacts
+
 Ordered Windows steps:
 
 - checkout the repository
@@ -75,6 +88,13 @@ Regression coverage from `eng/run-regression-tests.sh` guarantees that:
 - the seeded AES and RSA objects are discoverable before tests start
 - the xUnit suite still covers managed API shape, native layout assumptions, crypto flows, object lifecycle, admin operations, and PKCS#11 v3 runtime-present behavior through the Linux shim
 - SoftHSM capability-absent coverage stays distinct from v3-runtime-present failures because both paths run in the same Linux regression lane
+
+Admin runtime E2E coverage from `admin-runtime-e2e` guarantees that:
+
+- the Blazor admin host still boots in CI against an isolated temporary storage root instead of repo-local mutable `App_Data`
+- a deterministic bootstrap admin credential can be injected for automation without changing the default local first-run behavior
+- critical authenticated admin flows still work end-to-end: login, device profile creation + connection test, slot inventory load, keys/object browse + detail open, PKCS#11 Lab execution, and telemetry viewing/filtering
+- browser traces, screenshots, and runtime logs are captured as downloadable artifacts to make failures diagnosable instead of opaque
 
 Native AOT coverage from `eng/run-smoke-aot.sh` guarantees that:
 
@@ -108,7 +128,7 @@ Benchmark coverage from `benchmarks.yml` guarantees that, whenever the workflow 
 
 ## Fixture behavior in CI
 
-Both CI scripts create temporary fixture roots with `mktemp` and remove them on exit. CI does not depend on a pre-existing host token store or a checked-in SoftHSM configuration.
+Both Linux CI scripts create temporary fixture roots with `mktemp` and remove them on exit. CI does not depend on a pre-existing host token store or a checked-in SoftHSM configuration.
 
 The fixture env contract comes from `eng/setup-softhsm-fixture.sh`, including:
 
@@ -119,6 +139,14 @@ The fixture env contract comes from `eng/setup-softhsm-fixture.sh`, including:
 - `PKCS11_PROVISIONING_REGRESSION=1` for the opt-in `InitToken` test path
 
 The `InitToken` provisioning regression is still conditional on `PKCS11_SO_PIN`; the fixture script writes it, so CI satisfies that requirement.
+
+The admin runtime lane also creates a temporary admin storage root and injects:
+
+- `AdminStorage__DataRoot` pointing at that temporary runtime folder
+- `LocalAdminBootstrap__UserName` / `LocalAdminBootstrap__Password` for deterministic login
+- `AdminRuntime__DisableHttpsRedirection=true` so Playwright can exercise the runtime over a bounded local HTTP endpoint in CI
+
+That keeps the admin E2E run hermetic and avoids mutating `src/Pkcs11Wrapper.Admin.Web/App_Data`.
 
 For the optional vendor lane, CI does not provision a fixture. The lane calls:
 
@@ -170,6 +198,7 @@ sudo apt-get install -y softhsm2 opensc file
 dotnet restore Pkcs11Wrapper.sln
 dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 ./eng/run-regression-tests.sh
+./eng/run-admin-e2e.sh
 ./eng/run-smoke-aot.sh
 ```
 

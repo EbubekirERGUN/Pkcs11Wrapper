@@ -88,6 +88,58 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  admin-runtime-e2e:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_vendor_lane != true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      CI: true
+      CI_ARTIFACT_ROOT: artifacts/ci/admin-e2e
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            Directory.Build.props
+            **/*.csproj
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential softhsm2 opensc file
+
+      - name: Prepare CI artifact directory
+        run: mkdir -p "$CI_ARTIFACT_ROOT"
+
+      - name: Make engineering scripts executable
+        run: chmod +x eng/setup-softhsm-fixture.sh eng/run-admin-e2e.sh
+
+      - name: Restore
+        run: dotnet restore Pkcs11Wrapper.sln
+
+      - name: Build
+        run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore
+
+      - name: Admin runtime E2E
+        run: |
+          set -euo pipefail
+          ./eng/run-admin-e2e.sh --no-restore --no-build 2>&1 | tee "$CI_ARTIFACT_ROOT/admin-runtime-e2e.log"
+
+      - name: Upload admin runtime E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkcs11wrapper-ci-admin-e2e-run-${{ github.run_number }}
+          path: artifacts/ci/admin-e2e
+          if-no-files-found: warn
+          retention-days: 14
+
   build-test-windows:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_vendor_lane != true }}
     runs-on: windows-latest
