@@ -211,6 +211,45 @@ public sealed class HsmAdminServiceTests
     }
 
     [Fact]
+    public void ShouldRetryReadWriteAfterOpenSessionFailureReturnsTrueForReadOnlyFunctionFailed()
+    {
+        MethodInfo method = GetShouldRetryReadWriteAfterOpenSessionFailureMethod();
+        bool shouldRetry = (bool)method.Invoke(null,
+        [
+            false,
+            new Pkcs11Exception("C_OpenSession", new CK_RV(0x00000006))
+        ])!;
+
+        Assert.True(shouldRetry);
+    }
+
+    [Fact]
+    public void ShouldRetryReadWriteAfterOpenSessionFailureReturnsFalseForReadWriteRequests()
+    {
+        MethodInfo method = GetShouldRetryReadWriteAfterOpenSessionFailureMethod();
+        bool shouldRetry = (bool)method.Invoke(null,
+        [
+            true,
+            new Pkcs11Exception("C_OpenSession", new CK_RV(0x00000006))
+        ])!;
+
+        Assert.False(shouldRetry);
+    }
+
+    [Fact]
+    public void ShouldRetryReadWriteAfterOpenSessionFailureReturnsFalseForOtherErrors()
+    {
+        MethodInfo method = GetShouldRetryReadWriteAfterOpenSessionFailureMethod();
+        bool shouldRetry = (bool)method.Invoke(null,
+        [
+            false,
+            new Pkcs11Exception("C_OpenSession", new CK_RV(0x000000A0))
+        ])!;
+
+        Assert.False(shouldRetry);
+    }
+
+    [Fact]
     public void LoginUserToleratingAlreadyLoggedInSwallowsAlreadyLoggedInReturnValue()
     {
         MethodInfo method = GetLoginUserToleratingAlreadyLoggedInActionOverload();
@@ -240,6 +279,16 @@ public sealed class HsmAdminServiceTests
 
         Pkcs11Exception inner = Assert.IsType<Pkcs11Exception>(ex.InnerException);
         Assert.Equal((nuint)0xA0, (nuint)inner.RawResult);
+    }
+
+    private static MethodInfo GetShouldRetryReadWriteAfterOpenSessionFailureMethod()
+    {
+        return typeof(HsmAdminService)
+            .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
+            .Single(method => method.Name == "ShouldRetryReadWriteAfterOpenSessionFailure"
+                && method.GetParameters() is [{ ParameterType: var first }, { ParameterType: var second }]
+                && first == typeof(bool)
+                && second == typeof(Pkcs11Exception));
     }
 
     private static MethodInfo GetLoginUserToleratingAlreadyLoggedInActionOverload()

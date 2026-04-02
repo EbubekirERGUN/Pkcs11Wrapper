@@ -14,6 +14,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private const string DestroyConfirmationPrefix = "DESTROY ";
     private const string ConfigurationFormat = "Pkcs11Wrapper.Admin.Configuration";
     private const int ConfigurationSchemaVersion = 1;
+    private const nuint CkrFunctionFailed = 0x00000006u;
 
     private static readonly string[] ConfigurationIncludedSections =
     [
@@ -78,6 +79,13 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         public static implicit operator LabExecutionPayload((string Summary, string OutputText, List<string> Notes) value)
             => new(value.Summary, value.OutputText, value.Notes);
+    }
+
+    private sealed record SessionOpenResult(Pkcs11Session Session, bool RequestedReadWrite, bool OpenedReadWrite, bool EscalatedToReadWrite)
+    {
+        public string ModeLabel => OpenedReadWrite ? "Read-write" : "Read-only";
+
+        public string ModeShortLabel => OpenedReadWrite ? "RW" : "RO";
     }
 
     public Task<IReadOnlyList<HsmDeviceProfile>> GetDevicesAsync(CancellationToken cancellationToken = default)
@@ -440,7 +448,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(slotIdValue), readWriteRequested: false);
+        using Pkcs11Session session = sessionOpen.Session;
 
         string pinNote = LoginIfProvided(session, userPin);
         Pkcs11ObjectSearchParameters search = new(label: string.IsNullOrWhiteSpace(labelFilter) ? default : Encoding.UTF8.GetBytes(labelFilter));
@@ -457,7 +466,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(slotIdValue), readWriteRequested: false);
+        using Pkcs11Session session = sessionOpen.Session;
         string pinNote = LoginIfProvided(session, userPin);
 
         HsmKeyObjectPage page = HsmAdminKeyPageBrowser.ReadPage(deviceId, slotIdValue, session, request);
@@ -473,7 +483,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
         using Pkcs11Module module = CreateInitializedModule(device);
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue));
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(slotIdValue), readWriteRequested: false);
+        using Pkcs11Session session = sessionOpen.Session;
         string pinNote = LoginIfProvided(session, userPin);
 
         HsmObjectDetail detail = HsmAdminObjectCatalog.ReadObjectDetail(deviceId, slotIdValue, session, new Pkcs11ObjectHandle(handleValue));
@@ -638,7 +649,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         Pkcs11Module module = CreateInitializedModule(device);
         try
         {
-            Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite);
+            SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(slotIdValue), readWrite);
+            Pkcs11Session session = sessionOpen.Session;
             string notes = "Public session";
             if (!string.IsNullOrWhiteSpace(userPin))
             {
@@ -646,8 +658,16 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 notes = "User-authenticated session";
             }
 
-            AdminSessionSnapshot snapshot = sessionRegistry.Register(device.Id, device.Name, module, session, readWrite, notes);
-            await auditLog.WriteAsync("Session", "Open", $"{device.Name}/slot-{slotIdValue}", "Success", $"Opened {(readWrite ? "read-write" : "read-only")} session.", cancellationToken: cancellationToken);
+            if (sessionOpen.EscalatedToReadWrite)
+            {
+                notes += " (opened as read-write after the module rejected a read-only session request)";
+            }
+
+            AdminSessionSnapshot snapshot = sessionRegistry.Register(device.Id, device.Name, module, session, sessionOpen.OpenedReadWrite, notes);
+            string auditDetail = sessionOpen.EscalatedToReadWrite
+                ? "Opened read-write session after the module rejected a read-only session request."
+                : $"Opened {(sessionOpen.OpenedReadWrite ? "read-write" : "read-only")} session.";
+            await auditLog.WriteAsync("Session", "Open", $"{device.Name}/slot-{slotIdValue}", "Success", auditDetail, cancellationToken: cancellationToken);
             return snapshot;
         }
         catch
@@ -1205,30 +1225,33 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static (string Summary, string OutputText, List<string> Notes) ExecuteSessionInfoLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11SessionInfo info = session.GetInfo();
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {info.SlotId.Value}");
-        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"State: {info.State}");
         output.AppendLine($"Flags: {info.Flags}");
         output.AppendLine($"Device error: {info.DeviceError}");
-        return ($"Opened a transient {(request.OpenReadWriteSession ? "RW" : "RO")} session and read `C_GetSessionInfo`.", output.ToString(), notes);
+        return ($"Opened a transient {sessionOpen.ModeShortLabel} session and read `C_GetSessionInfo`.", output.ToString(), notes);
     }
 
     private static LabExecutionPayload ExecuteGenerateRandomLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), readWriteRequested: false, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         byte[] random = new byte[request.RandomLength];
         session.GenerateRandom(random);
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Random length: {request.RandomLength}");
         output.AppendLine($"Random hex: {Convert.ToHexString(random)}");
@@ -1238,7 +1261,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static LabExecutionPayload ExecuteDigestTextLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), readWriteRequested: false, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ResolveDigestMechanism(request.DigestAlgorithm);
         byte[] data = Encoding.UTF8.GetBytes(request.TextInput ?? string.Empty);
@@ -1251,6 +1275,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
         output.AppendLine($"Input bytes: {data.Length}");
@@ -1262,7 +1287,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static LabExecutionPayload ExecuteSignDataLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
@@ -1278,7 +1304,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
-        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
         output.AppendLine($"Key handle: {keyHandle.Value}");
@@ -1296,7 +1322,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static (string Summary, string OutputText, List<string> Notes) ExecuteVerifySignatureLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
@@ -1308,7 +1335,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
-        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
         output.AppendLine($"Key handle: {keyHandle.Value}");
@@ -1326,7 +1353,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static LabExecutionPayload ExecuteEncryptDataLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
@@ -1342,7 +1370,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
-        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
         output.AppendLine($"Key handle: {keyHandle.Value}");
@@ -1359,7 +1387,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static LabExecutionPayload ExecuteDecryptDataLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
@@ -1376,7 +1405,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         ReadOnlySpan<byte> plaintextSpan = plaintext.AsSpan(0, written);
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
-        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
         output.AppendLine($"Key handle: {keyHandle.Value}");
@@ -1391,7 +1420,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static (string Summary, string OutputText, List<string> Notes) ExecuteInspectObjectLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), readWriteRequested: false, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11ObjectHandle handle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         HsmObjectDetail detail = HsmAdminObjectCatalog.ReadObjectDetail(deviceId, request.SlotId.Value, session, handle);
@@ -1403,6 +1433,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Handle: {detail.Handle}");
         output.Append(FormatObjectDetail(detail));
@@ -1412,7 +1443,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static LabExecutionPayload ExecuteWrapKeyLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), request.OpenReadWriteSession, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11MechanismType mechanismType = ParseMechanismTypeText(request.MechanismTypeText!);
         byte[] mechanismParameter = CreateLabMechanismParameter(mechanismType, request, validateOnly: false, notes);
@@ -1428,7 +1460,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
-        output.AppendLine($"Mode: {(request.OpenReadWriteSession ? "Read-write" : "Read-only")}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Mechanism: {DescribeMechanismType(mechanismType)}");
         output.AppendLine($"Wrapping key handle: {wrappingKeyHandle.Value}");
@@ -1520,11 +1552,13 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static (string Summary, string OutputText, List<string> Notes) ExecuteReadAttributeLab(Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), readWriteRequested: false, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         Pkcs11ObjectHandle handle = ResolveLabObjectHandle(session, request.KeyHandleText, request.KeyLabel, request.KeyIdHex, request.KeyObjectClass, request.KeyType, "Key handle");
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Handle: {handle.Value}");
         IReadOnlyList<Pkcs11AttributeType> attributeTypes = ParseAttributeTypeListText(request.AttributeTypeText!);
@@ -1541,7 +1575,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private static (string Summary, string OutputText, List<string> Notes) ExecuteFindObjectsLab(Guid deviceId, Pkcs11Module module, Pkcs11LabRequest request)
     {
         List<string> notes = [];
-        using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(request.SlotId!.Value), readWrite: false);
+        SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(request.SlotId!.Value), readWriteRequested: false, notes);
+        using Pkcs11Session session = sessionOpen.Session;
         string authMode = LoginLabSessionIfRequested(session, request, notes);
         byte[] label = string.IsNullOrWhiteSpace(request.LabelFilter) ? [] : Encoding.UTF8.GetBytes(request.LabelFilter.Trim());
         byte[] id = ParseOptionalHex(request.IdHex, nameof(request.IdHex));
@@ -1561,6 +1596,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         StringBuilder output = new();
         output.AppendLine($"Slot: {request.SlotId.Value}");
+        output.AppendLine($"Mode: {sessionOpen.ModeLabel}");
         output.AppendLine($"Auth mode: {authMode}");
         output.AppendLine($"Max objects: {request.MaxObjects}");
         output.AppendLine($"Label filter: {(string.IsNullOrWhiteSpace(request.LabelFilter) ? "<none>" : request.LabelFilter.Trim())}");
@@ -1579,6 +1615,22 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             : $"Found {handles.Count} object(s) matching the current search filters.";
         return (summaryText, output.ToString(), notes);
     }
+
+    private static SessionOpenResult OpenCompatibleSession(Pkcs11Module module, Pkcs11SlotId slotId, bool readWriteRequested, List<string>? notes = null)
+    {
+        try
+        {
+            return new(module.OpenSession(slotId, readWriteRequested), readWriteRequested, readWriteRequested, EscalatedToReadWrite: false);
+        }
+        catch (Pkcs11Exception ex) when (ShouldRetryReadWriteAfterOpenSessionFailure(readWriteRequested, ex))
+        {
+            notes?.Add("The module rejected a read-only C_OpenSession request with CKR_FUNCTION_FAILED, so the admin layer retried with a read-write session for compatibility.");
+            return new(module.OpenSession(slotId, readWrite: true), readWriteRequested, OpenedReadWrite: true, EscalatedToReadWrite: true);
+        }
+    }
+
+    private static bool ShouldRetryReadWriteAfterOpenSessionFailure(bool readWriteRequested, Pkcs11Exception exception)
+        => !readWriteRequested && exception.Result.Value == CkrFunctionFailed;
 
     private static string LoginLabSessionIfRequested(Pkcs11Session session, Pkcs11LabRequest request, List<string> notes)
     {

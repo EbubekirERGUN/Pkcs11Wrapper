@@ -140,6 +140,26 @@ Based on the completed audit, these should remain capability-gated, unsupported,
 
 If one of the capability-gated checks is absent because the Luna runtime or token policy does not expose it, that should be interpreted as a skipped/capability-gated result, not as proof that the wrapper is broken.
 
+## Why there is not yet a checked-in AWS CloudHSM profile
+
+See also: `docs/cloudhsm-integration.md` and `docs/cloudhsm-compatibility-audit.md`.
+
+AWS CloudHSM is now a documented target for the repo, but there is intentionally **no** checked-in `cloudhsm-*` vendor-regression profile yet.
+
+Reason:
+
+- AWS Client SDK 5 documents that read-only `C_OpenSession` is not supported
+- AWS’s supported-API page does not currently list several operations assumed elsewhere in the broader repo/runtime surface, including `C_CopyObject`, `C_SetAttributeValue`, `C_InitToken`, `C_InitPIN`, `C_SetPIN`, `C_GetOperationState`, and PKCS#11 v3-only paths
+- the existing smoke/vendor-regression flow would need CloudHSM-specific capability gating before a profile could be described as reliable rather than misleading
+
+So the current CloudHSM support slice is:
+
+- strong documentation
+- admin-panel readiness improvements
+- explicit wrapper/admin setup guidance
+
+rather than a premature vendor-lane profile that would overstate validation depth.
+
 ## Recommended local usage
 
 ```bash
