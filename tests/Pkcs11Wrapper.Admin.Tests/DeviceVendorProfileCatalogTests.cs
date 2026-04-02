@@ -11,6 +11,12 @@ public sealed class DeviceVendorProfileCatalogTests
         "cloud-kms-kmsp11",
         "Cloud KMS / Cloud HSM via kmsp11");
 
+    private static readonly HsmDeviceVendorMetadata AzureVendor = new(
+        "azure",
+        "Azure",
+        "cloud-hsm-standard",
+        "Cloud HSM / standard PKCS#11");
+
     private static readonly HsmDeviceVendorMetadata IbmVendor = new(
         "ibm",
         "IBM Cloud",
@@ -45,6 +51,30 @@ public sealed class DeviceVendorProfileCatalogTests
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("KMS_PKCS11_CONFIG", StringComparison.Ordinal));
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("PIN is ignored", StringComparison.Ordinal));
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Cloud KMS lifecycle/control-plane", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetSelectionId_ReturnsKnownAzureProfileSelection()
+    {
+        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(AzureVendor);
+
+        Assert.Equal("azure-cloud-hsm-standard", selectionId);
+    }
+
+    [Fact]
+    public void GetGuidance_ReturnsAzureSpecificSummaryAndHints()
+    {
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(AzureVendor);
+
+        Assert.True(guidance.IsKnownProfile);
+        Assert.False(guidance.IsVendorNeutral);
+        Assert.Equal("Azure", guidance.Title);
+        Assert.Equal("Cloud HSM / standard PKCS#11", guidance.ProfileName);
+        Assert.Contains("direct PKCS#11", guidance.Summary);
+        Assert.Equal(3, guidance.Hints.Count);
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("azcloudhsm_client", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("username:password", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Managed HSM", StringComparison.Ordinal));
     }
 
     [Fact]
