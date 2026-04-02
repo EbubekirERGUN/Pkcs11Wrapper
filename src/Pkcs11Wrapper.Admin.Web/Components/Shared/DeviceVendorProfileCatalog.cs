@@ -74,6 +74,28 @@ internal static class DeviceVendorProfileCatalog
                     "Stay on the vendor-neutral operational surface",
                     "This UI intentionally covers standard PKCS#11 workflows. Vendor-specific appliance or security-administration tasks remain out of scope and should stay in dedicated vendor tooling/processes.",
                     DeviceVendorHintTone.Boundary)
+            ]),
+        new(
+            "aws-cloudhsm-standard",
+            "AWS CloudHSM / standard PKCS#11",
+            "aws",
+            "AWS",
+            "cloudhsm-standard",
+            "CloudHSM / Client SDK 5",
+            "Use this when the profile targets the PKCS#11 library from AWS CloudHSM Client SDK 5 and you want the admin UI to keep the CloudHSM bootstrap/auth/session caveats visible while staying inside standard PKCS#11 flows.",
+            [
+                new DeviceVendorHint(
+                    "Client SDK 5 must already be installed and bootstrapped on this host",
+                    "Point the profile at the exact AWS CloudHSM PKCS#11 module path that the running host/container can resolve, and make sure the host already has the Client SDK 5 runtime, cluster certificate, and cluster bootstrap/configuration in place first.",
+                    DeviceVendorHintTone.Info),
+                new DeviceVendorHint(
+                    "CloudHSM uses RW sessions and CU-style login semantics",
+                    "AWS documents that SDK 5 rejects read-only C_OpenSession calls and expects C_Login PINs in the form username:password for a crypto user (CU). The admin layer will retry a failed read-only open as read-write for compatibility, but operators should still expect CloudHSM sessions to behave as RW by default.",
+                    DeviceVendorHintTone.Warning),
+                new DeviceVendorHint(
+                    "Cluster/user administration stays outside this UI",
+                    "This profile is for standard PKCS#11 device, slot, object, and lab workflows only. Cluster bootstrap, CloudHSM CLI/CMU user management, trust-anchor/TLS bootstrap, and other AWS control-plane operations remain out of scope here.",
+                    DeviceVendorHintTone.Boundary)
             ])
     ];
 

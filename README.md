@@ -309,6 +309,8 @@ Current capabilities include:
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract
 - [docs/luna-integration.md](docs/luna-integration.md) - practical Thales Luna client/module setup guidance for wrapper, admin panel, smoke, and vendor regression
 - [docs/luna-compatibility-audit.md](docs/luna-compatibility-audit.md) - public-doc audit of Thales Luna standard compatibility vs current wrapper/admin/runtime scope
+- [docs/cloudhsm-integration.md](docs/cloudhsm-integration.md) - practical AWS CloudHSM Client SDK 5 setup guidance for wrapper and admin-panel usage
+- [docs/cloudhsm-compatibility-audit.md](docs/cloudhsm-compatibility-audit.md) - public-doc audit of AWS CloudHSM standard PKCS#11 compatibility vs current wrapper/admin/runtime scope
 - [docs/luna-vendor-extension-design.md](docs/luna-vendor-extension-design.md) - proposed package/boundary/loading/test strategy for future Luna-only `CA_*` support
 - [docs/vendor-audit-integration.md](docs/vendor-audit-integration.md) - vendor-native audit evaluation starting with Thales Luna, including CLI/syslog/export/API path trade-offs vs wrapper telemetry
 - [docs/smoke.md](docs/smoke.md) - smoke sample behavior and troubleshooting
@@ -327,6 +329,7 @@ Current capabilities include:
 - The current admin auth/security model is intentionally local-host oriented; external IdP/IAM, MFA, and centralized secret governance are not part of the app yet.
 - Linux is still the primary benchmark/reference environment, even though Windows now also has fixture-backed NativeAOT smoke validation.
 - PKCS#11 v3 runtime behavior still depends on whether the target module actually exports the relevant v3 interface surface.
+- AWS CloudHSM support in the current repo is a documented/admin-readiness slice, not a claim of live cluster-backed CI validation yet.
 
 ## Contributing
 
