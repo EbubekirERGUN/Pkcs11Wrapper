@@ -167,13 +167,49 @@ public sealed class JsonStoresTests
         }
     }
 
+    [Fact]
+    public async Task JsonPkcs11TelemetryStoreRotatesAndPrunesArchives()
+    {
+        string root = CreateTempDirectory();
+        try
+        {
+            JsonLinePkcs11TelemetryStore store = new(
+                new AdminStorageOptions { DataRoot = root },
+                new AdminPkcs11TelemetryOptions
+                {
+                    ActiveFileMaxBytes = 350,
+                    MaxArchivedFiles = 2,
+                    RetentionDays = 14,
+                    ExportMaxEntries = 50
+                });
+
+            for (int i = 0; i < 12; i++)
+            {
+                await store.AppendAsync(CreateTelemetry($"Rotate-{i}", DateTimeOffset.UtcNow.AddSeconds(i), actor: "alice", sessionId: $"trace-{i}"));
+            }
+
+            AdminPkcs11TelemetryStorageStatus status = await store.GetStorageStatusAsync();
+            IReadOnlyList<AdminPkcs11TelemetryEntry> retained = await store.ReadAllAsync();
+
+            Assert.InRange(status.ArchivedFileCount, 1, 2);
+            Assert.InRange(status.RetainedFileCount, 1, 3);
+            Assert.True(status.RetainedBytes > 0);
+            Assert.Contains(retained, entry => entry.OperationName == "Rotate-11");
+            Assert.All(retained, entry => Assert.False(string.IsNullOrWhiteSpace(entry.Actor)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static HsmDeviceProfile CreateProfile(string name)
         => new(Guid.NewGuid(), name, "/tmp/libpkcs11.so", null, null, true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     private static AdminAuditLogEntry CreateAudit(string target, string details, DateTimeOffset timestamp)
         => new(Guid.NewGuid(), timestamp, "tester", ["admin"], "cookie", "Device", "Add", target, "Success", details, 0, null, string.Empty, "127.0.0.1", "trace-1", "test-agent", Environment.MachineName);
 
-    private static AdminPkcs11TelemetryEntry CreateTelemetry(string operationName, DateTimeOffset timestamp)
+    private static AdminPkcs11TelemetryEntry CreateTelemetry(string operationName, DateTimeOffset timestamp, string? actor = null, string? sessionId = null)
         => new(
             Guid.NewGuid(),
             timestamp,
@@ -188,6 +224,10 @@ public sealed class JsonStoresTests
             2,
             0x1082,
             null,
+            actor,
+            actor is null ? null : "cookie",
+            sessionId,
+            sessionId,
             [new AdminPkcs11TelemetryField("credential.pin", "Masked", "set(len=8)")]);
 
     private static string CreateTempDirectory()

@@ -1,5 +1,6 @@
 @page "/telemetry"
 @attribute [Authorize(Policy = AdminRoles.Viewer)]
+@using System.Globalization
 @using Pkcs11Wrapper.Admin.Application.Models
 @inject HsmAdminService Admin
 
@@ -14,7 +15,8 @@
             <span class="page-tag">Redacted only</span>
             <span class="page-tag">Device / slot filters</span>
             <span class="page-tag">Mechanism correlation</span>
-            <span class="page-tag">Failure review</span>
+            <span class="page-tag">Retention aware</span>
+            <span class="page-tag">Audit trace links</span>
         </div>
     </div>
     <div class="page-hero-side">
@@ -24,17 +26,25 @@
             <div class="hero-panel-copy">The viewer reads the newest admin-hosted PKCS#11 telemetry window so operators can isolate a device, slot, mechanism, or failing operation quickly.</div>
         </div>
         <div class="hero-panel">
-            <div class="hero-panel-title">Safety posture</div>
-            <div class="hero-panel-value">Redaction enforced</div>
-            <div class="hero-panel-copy">Only the wrapper's already-redacted field stream is persisted here. Raw exception messages are intentionally not stored in this viewer.</div>
+            <div class="hero-panel-title">Lifecycle posture</div>
+            <div class="hero-panel-value">Rotated + bounded</div>
+            <div class="hero-panel-copy">The JSONL store auto-rotates and prunes retained telemetry so storage growth stays bounded while still allowing safe redacted exports.</div>
         </div>
     </div>
 </section>
 
 <div class="alert alert-info">
     <div class="fw-semibold">Safe telemetry surface</div>
-    <div class="small">Search and filter the redacted PKCS#11 event stream by device, slot, operation, mechanism, status, and recent time window. Use <a href="audit">Audit Logs</a> when you need actor/action traceability; use this page when you need PKCS#11 call context.</div>
+    <div class="small">Search and filter the redacted PKCS#11 event stream by device, slot, operation, mechanism, status, actor trace, and recent time window. Use <a href="audit">Audit Logs</a> when you need actor/action traceability; this page now links back into matching audit traces when request/session correlation is available.</div>
 </div>
+
+@if (_storageStatus is not null)
+{
+    <div class="alert alert-secondary">
+        <div class="fw-semibold">Retention policy</div>
+        <div class="small">Active log rotates at @FormatBytes(_storageStatus.ActiveFileMaxBytes), retains up to @_storageStatus.MaxArchivedFiles archive file(s) for @_storageStatus.RetentionDays day(s), and exports are capped at @_storageStatus.ExportMaxEntries retained event(s).</div>
+    </div>
+}
 
 <div class="row g-3 mb-3">
     <div class="col-xl-3 col-md-4 col-sm-6">
@@ -69,6 +79,38 @@
             </div>
         </div>
     </div>
+    <div class="col-xl-3 col-md-4 col-sm-6">
+        <div class="card shadow-sm h-100 metric-card">
+            <div class="card-body">
+                <div class="metric-label">Retained files</div>
+                <div class="display-6 metric-meta">@(_storageStatus?.RetainedFileCount ?? 0)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-4 col-sm-6">
+        <div class="card shadow-sm h-100 metric-card">
+            <div class="card-body">
+                <div class="metric-label">Retained size</div>
+                <div class="display-6 metric-meta">@FormatBytes(_storageStatus?.RetainedBytes ?? 0)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-4 col-sm-6">
+        <div class="card shadow-sm h-100 metric-card">
+            <div class="card-body">
+                <div class="metric-label">Archive files</div>
+                <div class="display-6 metric-meta">@(_storageStatus?.ArchivedFileCount ?? 0)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-4 col-sm-6">
+        <div class="card shadow-sm h-100 metric-card">
+            <div class="card-body">
+                <div class="metric-label">Export cap</div>
+                <div class="display-6 metric-meta">@(_storageStatus?.ExportMaxEntries ?? 0)</div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
@@ -76,9 +118,13 @@
         <div class="col-xl-2 col-lg-3 col-md-6">
             <button class="btn btn-primary" @onclick="LoadAsync" data-testid="telemetry-refresh">Refresh</button>
         </div>
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <a class="btn btn-outline-secondary" href="@BuildExportHref()" data-testid="telemetry-export">Download filtered JSON</a>
+            <div class="form-text">Exports only the redacted retained stream and respects the server-side export cap.</div>
+        </div>
         <div class="col-xl-4 col-lg-5 col-md-6">
             <label class="form-label">Search</label>
-            <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="device, native op, return value, field..." data-testid="telemetry-search" />
+            <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="device, native op, return value, actor, trace, field..." data-testid="telemetry-search" />
         </div>
         <div class="col-xl-2 col-lg-4 col-md-6">
             <label class="form-label">Device</label>
@@ -203,7 +249,33 @@ else
                                 {
                                     <span class="table-pill">exception=@entry.ExceptionType</span>
                                 }
+                                @if (!string.IsNullOrWhiteSpace(entry.Actor))
+                                {
+                                    <span class="table-pill">actor=@entry.Actor</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(entry.AuthenticationType))
+                                {
+                                    <span class="table-pill table-pill-code">auth=@entry.AuthenticationType</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(entry.SessionId) || !string.IsNullOrWhiteSpace(entry.CorrelationId) || !string.IsNullOrWhiteSpace(entry.Actor))
+                                {
+                                    <a class="table-pill table-pill-code text-decoration-none" href="@Pkcs11TelemetryView.BuildAuditHref(entry)">audit trace</a>
+                                }
                             </div>
+
+                            @if (!string.IsNullOrWhiteSpace(entry.SessionId) || !string.IsNullOrWhiteSpace(entry.CorrelationId))
+                            {
+                                <div class="small text-muted mb-1">
+                                    @if (!string.IsNullOrWhiteSpace(entry.SessionId))
+                                    {
+                                        <span class="me-2">session=@entry.SessionId</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(entry.CorrelationId) && !string.Equals(entry.CorrelationId, entry.SessionId, StringComparison.Ordinal))
+                                    {
+                                        <span>correlation=@entry.CorrelationId</span>
+                                    }
+                                </div>
+                            }
 
                             @if (entry.Fields.Length == 0)
                             {
@@ -238,6 +310,7 @@ else
     private const int _loadWindowSize = 500;
 
     private IReadOnlyList<AdminPkcs11TelemetryEntry> _entries = [];
+    private AdminPkcs11TelemetryStorageStatus? _storageStatus;
     private string _searchText = string.Empty;
     private string _deviceFilter = string.Empty;
     private string _slotFilter = string.Empty;
@@ -293,7 +366,11 @@ else
 
     private async Task LoadAsync()
     {
-        _entries = await Admin.GetPkcs11TelemetryAsync(_loadWindowSize);
+        Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> entriesTask = Admin.GetPkcs11TelemetryAsync(new AdminPkcs11TelemetryQuery(Take: _loadWindowSize));
+        Task<AdminPkcs11TelemetryStorageStatus> statusTask = Admin.GetPkcs11TelemetryStorageStatusAsync();
+        await Task.WhenAll(entriesTask, statusTask);
+        _entries = await entriesTask;
+        _storageStatus = await statusTask;
         _pageIndex = 1;
     }
 
@@ -338,5 +415,43 @@ else
         }
 
         return _pageIndex;
+    }
+
+    private string BuildExportHref()
+    {
+        Dictionary<string, string?> query = new()
+        {
+            ["take"] = _storageStatus?.ExportMaxEntries > 0 ? _storageStatus.ExportMaxEntries.ToString(CultureInfo.InvariantCulture) : null,
+            ["search"] = string.IsNullOrWhiteSpace(_searchText) ? null : _searchText,
+            ["device"] = string.IsNullOrWhiteSpace(_deviceFilter) ? null : _deviceFilter,
+            ["slot"] = string.IsNullOrWhiteSpace(_slotFilter) ? null : _slotFilter,
+            ["operation"] = string.IsNullOrWhiteSpace(_operationFilter) ? null : _operationFilter,
+            ["mechanism"] = string.IsNullOrWhiteSpace(_mechanismFilter) ? null : _mechanismFilter,
+            ["status"] = string.IsNullOrWhiteSpace(_statusFilter) ? null : _statusFilter,
+            ["timeRange"] = string.IsNullOrWhiteSpace(_timeRangeFilter) ? null : _timeRangeFilter
+        };
+
+        return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
+            "/telemetry/export",
+            query.Where(pair => !string.IsNullOrWhiteSpace(pair.Value)).ToDictionary(pair => pair.Key, pair => pair.Value));
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0)
+        {
+            return "0 B";
+        }
+
+        string[] units = ["B", "KB", "MB", "GB"];
+        double value = bytes;
+        int unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return $"{value:0.#} {units[unitIndex]}";
     }
 }

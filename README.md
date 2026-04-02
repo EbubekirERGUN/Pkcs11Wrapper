@@ -52,7 +52,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - key/object browsing, detail, edit, copy, generate, import, and destroy flows
 - tracked session visibility and control (`login` / `logout` / `cancel` / `close-all` + invalidation visibility)
 - PKCS#11 Lab diagnostics, crypto experiments, object workflows, and scenario replay helpers
-- PKCS#11 telemetry viewer with redacted device / slot / mechanism / status filtering
+- PKCS#11 telemetry viewer with redacted device / slot / mechanism / status filtering, bounded retention/rotation, safe export, and audit correlation links
 - protected PIN cache + append-only chained audit log integrity
 
 ## Platform & validation status
@@ -256,7 +256,7 @@ Current capabilities include:
 - protected PIN caching for repeat operations
 - device-profile configuration export/import
 - PKCS#11 Lab for diagnostics, crypto operations, object inspection, wrap/unwrap, raw attribute reads, and scenario replay
-- PKCS#11 telemetry viewer for redacted wrapper-level operation traces and failure correlation
+- PKCS#11 telemetry viewer for redacted wrapper-level operation traces, bounded retention/export control, and audit correlation
 - append-only chained audit entries with integrity verification
 
 ## Documentation map
@@ -275,6 +275,7 @@ Current capabilities include:
 - [docs/smoke.md](docs/smoke.md) - smoke sample behavior and troubleshooting
 - [docs/telemetry-redaction.md](docs/telemetry-redaction.md) - PKCS#11 telemetry redaction policy
 - [docs/telemetry-integrations.md](docs/telemetry-integrations.md) - `ILogger` and `ActivitySource` / OpenTelemetry integration guidance
+- [docs/admin-telemetry-operations.md](docs/admin-telemetry-operations.md) - admin telemetry retention, rotation, export, and audit-correlation operations
 - [docs/release.md](docs/release.md) - release checklist and packaging discipline
 - [docs/versioning.md](docs/versioning.md) - centralized versioning model and tag strategy
 - [docs/admin-panel-roadmap.md](docs/admin-panel-roadmap.md) - admin panel roadmap

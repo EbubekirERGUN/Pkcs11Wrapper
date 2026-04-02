@@ -34,7 +34,7 @@ public sealed class Pkcs11TelemetryViewTests
     }
 
     [Fact]
-    public void ApplySearchesReturnValuesAndRedactedFields()
+    public void ApplySearchesReturnValuesRedactedFieldsAndCorrelationFields()
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         AdminPkcs11TelemetryEntry[] items =
@@ -47,6 +47,8 @@ public sealed class Pkcs11TelemetryViewTests
                 slotId: 3,
                 mechanismType: null,
                 returnValue: "CKR_PIN_INCORRECT",
+                actor: "alice",
+                sessionId: "trace-1",
                 fields:
                 [
                     new AdminPkcs11TelemetryField("credential.pin", "Masked", "set(len=8)")
@@ -56,11 +58,17 @@ public sealed class Pkcs11TelemetryViewTests
 
         IReadOnlyList<AdminPkcs11TelemetryEntry> byReturnValue = Pkcs11TelemetryView.Apply(items, "pin_incorrect", null, null, null, null, "all", "all", now);
         IReadOnlyList<AdminPkcs11TelemetryEntry> byFieldName = Pkcs11TelemetryView.Apply(items, "credential.pin", null, null, null, null, "all", "all", now);
+        IReadOnlyList<AdminPkcs11TelemetryEntry> byActor = Pkcs11TelemetryView.Apply(items, "alice", null, null, null, null, "all", "all", now);
+        IReadOnlyList<AdminPkcs11TelemetryEntry> byTrace = Pkcs11TelemetryView.Apply(items, "trace-1", null, null, null, null, "all", "all", now);
 
         Assert.Single(byReturnValue);
         Assert.Single(byFieldName);
+        Assert.Single(byActor);
+        Assert.Single(byTrace);
         Assert.Equal("Login", byReturnValue[0].OperationName);
         Assert.Equal("Login", byFieldName[0].OperationName);
+        Assert.Equal("Login", byActor[0].OperationName);
+        Assert.Equal("Login", byTrace[0].OperationName);
     }
 
     [Fact]
@@ -80,6 +88,15 @@ public sealed class Pkcs11TelemetryViewTests
         Assert.DoesNotContain(filtered, item => item.Status == "Succeeded");
     }
 
+    [Fact]
+    public void BuildAuditHrefUsesSessionIdWhenAvailable()
+    {
+        string href = Pkcs11TelemetryView.BuildAuditHref(CreateEntry("Primary", "OpenSession", "Succeeded", DateTimeOffset.UtcNow, 1, null, actor: "alice", sessionId: "trace-88", correlationId: "corr-1"));
+
+        Assert.Contains("/audit", href, StringComparison.Ordinal);
+        Assert.Contains("trace-88", href, StringComparison.Ordinal);
+    }
+
     private static AdminPkcs11TelemetryEntry CreateEntry(
         string deviceName,
         string operationName,
@@ -88,6 +105,9 @@ public sealed class Pkcs11TelemetryViewTests
         ulong? slotId,
         ulong? mechanismType,
         string? returnValue = null,
+        string? actor = null,
+        string? sessionId = null,
+        string? correlationId = null,
         AdminPkcs11TelemetryField[]? fields = null)
         => new(
             Guid.NewGuid(),
@@ -103,5 +123,9 @@ public sealed class Pkcs11TelemetryViewTests
             99,
             mechanismType,
             status == "Failed" ? "Pkcs11Exception" : null,
+            actor,
+            actor is null ? null : "cookie",
+            sessionId,
+            correlationId,
             fields ?? []);
 }
