@@ -33,5 +33,6 @@
 - PKCS#11 v3 runtime validation now uses a deterministic Linux-built shim rather than a vendor module, so it validates marshalling/runtime behavior but not vendor-specific semantics.
 - Windows NativeAOT validation now exists, but Linux still remains the deepest day-to-day validation environment because it is the primary benchmark baseline and the most feature-complete local automation path.
 - AWS CloudHSM now has a documented standard-PKCS#11 support path plus admin-panel read-only→read-write session fallback guidance, but it is not yet backed by live CloudHSM CI or a real-cluster regression lane.
+- Google Cloud HSM now has a documented indirect support path through Google's kmsp11 Cloud KMS adapter, but it still depends on real Google auth/config, host-level `KMS_PKCS11_CONFIG`, and live cloud access for honest end-to-end validation.
 - Mechanism parameter helpers are intentionally selective; uncommon mechanisms may still require raw parameter bytes.
 - Packaging discipline is defined in `docs/release.md`, but external package publication is still a maintainer action rather than an automated CI publish step.

@@ -45,13 +45,16 @@ public partial class Keys
         => Guid.TryParse(_selectedDeviceId, out Guid deviceId)
             ? _devices.FirstOrDefault(device => device.Id == deviceId)
             : null;
+    private bool IsGoogleCloudKmsp11Device
+        => string.Equals(SelectedDevice?.Vendor?.VendorId, "google", StringComparison.Ordinal)
+            && string.Equals(SelectedDevice?.Vendor?.ProfileId, "cloud-kms-kmsp11", StringComparison.Ordinal);
     private bool CanLoadKeys => Guid.TryParse(_selectedDeviceId, out _) && nuint.TryParse(_selectedSlotId, out _);
     private bool CanManageKeys => CanLoadKeys && !string.IsNullOrWhiteSpace(_userPin);
     private bool CanGenerateAes => CanManageKeys && _slotCapabilities?.SupportsAesKeyGeneration == true;
     private bool CanImportAes => CanManageKeys && _slotCapabilities?.SupportsAesObjectImport == true;
     private bool CanGenerateRsa => CanManageKeys && _slotCapabilities?.SupportsRsaKeyPairGeneration == true;
-    private bool CanSaveEdit => CanManageKeys && _editRequest is not null && (_selectedDetail?.EditCapabilities.CanEditAnyAttributes ?? true);
-    private bool CanCopyObject => CanManageKeys && _copyRequest is not null && _slotCapabilities?.TokenPresent == true;
+    private bool CanSaveEdit => CanManageKeys && !IsGoogleCloudKmsp11Device && _editRequest is not null && (_selectedDetail?.EditCapabilities.CanEditAnyAttributes ?? true);
+    private bool CanCopyObject => CanManageKeys && !IsGoogleCloudKmsp11Device && _copyRequest is not null && _slotCapabilities?.TokenPresent == true;
     private bool HasLoadedPage => _keyPage is not null;
     private bool HasNextPage => _keyPage?.HasNextPage == true && !string.IsNullOrWhiteSpace(_keyPage.NextCursor);
     private bool HasPreviousPage => _previousPageCursors.Count != 0;
@@ -542,6 +545,7 @@ public partial class Keys
     private IReadOnlyList<string> GetEditWarnings()
     {
         List<string> warnings = [];
+        if (IsGoogleCloudKmsp11Device) warnings.Add("Google Cloud KMS / kmsp11 does not support C_SetAttributeValue, so generic attribute-edit flows stay disabled for this vendor profile.");
         if (_selectedDetail?.EditCapabilities.CanEditAnyAttributes == false) warnings.Add("The selected object does not currently look modifiable, so SetAttributeValue is likely to fail.");
         if (string.IsNullOrWhiteSpace(_userPin)) warnings.Add("User PIN is required for write operations.");
         return warnings;
@@ -550,6 +554,7 @@ public partial class Keys
     private IReadOnlyList<string> GetCopyWarnings()
     {
         List<string> warnings = [];
+        if (IsGoogleCloudKmsp11Device) warnings.Add("Google Cloud KMS / kmsp11 does not support C_CopyObject, so generic copy flows stay disabled for this vendor profile.");
         if (string.IsNullOrWhiteSpace(_userPin)) warnings.Add("User PIN is required for write operations.");
         if (_slotCapabilities?.TokenPresent == false) warnings.Add("No token is present in the selected slot.");
         warnings.Add("Some tokens reject copy-time overrides for sensitive or policy-controlled attributes; unchanged fields can be left as 'keep existing'.");
