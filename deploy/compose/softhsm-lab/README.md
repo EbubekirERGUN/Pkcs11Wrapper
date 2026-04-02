@@ -9,9 +9,14 @@ It is intentionally **not** a production orchestration recipe:
 - bootstrap credentials live in the compose env file unless you override them
 - SoftHSM state is a local named volume meant for demos, smoke-style checks, onboarding, and lab work
 
+If you need the **standalone container deployment** path for the admin panel, use:
+
+- `docs/admin-container.md`
+- `deploy/container/admin-panel.env.example`
+
 ## What the stack includes
 
-- `admin` - a lab-flavored admin-panel image that preserves the existing container runtime contract:
+- `admin` - a lab-flavored admin-panel image that preserves the existing container runtime contract for local use:
   - `AdminStorage__DataRoot=/var/lib/pkcs11wrapper-admin`
   - `AdminRuntime__DisableHttpsRedirection=true`
   - SoftHSM module exposed at `/opt/pkcs11/lib/libsofthsm2.so`
@@ -94,3 +99,4 @@ docker compose down -v
 - Rotate the bootstrap admin password from the `Users` page after first sign-in if the stack will live longer than a quick demo.
 - The `admin-data` volume includes the bootstrap notice, local users, Data Protection keys, device profiles, telemetry retention files, audit log, lab templates, and protected PIN cache.
 - The SoftHSM lab state lives entirely in the `softhsm-state` named volume; deleting that volume resets the token/config.
+- For persistent non-lab container deployments, back up and preserve the admin data volume intentionally rather than treating this compose bundle as the long-term deployment model.
