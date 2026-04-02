@@ -4,6 +4,7 @@ See also: `docs/luna-integration.md` for the practical Luna client/module setup 
 See also: `docs/luna-compatibility-audit.md` for the current Thales Luna-specific scope boundary and extension-gap audit.
 See also: `docs/cloudhsm-integration.md` and `docs/cloudhsm-compatibility-audit.md` for the current AWS CloudHSM support boundary.
 See also: `docs/google-cloud-hsm-integration.md` and `docs/google-cloud-hsm-compatibility-audit.md` for the current Google Cloud HSM / kmsp11 support boundary.
+See also: `docs/oci-dedicated-kms-integration.md` and `docs/oci-dedicated-kms-compatibility-audit.md` for the current Oracle OCI Dedicated KMS support boundary.
 See also: `docs/luna-vendor-extension-design.md` for the proposed package/boundary/loading strategy for future Luna-only `CA_*` support.
 
 ## Purpose
@@ -181,6 +182,27 @@ So the current Google support slice is:
 - strong documentation
 - admin-panel readiness improvements and guardrails
 - explicit wrapper/admin setup guidance
+
+rather than a premature vendor-lane profile that would overstate validation depth.
+
+## Why there is not yet a checked-in OCI Dedicated KMS profile
+
+See also: `docs/oci-dedicated-kms-integration.md` and `docs/oci-dedicated-kms-compatibility-audit.md`.
+
+Oracle OCI Dedicated KMS is now a documented target for the repo, but there is intentionally **no** checked-in `oci-*` vendor-regression profile yet.
+
+Reason:
+
+- the direct PKCS#11 path depends on a real OCI HSM cluster, client certificates/keys, and a running `client_daemon`
+- Oracle's reviewed public docs confirm the Linux PKCS#11 packaging path, login model, and some mechanism families, but they do **not** publish the kind of exhaustive supported-API matrix that would justify broad repo claims from docs alone
+- Oracle's reviewed Windows docs describe CNG/KSP rather than a Windows PKCS#11 path for the current repo boundary
+- no live OCI environment was available during issue #68 to prove the existing vendor lane contract end to end
+
+So the current OCI support slice is:
+
+- strong documentation
+- admin-panel vendor-profile guidance
+- explicit direct-vs-indirect Oracle product-boundary clarification
 
 rather than a premature vendor-lane profile that would overstate validation depth.
 
