@@ -166,16 +166,32 @@ cd src/Pkcs11Wrapper.Admin.Web
 dotnet run
 ```
 
-By default, first run seeds a local bootstrap admin credential file under `App_Data/bootstrap-admin.txt`.
+For local source-tree development, first run seeds a bootstrap admin credential file under `App_Data/bootstrap-admin.txt`.
 
-For CI/automation you can override the runtime storage root and bootstrap credential without changing the default local behavior:
+For CI/automation/container scenarios you can externalize the runtime storage root, bootstrap credential, first PKCS#11 module path, and runtime behavior:
 
 ```bash
 export AdminStorage__DataRoot=/tmp/pkcs11wrapper-admin-data
 export LocalAdminBootstrap__UserName=ci-admin
 export LocalAdminBootstrap__Password='AdminE2E!Pass123'
+export AdminBootstrapDevice__Name='SoftHSM demo'
+export AdminBootstrapDevice__ModulePath=/usr/lib/softhsm/libsofthsm2.so
 export AdminRuntime__DisableHttpsRedirection=true
 ```
+
+### 2b) Build and run the container image
+
+```bash
+docker build -f src/Pkcs11Wrapper.Admin.Web/Dockerfile -t pkcs11wrapper-admin .
+```
+
+The image defaults to:
+
+- `AdminStorage__DataRoot=/var/lib/pkcs11wrapper-admin`
+- `AdminRuntime__DisableHttpsRedirection=true`
+- `ASPNETCORE_URLS=http://+:8080`
+
+See [docs/admin-container.md](docs/admin-container.md) for a full `docker run` example with persistent volumes, bind-mount permission notes for the non-root runtime user, and a mounted host PKCS#11 library.
 
 ### 3) Run validation
 

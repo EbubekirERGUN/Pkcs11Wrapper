@@ -315,7 +315,7 @@ Rotate this password after first sign-in and then retire this file.
             }
         }
 
-        return Path.Combine(AppContext.BaseDirectory, "App_Data");
+        return AdminHostDefaults.ResolveStorageRoot(null, AppContext.BaseDirectory);
     }
 
     private static string GenerateBootstrapPassword()
