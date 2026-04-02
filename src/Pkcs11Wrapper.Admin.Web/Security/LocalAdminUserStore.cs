@@ -3,13 +3,15 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.Admin.Application.Models;
 using Pkcs11Wrapper.Admin.Infrastructure;
+using Pkcs11Wrapper.Admin.Web.Configuration;
 
 namespace Pkcs11Wrapper.Admin.Web.Security;
 
-public sealed class LocalAdminUserStore(IOptions<AdminStorageOptions> options)
+public sealed class LocalAdminUserStore(IOptions<AdminStorageOptions> options, IOptions<LocalAdminBootstrapOptions>? bootstrapOptions = null)
 {
     private readonly PasswordHasher<AdminWebUserRecord> _passwordHasher = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly LocalAdminBootstrapOptions _bootstrapOptions = bootstrapOptions?.Value ?? new();
 
     public async Task<(bool Success, AdminWebUserRecord? User)> ValidateCredentialsAsync(string? userName, string? password, CancellationToken cancellationToken = default)
     {
@@ -209,10 +211,11 @@ public sealed class LocalAdminUserStore(IOptions<AdminStorageOptions> options)
                 return;
             }
 
-            string password = GenerateBootstrapPassword();
+            string userName = ResolveBootstrapUserName(_bootstrapOptions.UserName);
+            string password = ResolveBootstrapPassword(_bootstrapOptions.Password);
             DateTimeOffset createdUtc = DateTimeOffset.UtcNow;
             AdminWebUserRecord admin = new(
-                "admin",
+                userName,
                 string.Empty,
                 [AdminRoles.Admin, AdminRoles.Operator, AdminRoles.Viewer],
                 createdUtc);
@@ -222,7 +225,7 @@ public sealed class LocalAdminUserStore(IOptions<AdminStorageOptions> options)
             string bootstrap = $"""
 Pkcs11Wrapper Admin bootstrap credential
 ======================================
-username: admin
+username: {userName}
 password: {password}
 generated_utc: {createdUtc:O}
 
@@ -258,7 +261,7 @@ Rotate this password after first sign-in and then retire this file.
             }
         }
 
-        return "admin";
+        return ResolveBootstrapUserName(_bootstrapOptions.UserName);
     }
 
     private static int FindUserIndex(List<AdminWebUserRecord> users, string userName)
@@ -320,4 +323,15 @@ Rotate this password after first sign-in and then retire this file.
             .Replace("/", "A", StringComparison.Ordinal)
             .Replace("+", "B", StringComparison.Ordinal)
             .Replace("=", "9", StringComparison.Ordinal);
+
+    private static string ResolveBootstrapUserName(string? configuredUserName)
+    {
+        string normalized = NormalizeUserName(configuredUserName);
+        return string.IsNullOrWhiteSpace(normalized) ? "admin" : normalized;
+    }
+
+    private static string ResolveBootstrapPassword(string? configuredPassword)
+        => string.IsNullOrWhiteSpace(configuredPassword)
+            ? GenerateBootstrapPassword()
+            : configuredPassword.Trim();
 }

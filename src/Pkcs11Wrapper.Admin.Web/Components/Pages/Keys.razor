@@ -35,14 +35,14 @@
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="keys-status">@_statusMessage</div>
 }
 
 <div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-lg-3">
             <label class="form-label">Device</label>
-            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync">
+            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync" data-testid="keys-device">
                 <option value="">Select device...</option>
                 @foreach (HsmDeviceProfile device in _devices)
                 {
@@ -52,7 +52,7 @@
         </div>
         <div class="col-lg-2">
             <label class="form-label">Slot</label>
-            <select class="form-select" @bind="_selectedSlotId" @bind:after="OnSelectedSlotChangedAsync">
+            <select class="form-select" @bind="_selectedSlotId" @bind:after="OnSelectedSlotChangedAsync" data-testid="keys-slot">
                 <option value="">Select slot...</option>
                 @foreach (HsmSlotSummary slot in _slots)
                 {
@@ -62,19 +62,19 @@
         </div>
         <div class="col-lg-2">
             <label class="form-label">Load-time Label Filter</label>
-            <input class="form-control" @bind="_labelFilter" />
+            <input class="form-control" @bind="_labelFilter" data-testid="keys-label-filter" />
             <div class="form-text">Sent to the server-side PKCS#11 search before the object list is loaded.</div>
         </div>
         <div class="col-lg-2">
             <label class="form-label">User PIN</label>
-            <input class="form-control" type="password" @bind="_userPin" />
+            <input class="form-control" type="password" @bind="_userPin" data-testid="keys-user-pin" />
             <div class="form-check mt-2">
                 <input class="form-check-input" type="checkbox" @bind="_rememberPin" />
                 <label class="form-check-label">Remember in protected local storage</label>
             </div>
         </div>
         <div class="col-lg-3 d-flex gap-2">
-            <button class="btn btn-primary" @onclick="LoadKeysAsync" disabled="@(!CanLoadKeys)">Load Keys</button>
+            <button class="btn btn-primary" @onclick="LoadKeysAsync" disabled="@(!CanLoadKeys)" data-testid="keys-load">Load Keys</button>
             <button class="btn btn-outline-secondary" @onclick="ReloadSlotsAsync" disabled="@string.IsNullOrWhiteSpace(_selectedDeviceId)">Refresh Slots</button>
         </div>
     </div>
@@ -348,7 +348,7 @@
             else
             {
                 <div class="table-responsive table-shell">
-                    <table class="table table-striped table-hover align-middle">
+                    <table class="table table-striped table-hover align-middle" data-testid="keys-table">
                         <thead>
                             <tr>
                                 <th>Handle</th>
@@ -403,7 +403,7 @@
 
             @if (_selectedDetail is not null)
             {
-                <div class="card shadow-sm mb-4 feature-card">
+                <div class="card shadow-sm mb-4 feature-card" data-testid="keys-detail-panel">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Object detail</span>
                         <div class="btn-group btn-group-sm">

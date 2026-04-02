@@ -37,14 +37,14 @@
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="slots-status">@_statusMessage</div>
 }
 
 <div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-lg-4">
             <label class="form-label">Device</label>
-            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync">
+            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync" data-testid="slots-device">
                 <option value="">Select device...</option>
                 @foreach (HsmDeviceProfile device in _devices)
                 {
@@ -54,14 +54,14 @@
         </div>
         <div class="col-lg-4">
             <label class="form-label">Optional User PIN</label>
-            <input class="form-control" type="password" @bind="_userPin" />
+            <input class="form-control" type="password" @bind="_userPin" data-testid="slots-user-pin" />
             <div class="form-check mt-2">
                 <input class="form-check-input" type="checkbox" @bind="_rememberPin" />
                 <label class="form-check-label">Remember this PIN in protected local storage</label>
             </div>
         </div>
         <div class="col-lg-4 d-flex gap-2">
-            <button class="btn btn-primary" @onclick="LoadSlotsAsync" disabled="@string.IsNullOrWhiteSpace(_selectedDeviceId)">Load Slots</button>
+            <button class="btn btn-primary" @onclick="LoadSlotsAsync" disabled="@string.IsNullOrWhiteSpace(_selectedDeviceId)" data-testid="slots-load">Load Slots</button>
             <button class="btn btn-outline-secondary" @onclick="RefreshSessions">Refresh Sessions</button>
         </div>
     </div>
@@ -138,7 +138,7 @@
     else
     {
         <div class="table-responsive table-shell">
-            <table class="table table-striped align-middle">
+            <table class="table table-striped align-middle" data-testid="slots-table">
                 <thead>
                     <tr>
                         <th>Slot</th>
