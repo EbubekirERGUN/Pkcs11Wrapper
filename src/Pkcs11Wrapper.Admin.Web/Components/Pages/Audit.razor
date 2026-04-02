@@ -152,7 +152,13 @@ else
                 {
                     <tr>
                         <td><span class="table-pill table-pill-code">@log.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</span></td>
-                        <td>@log.Actor</td>
+                        <td>
+                            <div>@log.Actor</div>
+                            @if (!string.IsNullOrWhiteSpace(log.SessionId))
+                            {
+                                <div class="small text-muted">trace @log.SessionId</div>
+                            }
+                        </td>
                         <td>@string.Join(", ", log.ActorRoles)</td>
                         <td><span class="table-pill">@log.Category</span></td>
                         <td>@log.Action</td>
@@ -175,8 +181,12 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? QueryText { get; set; }
+
     private IReadOnlyList<AdminAuditLogEntry> _logs = [];
     private AuditIntegrityStatus? _integrity;
+    private string _appliedQueryText = string.Empty;
     private string _searchText = string.Empty;
     private string _categoryFilter = string.Empty;
     private string _outcomeFilter = "all";
@@ -209,10 +219,14 @@ else
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
+    protected override void OnParametersSet()
+        => ApplyQueryText();
+
     private async Task LoadAsync(bool forceVerify = false)
     {
         _logs = await Admin.GetAuditLogsAsync();
         _integrity = await Admin.GetAuditIntegrityAsync(forceVerify);
+        ApplyQueryText();
         _pageIndex = 1;
     }
 
@@ -257,7 +271,10 @@ else
                 || Contains(log.Action, term)
                 || Contains(log.Target, term)
                 || Contains(log.Outcome, term)
-                || Contains(log.Details, term));
+                || Contains(log.Details, term)
+                || Contains(log.SessionId, term)
+                || Contains(log.RemoteIp, term)
+                || Contains(log.UserAgent, term));
         }
 
         if (!string.IsNullOrWhiteSpace(_categoryFilter))
@@ -273,6 +290,19 @@ else
         };
 
         return query.ToArray();
+    }
+
+    private void ApplyQueryText()
+    {
+        string queryText = QueryText?.Trim() ?? string.Empty;
+        if (string.Equals(_appliedQueryText, queryText, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _appliedQueryText = queryText;
+        _searchText = queryText;
+        _pageIndex = 1;
     }
 
     private int GetSafePageIndex(int filteredCount)

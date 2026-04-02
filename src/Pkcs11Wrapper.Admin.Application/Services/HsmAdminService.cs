@@ -133,10 +133,53 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return auditLog.VerifyIntegrityAsync(forceVerification, cancellationToken);
     }
 
-    public Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> GetPkcs11TelemetryAsync(int take = 500, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> GetPkcs11TelemetryAsync(AdminPkcs11TelemetryQuery? query = null, CancellationToken cancellationToken = default)
     {
         authorization.DemandViewer();
-        return pkcs11Telemetry?.GetRecentAsync(take, cancellationToken) ?? Task.FromResult<IReadOnlyList<AdminPkcs11TelemetryEntry>>([]);
+        return pkcs11Telemetry?.GetRecentAsync(query, cancellationToken) ?? Task.FromResult<IReadOnlyList<AdminPkcs11TelemetryEntry>>([]);
+    }
+
+    public Task<AdminPkcs11TelemetryStorageStatus> GetPkcs11TelemetryStorageStatusAsync(CancellationToken cancellationToken = default)
+    {
+        authorization.DemandViewer();
+        return pkcs11Telemetry?.GetStorageStatusAsync(cancellationToken)
+            ?? Task.FromResult(new AdminPkcs11TelemetryStorageStatus(0, 0, 0, 0, 0, 0, 0, 0));
+    }
+
+    public async Task<AdminPkcs11TelemetryExportBundle> ExportPkcs11TelemetryAsync(AdminPkcs11TelemetryQuery? query = null, CancellationToken cancellationToken = default)
+    {
+        authorization.DemandViewer();
+
+        try
+        {
+            AdminPkcs11TelemetryExportBundle bundle = pkcs11Telemetry is null
+                ? new AdminPkcs11TelemetryExportBundle(
+                    "Pkcs11Wrapper.Admin.Pkcs11Telemetry",
+                    1,
+                    DateTimeOffset.UtcNow,
+                    RedactedOnly: true,
+                    MayBeTruncated: false,
+                    EntryCount: 0,
+                    Filters: query ?? new(),
+                    StorageStatus: new AdminPkcs11TelemetryStorageStatus(0, 0, 0, 0, 0, 0, 0, 0),
+                    Entries: [])
+                : await pkcs11Telemetry.ExportAsync(query, cancellationToken);
+
+            await auditLog.WriteAsync(
+                "Telemetry",
+                "Export",
+                query?.DeviceFilter ?? "retained-window",
+                "Success",
+                $"Exported {bundle.EntryCount} redacted PKCS#11 telemetry event(s). Search='{query?.SearchText ?? string.Empty}', operation='{query?.OperationFilter ?? string.Empty}', status='{query?.StatusFilter ?? "all"}', timeRange='{query?.TimeRangeFilter ?? "all"}'.",
+                cancellationToken: cancellationToken);
+
+            return bundle;
+        }
+        catch (Exception ex)
+        {
+            await auditLog.WriteAsync("Telemetry", "Export", query?.DeviceFilter ?? "retained-window", "Failure", ex.Message, cancellationToken: cancellationToken);
+            throw;
+        }
     }
 
     public async Task<DashboardSummary> GetDashboardAsync(CancellationToken cancellationToken = default)

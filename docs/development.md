@@ -66,7 +66,7 @@ The wrapper surface implemented through the current phase set includes:
 - multipart operations and operation-state APIs
 - optional PKCS#11 v3 interface discovery and message-based API surface
 - optional `C_LoginUser` / `C_SessionCancel` through the discovered v3 interface
-- opt-in structured operation telemetry with duration, result/exception, slot/session/mechanism context, and redacted field summaries for sensitive PKCS#11 inputs
+- opt-in structured operation telemetry with duration, result/exception, slot/session/mechanism context, redacted field summaries for sensitive PKCS#11 inputs, and admin-side retention/export/correlation controls in the admin panel
 - administrative operations for session invalidation and token/PIN provisioning
 - NativeAOT smoke validation through the sample app on Linux and Windows
 
@@ -106,6 +106,7 @@ Notable current assumptions:
 - Fixture contract: `docs/softhsm-fixture.md`
 - CI behavior: `docs/ci.md`
 - Telemetry redaction policy: `docs/telemetry-redaction.md`
+- Admin telemetry operations: `docs/admin-telemetry-operations.md`
 - Smoke sample usage: `docs/smoke.md`
 - Compatibility matrix: `docs/compatibility-matrix.md`
 - Thales Luna integration guide: `docs/luna-integration.md`

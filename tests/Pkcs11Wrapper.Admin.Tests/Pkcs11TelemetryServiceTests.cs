@@ -11,7 +11,7 @@ public sealed class Pkcs11TelemetryServiceTests
     public void ListenerMapsOperationEventsIntoTelemetryEntries()
     {
         RecordingStore store = new();
-        Pkcs11TelemetryService service = new(store);
+        Pkcs11TelemetryService service = new(store, new StaticActorContext(new AdminActorInfo("alice", "cookie", true, ["admin"], "127.0.0.1", "trace-42", "tests")), new AdminPkcs11TelemetryOptions());
         HsmDeviceProfile device = new(Guid.NewGuid(), "Primary", "/tmp/libpkcs11.so", null, null, true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
         IPkcs11OperationTelemetryListener listener = service.CreateListener(device);
@@ -45,6 +45,10 @@ public sealed class Pkcs11TelemetryServiceTests
         Assert.Equal((ulong)19, entry.SessionHandle);
         Assert.Equal((ulong)0x00000040, entry.MechanismType);
         Assert.Equal("InvalidOperationException", entry.ExceptionType);
+        Assert.Equal("alice", entry.Actor);
+        Assert.Equal("cookie", entry.AuthenticationType);
+        Assert.Equal("trace-42", entry.SessionId);
+        Assert.Equal("trace-42", entry.CorrelationId);
         Assert.DoesNotContain(entry.Fields, field => field.Value?.Contains("should not be persisted", StringComparison.Ordinal) == true);
         Assert.Contains(entry.Fields, field => field.Name == "input" && field.Classification == "LengthOnly" && field.Value == "len=32");
         Assert.Contains(entry.Fields, field => field.Name == "credential.pin" && field.Classification == "Masked" && field.Value == "set(len=8)");
@@ -53,7 +57,7 @@ public sealed class Pkcs11TelemetryServiceTests
     [Fact]
     public void ListenerSwallowsStoreFailures()
     {
-        Pkcs11TelemetryService service = new(new ThrowingStore());
+        Pkcs11TelemetryService service = new(new ThrowingStore(), new StaticActorContext(new AdminActorInfo("alice", "cookie", true, ["admin"], null, "trace-99", null)), new AdminPkcs11TelemetryOptions());
         HsmDeviceProfile device = new(Guid.NewGuid(), "Primary", "/tmp/libpkcs11.so", null, null, true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
         IPkcs11OperationTelemetryListener listener = service.CreateListener(device);
@@ -71,6 +75,11 @@ public sealed class Pkcs11TelemetryServiceTests
         listener.OnOperationCompleted(in operationEvent);
     }
 
+    private sealed class StaticActorContext(AdminActorInfo actor) : IAdminActorContext
+    {
+        public AdminActorInfo GetCurrent() => actor;
+    }
+
     private sealed class RecordingStore : IPkcs11TelemetryStore
     {
         private readonly List<AdminPkcs11TelemetryEntry> _entries = [];
@@ -85,6 +94,12 @@ public sealed class Pkcs11TelemetryServiceTests
 
         public Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadRecentAsync(int take, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AdminPkcs11TelemetryEntry>>([.. _entries.TakeLast(take).Reverse()]);
+
+        public Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AdminPkcs11TelemetryEntry>>([.. _entries.OrderByDescending(entry => entry.TimestampUtc)]);
+
+        public Task<AdminPkcs11TelemetryStorageStatus> GetStorageStatusAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new AdminPkcs11TelemetryStorageStatus(0, 0, 0, 0, 1024, 14, 8, 5000));
     }
 
     private sealed class ThrowingStore : IPkcs11TelemetryStore
@@ -94,5 +109,11 @@ public sealed class Pkcs11TelemetryServiceTests
 
         public Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadRecentAsync(int take, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AdminPkcs11TelemetryEntry>>([]);
+
+        public Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadAllAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AdminPkcs11TelemetryEntry>>([]);
+
+        public Task<AdminPkcs11TelemetryStorageStatus> GetStorageStatusAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new AdminPkcs11TelemetryStorageStatus(0, 0, 0, 0, 1024, 14, 8, 5000));
     }
 }

@@ -42,6 +42,7 @@ AdminSessionRegistryOptions sessionOptions = builder.Configuration.GetSection("A
 LocalAdminLoginThrottleOptions throttleOptions = builder.Configuration.GetSection("LocalAdminLoginThrottle").Get<LocalAdminLoginThrottleOptions>() ?? new();
 LocalAdminBootstrapOptions bootstrapOptions = builder.Configuration.GetSection("LocalAdminBootstrap").Get<LocalAdminBootstrapOptions>() ?? new();
 AdminRuntimeOptions runtimeOptions = builder.Configuration.GetSection("AdminRuntime").Get<AdminRuntimeOptions>() ?? new();
+AdminPkcs11TelemetryOptions telemetryOptions = builder.Configuration.GetSection("AdminTelemetry").Get<AdminPkcs11TelemetryOptions>() ?? new();
 
 builder.Services.AddSingleton(adminStorage);
 builder.Services.AddSingleton<IOptions<AdminStorageOptions>>(Options.Create(adminStorage));
@@ -51,6 +52,8 @@ builder.Services.AddSingleton(bootstrapOptions);
 builder.Services.AddSingleton<IOptions<LocalAdminBootstrapOptions>>(Options.Create(bootstrapOptions));
 builder.Services.AddSingleton(runtimeOptions);
 builder.Services.AddSingleton<IOptions<AdminRuntimeOptions>>(Options.Create(runtimeOptions));
+builder.Services.AddSingleton(telemetryOptions);
+builder.Services.AddSingleton<IOptions<AdminPkcs11TelemetryOptions>>(Options.Create(telemetryOptions));
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(adminStorage.DataRoot, "keys")));
 builder.Services.AddSingleton<IDeviceProfileStore, JsonDeviceProfileStore>();
@@ -95,6 +98,8 @@ app.MapPost("/account/login", (Delegate)AccountEndpoints.LoginAsync);
 app.MapPost("/account/logout", (Delegate)AccountEndpoints.LogoutAsync);
 app.MapGet("/configuration/export", (Delegate)ConfigurationEndpoints.ExportAsync)
     .RequireAuthorization(AdminRoles.Admin);
+app.MapGet("/telemetry/export", (Delegate)TelemetryEndpoints.ExportAsync)
+    .RequireAuthorization(AdminRoles.Viewer);
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

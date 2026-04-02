@@ -19,4 +19,8 @@ public sealed record AdminPkcs11TelemetryEntry(
     ulong? SessionHandle,
     ulong? MechanismType,
     string? ExceptionType,
+    string? Actor,
+    string? AuthenticationType,
+    string? SessionId,
+    string? CorrelationId,
     AdminPkcs11TelemetryField[] Fields);
