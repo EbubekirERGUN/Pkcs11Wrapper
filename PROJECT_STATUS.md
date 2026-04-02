@@ -60,6 +60,11 @@
   - dashboard için failure-category, invalidated-device ve recovery widget genişletmeleri
   - configuration export freshness, bootstrap notice ve saved lab template görünürlüğü
   - `AdminDashboardView` helper + testler ile recovery-oriented dashboard hesaplarının testlenebilir hale getirilmesi
+- Admin panel Phase E yedinci polish dilimi teslim edildi:
+  - admin panel içinde JSONL-backed PKCS#11 telemetry store + viewer
+  - device / slot / operation / mechanism / status / time-window filtreleri
+  - wrapper redaction policy ile uyumlu safe field rendering; raw exception messages intentionally persist edilmiyor
+  - `Pkcs11TelemetryView` helper + telemetry store/service testleri ile filtre/saklama davranışı doğrulandı
 - Çözüm doğrulaması temiz:
   - `dotnet build Pkcs11Wrapper.sln -c Release`
   - `dotnet test Pkcs11Wrapper.sln -c Release`
@@ -70,7 +75,7 @@
 - Belgeleme senkronizasyonu yapıldı; README'ler artık admin panelin auth/users/config-transfer/PKCS#11 Lab gerçek durumunu ve benchmark baseline tarihini yansıtıyor.
 
 ## Sıradaki işler
-- Admin panel UX/product polish'in sonraki dilimleri (dashboard quick-action refinements, gerekiyorsa Lab için favorites import/export veya pin-to-navigation ergonomisi, daha derin operator playbook yüzeyleri).
+- Admin panel UX/product polish'in sonraki dilimleri (dashboard quick-action refinements, gerekiyorsa telemetry trend/top-operation widget'ları, Lab için favorites import/export veya pin-to-navigation ergonomisi, daha derin operator playbook yüzeyleri).
 - PKCS#11 v3 interface yüzeyini gerçekten export eden vendor/modül ile ek runtime regression.
 - Benchmark suite'i performans hassas değişikliklerden sonra ve release öncesinde tekrar çalıştırıp en güncel baseline'ı tazelemek.
 - GitHub vitrin materyallerini zenginleştirmek (ekran görüntüsü, demo media, release notes).

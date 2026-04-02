@@ -1,0 +1,342 @@
+@page "/telemetry"
+@attribute [Authorize(Policy = AdminRoles.Viewer)]
+@using Pkcs11Wrapper.Admin.Application.Models
+@inject HsmAdminService Admin
+
+<PageTitle>PKCS#11 Telemetry</PageTitle>
+
+<section class="page-hero page-hero-audit">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">PKCS#11 visibility</div>
+        <h1>PKCS#11 Telemetry</h1>
+        <p class="page-lead">Admin host'un wrapper üzerinden yaptığı PKCS#11 çağrılarının redacted telemetry görünümü. Buradaki olaylar intentionally safe tutulur: PIN, payload, wrapped blobs ve secret-bearing attributes bu yüzeye yazılmaz.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">Redacted only</span>
+            <span class="page-tag">Device / slot filters</span>
+            <span class="page-tag">Mechanism correlation</span>
+            <span class="page-tag">Failure review</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Capture scope</div>
+            <div class="hero-panel-value">Latest @_loadWindowSize events</div>
+            <div class="hero-panel-copy">The viewer reads the newest admin-hosted PKCS#11 telemetry window so operators can isolate a device, slot, mechanism, or failing operation quickly.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Safety posture</div>
+            <div class="hero-panel-value">Redaction enforced</div>
+            <div class="hero-panel-copy">Only the wrapper's already-redacted field stream is persisted here. Raw exception messages are intentionally not stored in this viewer.</div>
+        </div>
+    </div>
+</section>
+
+<div class="alert alert-info">
+    <div class="fw-semibold">Safe telemetry surface</div>
+    <div class="small">Search and filter the redacted PKCS#11 event stream by device, slot, operation, mechanism, status, and recent time window. Use <a href="audit">Audit Logs</a> when you need actor/action traceability; use this page when you need PKCS#11 call context.</div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-xl-3 col-md-4 col-sm-6">
+        <div class="card shadow-sm h-100 metric-card">
+            <div class="card-body">
+                <div class="metric-label">Loaded events</div>
+                <div class="display-6 metric-meta">@_entries.Count</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-4 col-sm-6">
+        <div class="card shadow-sm h-100 metric-card">
+            <div class="card-body">
+                <div class="metric-label">Filtered events</div>
+                <div class="display-6 metric-meta">@FilteredEntries.Count</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-4 col-sm-6">
+        <div class="card shadow-sm h-100 metric-card">
+            <div class="card-body">
+                <div class="metric-label">Non-success</div>
+                <div class="display-6 metric-meta">@FilteredEntries.Count(entry => !Pkcs11TelemetryView.IsSuccess(entry))</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-4 col-sm-6">
+        <div class="card shadow-sm h-100 metric-card">
+            <div class="card-body">
+                <div class="metric-label">Devices in window</div>
+                <div class="display-6 metric-meta">@AvailableDevices.Count</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
+    <div class="card-body row g-3 align-items-end">
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <button class="btn btn-primary" @onclick="LoadAsync">Refresh</button>
+        </div>
+        <div class="col-xl-4 col-lg-5 col-md-6">
+            <label class="form-label">Search</label>
+            <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="device, native op, return value, field..." />
+        </div>
+        <div class="col-xl-2 col-lg-4 col-md-6">
+            <label class="form-label">Device</label>
+            <select class="form-select" @bind="_deviceFilter" @bind:after="OnFiltersChanged">
+                <option value="">All devices</option>
+                @foreach (string device in AvailableDevices)
+                {
+                    <option value="@device">@device</option>
+                }
+            </select>
+        </div>
+        <div class="col-xl-2 col-lg-4 col-md-6">
+            <label class="form-label">Operation</label>
+            <select class="form-select" @bind="_operationFilter" @bind:after="OnFiltersChanged">
+                <option value="">All operations</option>
+                @foreach (string operation in AvailableOperations)
+                {
+                    <option value="@operation">@operation</option>
+                }
+            </select>
+        </div>
+        <div class="col-xl-2 col-lg-4 col-md-6">
+            <label class="form-label">Status</label>
+            <select class="form-select" @bind="_statusFilter" @bind:after="OnFiltersChanged">
+                <option value="all">All statuses</option>
+                <option value="success">Success only</option>
+                <option value="non-success">Non-success</option>
+                <option value="returned-false">Returned false</option>
+                <option value="failed">Failed</option>
+            </select>
+        </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Slot</label>
+            <input class="form-control" @bind="_slotFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="decimal or hex" />
+        </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Mechanism</label>
+            <input class="form-control" @bind="_mechanismFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="0x1082 or 4226" />
+        </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Time range</label>
+            <select class="form-select" @bind="_timeRangeFilter" @bind:after="OnFiltersChanged">
+                <option value="all">All loaded</option>
+                <option value="1h">Last hour</option>
+                <option value="6h">Last 6 hours</option>
+                <option value="24h">Last 24 hours</option>
+                <option value="7d">Last 7 days</option>
+            </select>
+        </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Page size</label>
+            <select class="form-select" @bind="_pageSize" @bind:after="OnPageSizeChanged">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+@if (_entries.Count == 0)
+{
+    <div class="empty-state">No PKCS#11 telemetry has been captured yet.</div>
+}
+else if (FilteredEntries.Count == 0)
+{
+    <div class="empty-state">No PKCS#11 telemetry matched the current filters.</div>
+}
+else
+{
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <div class="small text-muted">
+            Showing @CurrentRangeStart-@CurrentRangeEnd of @FilteredEntries.Count filtered event(s) from the latest @_entries.Count loaded item(s).
+        </div>
+        <div class="small text-muted">Page @CurrentPageIndex of @TotalPages</div>
+    </div>
+
+    <div class="table-responsive table-shell">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Device</th>
+                    <th>Operation</th>
+                    <th>Slot</th>
+                    <th>Mechanism</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (AdminPkcs11TelemetryEntry entry in CurrentPageEntries)
+                {
+                    <tr>
+                        <td><span class="table-pill table-pill-code">@entry.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</span></td>
+                        <td>
+                            <div class="fw-semibold">@entry.DeviceName</div>
+                            <div class="small text-muted">@entry.DeviceId</div>
+                        </td>
+                        <td>
+                            <div class="fw-semibold">@entry.OperationName</div>
+                            <div class="small text-muted">@(string.IsNullOrWhiteSpace(entry.NativeOperationName) ? "managed wrapper" : entry.NativeOperationName)</div>
+                        </td>
+                        <td>
+                            <div>@Pkcs11TelemetryView.FormatDecimal(entry.SlotId)</div>
+                            <div class="small text-muted">session @Pkcs11TelemetryView.FormatDecimal(entry.SessionHandle)</div>
+                        </td>
+                        <td><span class="table-pill table-pill-code">@Pkcs11TelemetryView.FormatMechanism(entry.MechanismType)</span></td>
+                        <td>
+                            <span class="badge @Pkcs11TelemetryView.GetStatusBadgeClass(entry)">@entry.Status</span>
+                        </td>
+                        <td><span class="table-pill table-pill-code">@entry.DurationMilliseconds.ToString("F2") ms</span></td>
+                        <td>
+                            <div class="d-flex flex-wrap gap-1 mb-1">
+                                @if (!string.IsNullOrWhiteSpace(entry.ReturnValue))
+                                {
+                                    <span class="table-pill table-pill-code">rv=@entry.ReturnValue</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(entry.ExceptionType))
+                                {
+                                    <span class="table-pill">exception=@entry.ExceptionType</span>
+                                }
+                            </div>
+
+                            @if (entry.Fields.Length == 0)
+                            {
+                                <div class="small text-muted">No extra redacted fields.</div>
+                            }
+                            else
+                            {
+                                <div class="d-flex flex-wrap gap-1 small">
+                                    @foreach (AdminPkcs11TelemetryField field in entry.Fields)
+                                    {
+                                        <span class="table-pill">@field.Name</span>
+                                        <span class="table-pill table-pill-code">@field.Classification</span>
+                                        <span class="text-muted me-2">@(string.IsNullOrWhiteSpace(field.Value) ? "[suppressed]" : field.Value)</span>
+                                    }
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+        <button class="btn btn-outline-secondary" @onclick="PreviousPage" disabled="@(CurrentPageIndex <= 1)">Previous</button>
+        <div class="small text-muted">Page @CurrentPageIndex / @TotalPages</div>
+        <button class="btn btn-outline-secondary" @onclick="NextPage" disabled="@(CurrentPageIndex >= TotalPages)">Next</button>
+    </div>
+}
+
+@code {
+    private const int _loadWindowSize = 500;
+
+    private IReadOnlyList<AdminPkcs11TelemetryEntry> _entries = [];
+    private string _searchText = string.Empty;
+    private string _deviceFilter = string.Empty;
+    private string _slotFilter = string.Empty;
+    private string _operationFilter = string.Empty;
+    private string _mechanismFilter = string.Empty;
+    private string _statusFilter = "all";
+    private string _timeRangeFilter = "24h";
+    private int _pageSize = 25;
+    private int _pageIndex = 1;
+
+    private IReadOnlyList<string> AvailableDevices => _entries
+        .Select(entry => entry.DeviceName)
+        .Distinct(StringComparer.Ordinal)
+        .OrderBy(device => device, StringComparer.Ordinal)
+        .ToArray();
+
+    private IReadOnlyList<string> AvailableOperations => _entries
+        .Select(entry => entry.OperationName)
+        .Distinct(StringComparer.Ordinal)
+        .OrderBy(operation => operation, StringComparer.Ordinal)
+        .ToArray();
+
+    private IReadOnlyList<AdminPkcs11TelemetryEntry> FilteredEntries => Pkcs11TelemetryView.Apply(
+        _entries,
+        _searchText,
+        _deviceFilter,
+        _slotFilter,
+        _operationFilter,
+        _mechanismFilter,
+        _statusFilter,
+        _timeRangeFilter,
+        DateTimeOffset.UtcNow);
+
+    private IReadOnlyList<AdminPkcs11TelemetryEntry> CurrentPageEntries
+    {
+        get
+        {
+            IReadOnlyList<AdminPkcs11TelemetryEntry> filtered = FilteredEntries;
+            int pageIndex = GetSafePageIndex(filtered.Count);
+            return filtered.Skip((pageIndex - 1) * _pageSize).Take(_pageSize).ToArray();
+        }
+    }
+
+    private int CurrentPageIndex => GetSafePageIndex(FilteredEntries.Count);
+
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(FilteredEntries.Count / (double)_pageSize));
+
+    private int CurrentRangeStart => FilteredEntries.Count == 0 ? 0 : ((CurrentPageIndex - 1) * _pageSize) + 1;
+
+    private int CurrentRangeEnd => Math.Min(CurrentPageIndex * _pageSize, FilteredEntries.Count);
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _entries = await Admin.GetPkcs11TelemetryAsync(_loadWindowSize);
+        _pageIndex = 1;
+    }
+
+    private Task OnFiltersChanged()
+    {
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
+    private Task OnPageSizeChanged()
+    {
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
+    private void PreviousPage()
+    {
+        if (_pageIndex > 1)
+        {
+            _pageIndex--;
+        }
+    }
+
+    private void NextPage()
+    {
+        if (_pageIndex < TotalPages)
+        {
+            _pageIndex++;
+        }
+    }
+
+    private int GetSafePageIndex(int filteredCount)
+    {
+        int totalPages = Math.Max(1, (int)Math.Ceiling(filteredCount / (double)_pageSize));
+        if (_pageIndex < 1)
+        {
+            _pageIndex = 1;
+        }
+        else if (_pageIndex > totalPages)
+        {
+            _pageIndex = totalPages;
+        }
+
+        return _pageIndex;
+    }
+}

@@ -9,7 +9,7 @@ using Pkcs11Wrapper.Native;
 
 namespace Pkcs11Wrapper.Admin.Application.Services;
 
-public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization, IDeviceDependencyCleanupService? dependencyCleanup = null)
+public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization, IDeviceDependencyCleanupService? dependencyCleanup = null, Pkcs11TelemetryService? pkcs11Telemetry = null)
 {
     private const string DestroyConfirmationPrefix = "DESTROY ";
     private const string ConfigurationFormat = "Pkcs11Wrapper.Admin.Configuration";
@@ -131,6 +131,12 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         authorization.DemandViewer();
         return auditLog.VerifyIntegrityAsync(forceVerification, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> GetPkcs11TelemetryAsync(int take = 500, CancellationToken cancellationToken = default)
+    {
+        authorization.DemandViewer();
+        return pkcs11Telemetry?.GetRecentAsync(take, cancellationToken) ?? Task.FromResult<IReadOnlyList<AdminPkcs11TelemetryEntry>>([]);
     }
 
     public async Task<DashboardSummary> GetDashboardAsync(CancellationToken cancellationToken = default)
@@ -2618,9 +2624,9 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, id)
         ];
 
-    private static Pkcs11Module CreateInitializedModule(HsmDeviceProfile device)
+    private Pkcs11Module CreateInitializedModule(HsmDeviceProfile device)
     {
-        Pkcs11Module module = Pkcs11Module.Load(device.ModulePath);
+        Pkcs11Module module = Pkcs11Module.Load(device.ModulePath, pkcs11Telemetry?.CreateListener(device));
         module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
         return module;
     }
