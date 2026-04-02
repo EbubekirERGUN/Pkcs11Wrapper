@@ -191,7 +191,12 @@ The image defaults to:
 - `AdminRuntime__DisableHttpsRedirection=true`
 - `ASPNETCORE_URLS=http://+:8080`
 
-See [docs/admin-container.md](docs/admin-container.md) for a full `docker run` example with persistent volumes, bind-mount permission notes for the non-root runtime user, a mounted host PKCS#11 library, and the local SoftHSM compose lab bundle.
+For the standalone container deployment path, start from:
+
+- [docs/admin-container.md](docs/admin-container.md)
+- `deploy/container/admin-panel.env.example`
+
+That guide covers the runtime contract, first-run bootstrap behavior, storage-root contents, PKCS#11 module mount patterns, non-root bind-mount permissions, upgrade/backup expectations, and the distinction between the standalone container image and the local SoftHSM compose lab.
 
 ### 2c) Run the local SoftHSM compose lab stack
 
@@ -297,7 +302,8 @@ Current capabilities include:
 - [docs/windows-local-setup.md](docs/windows-local-setup.md) - local Windows fixture/bootstrap path
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark scope, rerun flow, periodic tracking model
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - latest committed Linux benchmark baseline
-- [docs/admin-container.md](docs/admin-container.md) - admin container runtime contract plus local SoftHSM compose lab entry point
+- [docs/admin-container.md](docs/admin-container.md) - standalone admin-container deployment guide, volume layout, PKCS#11 mount patterns, and local/dev vs production-safe guidance
+- `deploy/container/admin-panel.env.example` - starter env template for the standalone admin container path
 - [deploy/compose/softhsm-lab/README.md](deploy/compose/softhsm-lab/README.md) - local/dev/lab compose stack for the admin panel + SoftHSM backend
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - local admin-panel operations and recovery runbook
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract
