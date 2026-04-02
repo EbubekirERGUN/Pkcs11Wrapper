@@ -40,11 +40,11 @@ static void ValidatePackage(string packageDirectory, string packageId, string ve
     string nupkgPath = Path.Combine(packageDirectory, $"{packageId}.{version}.nupkg");
     string snupkgPath = Path.Combine(packageDirectory, $"{packageId}.{version}.snupkg");
 
-    ValidateMainPackage(nupkgPath, packageId);
+    ValidateMainPackage(nupkgPath, packageId, version);
     ValidateSymbolsPackage(snupkgPath, packageId);
 }
 
-static void ValidateMainPackage(string packagePath, string packageId)
+static void ValidateMainPackage(string packagePath, string packageId, string expectedVersion)
 {
     if (!File.Exists(packagePath))
     {
@@ -63,7 +63,19 @@ static void ValidateMainPackage(string packagePath, string packageId)
     using Stream nuspecStream = nuspecEntry.Open();
     XDocument nuspec = XDocument.Load(nuspecStream);
     XElement? metadata = nuspec.Root?.Element(XName.Get("metadata", nuspec.Root.Name.NamespaceName));
+    XElement? version = metadata?.Element(XName.Get("version", nuspec.Root!.Name.NamespaceName));
     XElement? repository = metadata?.Element(XName.Get("repository", nuspec.Root!.Name.NamespaceName));
+    if (version is null || string.IsNullOrWhiteSpace(version.Value))
+    {
+        throw new InvalidOperationException($"{packageId} package is missing version metadata.");
+    }
+
+    string nuspecVersion = version.Value.Trim();
+    if (!string.Equals(nuspecVersion, expectedVersion, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"{packageId} nuspec version '{nuspecVersion}' does not match expected release version '{expectedVersion}'.");
+    }
+
     if (repository is null)
     {
         throw new InvalidOperationException($"{packageId} package is missing repository metadata.");

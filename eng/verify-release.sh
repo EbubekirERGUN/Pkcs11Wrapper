@@ -7,27 +7,27 @@ if [[ $# -gt 1 ]]; then
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-repo_version="$(python3 - "$repo_root/Directory.Build.props" <<'PY'
+project_path="$repo_root/src/Pkcs11Wrapper/Pkcs11Wrapper.csproj"
+version_json="$(dotnet msbuild "$project_path" -nologo -getProperty:Version -getProperty:VersionPrefix -getProperty:VersionSuffix)"
+repo_version="$(python3 - <<'PY' "$version_json"
+import json
 import sys
-import xml.etree.ElementTree as ET
 
-root = ET.parse(sys.argv[1]).getroot()
-value = None
-for element in root.iter():
-    if element.tag == 'VersionPrefix':
-        value = (element.text or '').strip()
-        break
+data = json.loads(sys.argv[1]).get('Properties', {})
+value = (data.get('Version') or '').strip()
 if not value:
-    raise SystemExit('VersionPrefix was not found in Directory.Build.props')
+    raise SystemExit('The effective Version property could not be resolved for Pkcs11Wrapper.csproj')
 print(value)
 PY
 )"
 
 version="${1:-$repo_version}"
 if [[ "$version" != "$repo_version" ]]; then
-  echo "requested version '$version' does not match repository version '$repo_version' from Directory.Build.props" >&2
+  echo "requested version '$version' does not match effective repository version '$repo_version'" >&2
   exit 2
 fi
+
+"$repo_root/eng/release-preflight.sh" --version "$version" >/dev/null
 
 package_dir="$repo_root/artifacts/packages/$version"
 validation_root="$repo_root/artifacts/packages/$version-validation"
@@ -40,7 +40,7 @@ create_consumer_project() {
 
   mkdir -p "$project_dir"
 
-  cat > "$project_dir/NuGet.Config" <<EOF
+  cat > "$project_dir/NuGet.Config" <<EOF2
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <packageSources>
@@ -48,9 +48,9 @@ create_consumer_project() {
     <add key="local-packages" value="$package_dir" />
   </packageSources>
 </configuration>
-EOF
+EOF2
 
-  cat > "$project_dir/${package_id}.Consumer.csproj" <<EOF
+  cat > "$project_dir/${package_id}.Consumer.csproj" <<EOF2
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -64,7 +64,7 @@ EOF
     <PackageReference Include="$package_id" Version="$version" />
   </ItemGroup>
 </Project>
-EOF
+EOF2
 
   printf '%b\n' "$source_body" > "$project_dir/Program.cs"
 }

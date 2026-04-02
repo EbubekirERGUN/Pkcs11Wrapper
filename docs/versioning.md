@@ -4,7 +4,7 @@
 
 ## Source of truth
 
-The repository version is defined centrally in `Directory.Build.props` via `VersionPrefix`.
+The repository version is defined centrally in `Directory.Build.props` via the effective `Version` that flows from `VersionPrefix` and optional `VersionSuffix`.
 
 Current version:
 
@@ -16,6 +16,7 @@ This value flows into:
 - file version (`0.1.0.0`)
 - informational version (`0.1.0`)
 - NuGet package version (`0.1.0`)
+- release-notes file naming (`docs/release-notes/v0.1.0.md`)
 - Git tags and GitHub releases (recommended format: `v0.1.0`)
 
 ## Release tag format
@@ -43,3 +44,9 @@ That yields versions like:
 
 - `0.2.0-preview.1`
 - `1.0.0-rc.1`
+
+The same effective version also drives:
+
+- release tags such as `v0.2.0-preview.1`
+- release-note files such as `docs/release-notes/v0.2.0-preview.1.md`
+- release preflight checks in `eng/release-preflight.sh`

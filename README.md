@@ -1,6 +1,7 @@
 # Pkcs11Wrapper
 
 [![CI](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/ci.yml)
+[![Release](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/release.yml/badge.svg)](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/release.yml)
 [![Benchmarks](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/EbubekirERGUN/Pkcs11Wrapper/actions/workflows/benchmarks.yml)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Linux](https://img.shields.io/badge/Linux-supported-2ea043)](#platform--validation-status)
@@ -60,7 +61,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - NativeAOT smoke validation on Linux
 - BenchmarkDotNet performance baseline + periodic benchmark workflow with allocation/regression reporting
 - Optional vendor regression lane
-- Release verification script, package-safe NuGet README, and SourceLink/symbol package validation
+- Tagged release workflow with preflight checks, artifact publication, optional NuGet push, plus release verification script and SourceLink/symbol package validation
 
 ### Admin panel
 

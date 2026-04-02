@@ -9,18 +9,48 @@
 ## Release checklist
 
 1. Confirm working tree is clean except the intended release changes.
-2. Update the repository version in `Directory.Build.props` (`VersionPrefix`).
-3. Run:
+2. Update the repository version in `Directory.Build.props` (`VersionPrefix`, and `VersionSuffix` when needed for pre-release builds).
+3. Add or update the release notes file for the exact tag/version you intend to publish:
+
+```text
+docs/release-notes/v<version>.md
+```
+
+Examples:
+
+- `docs/release-notes/v0.1.0.md`
+- `docs/release-notes/v0.2.0-rc.1.md`
+
+4. Run:
 
 ```bash
 ./eng/verify-release.sh
 ```
 
-This executes restore, Release build, tests, Linux NativeAOT smoke, package creation, SourceLink/symbol validation, and local package-consumer restore/build checks for both packages using the repository version from `Directory.Build.props`.
+This now performs release preflight first and fails fast when:
 
-4. Review generated artifacts under `artifacts/packages/<version>/` and `artifacts/packages/<version>-validation/`.
-5. Update release notes / changelog text in the platform where the release will be published.
-6. Optional cross-platform sanity: confirm the Windows lane still builds, either via GitHub Actions or with a local fixture-backed PowerShell run:
+- the requested version does not match the repository's **effective** package version
+- the Git tag format would not be `v<version>`
+- the matching `docs/release-notes/v<version>.md` file is missing
+
+After preflight, it executes restore, Release build, tests, Linux NativeAOT smoke, package creation, SourceLink/symbol validation, and local package-consumer restore/build checks for all four packages using the repository's effective version.
+
+5. Review generated artifacts under `artifacts/packages/<version>/` and `artifacts/packages/<version>-validation/`.
+6. Optional local packaging bundle check:
+
+```bash
+./eng/assemble-release-artifacts.sh <version>
+```
+
+That creates a GitHub-release-ready bundle under `artifacts/releases/v<version>/` with:
+
+- validated `.nupkg` and `.snupkg` files
+- a bundled Linux NativeAOT smoke artifact archive
+- bundled release-validation logs/output
+- `SHA256SUMS.txt`
+- `release-manifest.json`
+
+7. Optional cross-platform sanity: confirm the Windows lane still builds, either via GitHub Actions or with a local fixture-backed PowerShell run:
 
 ```powershell
 .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1"
@@ -28,7 +58,23 @@ This executes restore, Release build, tests, Linux NativeAOT smoke, package crea
 .\eng\run-smoke-aot.ps1 -UseExistingEnv -EnvFilePath "$env:TEMP\pkcs11-fixture.ps1" -Strict
 ```
 
-7. Tag and publish only after the maintainer confirms the package contents and validation output. Recommended tag format: `v<version>`.
+8. Push the release tag after the maintainer confirms the package contents and validation output. Recommended tag format: `v<version>`.
+
+```bash
+git tag v<version>
+git push origin v<version>
+```
+
+The tagged release workflow now automates:
+
+- release preflight (`version` / `tag` / release-notes alignment)
+- `./eng/verify-release.sh`
+- Windows release-readiness regression on `windows-latest`
+- release-bundle assembly with checksums and manifest
+- GitHub release creation/update with the checked-in release notes body
+- optional NuGet publication when `NUGET_API_KEY` is configured
+
+You can also run the same workflow manually via **Actions -> release -> Run workflow** to dry-run a release candidate from a branch/ref before pushing the tag.
 
 If you want a starting point for the GitHub release text after the Windows support work, reuse or adapt `docs/release-notes/windows-compatibility.md`.
 
@@ -50,7 +96,8 @@ See also: [docs/versioning.md](versioning.md)
 - Pack validation now checks for:
   - `README.nuget.md` inside each package
   - repository metadata in the nuspec
+  - nuspec/package version alignment with the requested release version
   - `snupkg` symbol packages for all four packages
   - embedded GitHub SourceLink data inside the portable PDBs
   - successful local restore/build from a file-based package source for all four packages
-- Package publication is intentionally not automated from this repository yet; maintainers should publish only from a validated local tag/release candidate.
+- Tagged GitHub releases now automate package artifact publication to the GitHub release itself. NuGet publication is also automated when `NUGET_API_KEY` is configured; otherwise the workflow skips NuGet push and records that explicitly in the run summary.
