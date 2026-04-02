@@ -45,12 +45,12 @@ See also: [docs/versioning.md](versioning.md)
 
 ## Packaging notes
 
-- `Pkcs11Wrapper` and `Pkcs11Wrapper.Native` are both packable.
+- `Pkcs11Wrapper`, `Pkcs11Wrapper.Native`, `Pkcs11Wrapper.ThalesLuna.Native`, and `Pkcs11Wrapper.ThalesLuna` are packable.
 - NuGet packages embed `docs/nuget/README.nuget.md`, which keeps the package page free of repo-relative links.
 - Pack validation now checks for:
   - `README.nuget.md` inside each package
   - repository metadata in the nuspec
-  - `snupkg` symbol packages for both packages
+  - `snupkg` symbol packages for all four packages
   - embedded GitHub SourceLink data inside the portable PDBs
-  - successful local restore/build from a file-based package source for both `Pkcs11Wrapper` and `Pkcs11Wrapper.Native`
+  - successful local restore/build from a file-based package source for all four packages
 - Package publication is intentionally not automated from this repository yet; maintainers should publish only from a validated local tag/release candidate.

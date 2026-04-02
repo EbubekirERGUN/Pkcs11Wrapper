@@ -5,6 +5,7 @@ See also:
 - `docs/luna-compatibility-audit.md` for the current standard-vs-extension support boundary
 - `docs/vendor-regression.md` for the opt-in Luna-oriented vendor regression profile
 - `docs/luna-vendor-extension-design.md` for the future `CA_*` extension-layer plan
+- `docs/luna-extension-skeleton.md` for the current bootstrap-only Luna package status
 - `docs/vendor-audit-integration.md` for the vendor-native audit vs wrapper-telemetry boundary and Luna audit-integration evaluation
 
 ## Purpose
@@ -43,11 +44,24 @@ That means the current support story is:
 - PKCS#11 v3 interface discovery (`C_GetInterface*`), message APIs (`C_Message*`), `C_LoginUser`, and `C_SessionCancel` until a real Luna runtime proves them
 - mechanisms that require structured vendor-specific parameters not yet modelled by the wrapper
 
+### Extension bootstrap exists, but Luna API families are still not implemented
+
+The repo now includes a **bootstrap-only** Luna extension skeleton in:
+
+- `Pkcs11Wrapper.ThalesLuna.Native`
+- `Pkcs11Wrapper.ThalesLuna`
+
+Current scope of that skeleton:
+
+- explicit `CA_GetFunctionList` probing
+- conservative bootstrap success/failure handling
+- function-list version + capability metadata
+- family placeholders that stay unavailable until real Luna entry points are implemented
+
 ### Not supported today
 
-- `CA_GetFunctionList`
-- Luna `CA_*` extension APIs
-- Luna-specific HA / cloning / PED / MofN / container / STC / STM / policy-admin workflows
+- Luna HA / cloning / PED / MofN / container / policy/admin operations
+- broad Luna `CA_*` family coverage claims
 - any claim that the current admin panel or runtime tooling directly covers Luna-only APIs
 
 If you need the deeper rationale behind those boundaries, read `docs/luna-compatibility-audit.md` first.

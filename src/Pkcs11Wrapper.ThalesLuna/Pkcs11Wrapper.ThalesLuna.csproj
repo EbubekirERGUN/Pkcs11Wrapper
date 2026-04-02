@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Pkcs11Wrapper.ThalesLuna</AssemblyName>
+    <RootNamespace>Pkcs11Wrapper.ThalesLuna</RootNamespace>
+    <PackageId>Pkcs11Wrapper.ThalesLuna</PackageId>
+    <Description>Managed Thales Luna extension bootstrap and capability layer for Pkcs11Wrapper.</Description>
+    <PackageTags>pkcs11;cryptoki;hsm;thales;luna</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.nuget.md</PackageReadmeFile>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pkcs11Wrapper\Pkcs11Wrapper.csproj" />
+    <ProjectReference Include="..\Pkcs11Wrapper.ThalesLuna.Native\Pkcs11Wrapper.ThalesLuna.Native.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\docs\nuget\README.nuget.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>

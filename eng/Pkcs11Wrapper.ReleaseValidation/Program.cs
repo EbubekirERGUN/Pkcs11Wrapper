@@ -24,6 +24,8 @@ try
 {
     ValidatePackage(packageDirectory, "Pkcs11Wrapper", version);
     ValidatePackage(packageDirectory, "Pkcs11Wrapper.Native", version);
+    ValidatePackage(packageDirectory, "Pkcs11Wrapper.ThalesLuna.Native", version);
+    ValidatePackage(packageDirectory, "Pkcs11Wrapper.ThalesLuna", version);
     Console.WriteLine("Package layout, README, SourceLink, and symbol validation completed successfully.");
     return 0;
 }

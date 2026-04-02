@@ -65,6 +65,13 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         set => _telemetryListener = value;
     }
 
+    internal bool TryResolveOptionalExport(string exportName, out nint exportAddress)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(exportName);
+        EnsureNotDisposed();
+        return NativeLibrary.TryGetExport(_handle, exportName, out exportAddress);
+    }
+
     public static Pkcs11NativeModule Load(string libraryPath) => Load(libraryPath, null);
 
     public static Pkcs11NativeModule Load(string libraryPath, IPkcs11OperationTelemetryListener? telemetryListener)

@@ -28,22 +28,22 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.ThalesLuna.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.ThalesLuna'">
     <DebugType>portable</DebugType>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
 
-  <PropertyGroup Condition="('$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper') and '$(ContinuousIntegrationBuild)' == '' and '$(CI)' == 'true'">
+  <PropertyGroup Condition="('$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.ThalesLuna.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.ThalesLuna') and '$(ContinuousIntegrationBuild)' == '' and '$(CI)' == 'true'">
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper'">
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.ThalesLuna.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.ThalesLuna'">
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
   </ItemGroup>
 
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.Smoke'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Pkcs11Wrapper.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.ThalesLuna.Native' or '$(MSBuildProjectName)' == 'Pkcs11Wrapper.Smoke'">
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
   </PropertyGroup>
 </Project>
