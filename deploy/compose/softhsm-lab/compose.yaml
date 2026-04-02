@@ -1,0 +1,53 @@
+services:
+  softhsm:
+    build:
+      context: ../../..
+      dockerfile: deploy/compose/softhsm-lab/softhsm.Dockerfile
+    environment:
+      SOFTHSM2_CONF: /opt/pkcs11/softhsm/softhsm2.conf
+      SOFTHSM_TOKEN_DIR: /opt/pkcs11/softhsm/tokens
+      PKCS11_MODULE_PATH: /opt/pkcs11/lib/libsofthsm2.so
+      SOFTHSM_AUTO_SEED: ${SOFTHSM_AUTO_SEED:-1}
+      SOFTHSM_TOKEN_LABEL: ${SOFTHSM_TOKEN_LABEL:-Pkcs11Wrapper CI Token}
+      SOFTHSM_USER_PIN: ${SOFTHSM_USER_PIN:-123456}
+      SOFTHSM_SO_PIN: ${SOFTHSM_SO_PIN:-12345678}
+      SOFTHSM_AES_LABEL: ${SOFTHSM_AES_LABEL:-ci-aes}
+      SOFTHSM_AES_ID_HEX: ${SOFTHSM_AES_ID_HEX:-A1}
+      SOFTHSM_RSA_LABEL: ${SOFTHSM_RSA_LABEL:-ci-rsa}
+      SOFTHSM_RSA_ID_HEX: ${SOFTHSM_RSA_ID_HEX:-B2}
+    volumes:
+      - softhsm-state:/opt/pkcs11/softhsm
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /opt/pkcs11/softhsm/softhsm2.conf && softhsm2-util --show-slots >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+  admin:
+    build:
+      context: ../../..
+      dockerfile: deploy/compose/softhsm-lab/admin.Dockerfile
+    depends_on:
+      softhsm:
+        condition: service_healthy
+    ports:
+      - "${PKCS11WRAPPER_ADMIN_PORT:-8080}:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      AdminStorage__DataRoot: /var/lib/pkcs11wrapper-admin
+      AdminRuntime__DisableHttpsRedirection: "true"
+      LocalAdminBootstrap__UserName: ${PKCS11WRAPPER_ADMIN_USER:-admin}
+      LocalAdminBootstrap__Password: ${PKCS11WRAPPER_ADMIN_PASSWORD:-ChangeMe!123456}
+      AdminBootstrapDevice__Name: ${PKCS11WRAPPER_ADMIN_DEVICE_NAME:-SoftHSM lab}
+      AdminBootstrapDevice__ModulePath: /opt/pkcs11/lib/libsofthsm2.so
+      AdminBootstrapDevice__DefaultTokenLabel: ${SOFTHSM_TOKEN_LABEL:-Pkcs11Wrapper CI Token}
+      AdminBootstrapDevice__Notes: ${PKCS11WRAPPER_ADMIN_DEVICE_NOTES:-Local/dev/lab SoftHSM compose stack. Not production orchestrated.}
+      SOFTHSM2_CONF: /opt/pkcs11/softhsm/softhsm2.conf
+    volumes:
+      - admin-data:/var/lib/pkcs11wrapper-admin
+      - softhsm-state:/opt/pkcs11/softhsm
+
+volumes:
+  admin-data:
+  softhsm-state:

@@ -191,7 +191,19 @@ The image defaults to:
 - `AdminRuntime__DisableHttpsRedirection=true`
 - `ASPNETCORE_URLS=http://+:8080`
 
-See [docs/admin-container.md](docs/admin-container.md) for a full `docker run` example with persistent volumes, bind-mount permission notes for the non-root runtime user, and a mounted host PKCS#11 library.
+See [docs/admin-container.md](docs/admin-container.md) for a full `docker run` example with persistent volumes, bind-mount permission notes for the non-root runtime user, a mounted host PKCS#11 library, and the local SoftHSM compose lab bundle.
+
+### 2c) Run the local SoftHSM compose lab stack
+
+```bash
+cd deploy/compose/softhsm-lab
+cp .env.example .env
+# optional: edit .env
+
+docker compose up --build -d
+```
+
+This stack is deliberately aimed at **local/dev/lab** usage, not production orchestration. It brings up the admin panel plus a SoftHSM-backed token environment with shared volumes for repeatable local reuse. See [deploy/compose/softhsm-lab/README.md](deploy/compose/softhsm-lab/README.md) for setup, seeded credentials/PINs, and reset/reseed commands.
 
 ### 3) Run validation
 
@@ -285,6 +297,8 @@ Current capabilities include:
 - [docs/windows-local-setup.md](docs/windows-local-setup.md) - local Windows fixture/bootstrap path
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark scope, rerun flow, periodic tracking model
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - latest committed Linux benchmark baseline
+- [docs/admin-container.md](docs/admin-container.md) - admin container runtime contract plus local SoftHSM compose lab entry point
+- [deploy/compose/softhsm-lab/README.md](deploy/compose/softhsm-lab/README.md) - local/dev/lab compose stack for the admin panel + SoftHSM backend
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - local admin-panel operations and recovery runbook
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract
 - [docs/luna-integration.md](docs/luna-integration.md) - practical Thales Luna client/module setup guidance for wrapper, admin panel, smoke, and vendor regression
