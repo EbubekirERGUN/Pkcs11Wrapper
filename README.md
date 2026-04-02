@@ -12,6 +12,25 @@ Modern **.NET 10 PKCS#11 wrapper** with strong Linux validation, Windows support
 
 > Turkish README: [README.tr.md](README.tr.md)
 
+## Admin panel showcase
+
+<p align="center">
+  <img src="docs/showcase/2026-04-final/admin-dashboard.png" alt="Pkcs11Wrapper admin dashboard overview" />
+</p>
+
+<p align="center">
+  <img src="docs/showcase/2026-04-final/admin-devices.png" alt="Pkcs11Wrapper admin device profiles surface" width="49%" />
+  <img src="docs/showcase/2026-04-final/admin-slots.png" alt="Pkcs11Wrapper admin slots and tokens surface" width="49%" />
+</p>
+
+A small, current showcase slice from the admin panel:
+
+- **Dashboard** — recovery-first operations overview and role-aware console framing
+- **Devices** — HSM profile inventory, connection-governance workflow, and vendor-aware management surface
+- **Slots** — token visibility and slot-level operational entry point before key/session work
+
+Capture notes and the reproducible screenshot flow live in [docs/showcase/2026-04-final/README.md](docs/showcase/2026-04-final/README.md).
+
 ## Why this project exists
 
 PKCS#11 integrations are powerful, but they are often awkward to consume from modern .NET codebases. `Pkcs11Wrapper` aims to provide a cleaner, explicit, testable, and production-minded foundation for:
@@ -329,6 +348,7 @@ Current capabilities include:
 - [docs/versioning.md](docs/versioning.md) - centralized versioning model and tag strategy
 - [docs/admin-panel-roadmap.md](docs/admin-panel-roadmap.md) - admin panel roadmap
 - [docs/github-showcase.md](docs/github-showcase.md) - suggested GitHub repo description/topics/social preview copy
+- [docs/showcase/2026-04-final/README.md](docs/showcase/2026-04-final/README.md) - current committed admin-panel showcase assets + capture recipe
 
 ## Current limitations
 
