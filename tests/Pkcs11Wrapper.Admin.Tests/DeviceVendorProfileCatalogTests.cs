@@ -11,6 +11,12 @@ public sealed class DeviceVendorProfileCatalogTests
         "cloud-kms-kmsp11",
         "Cloud KMS / Cloud HSM via kmsp11");
 
+    private static readonly HsmDeviceVendorMetadata OracleVendor = new(
+        "oracle",
+        "Oracle",
+        "oci-dedicated-kms-standard",
+        "OCI Dedicated KMS / standard PKCS#11");
+
     [Fact]
     public void GetSelectionId_ReturnsKnownGoogleProfileSelection()
     {
@@ -33,5 +39,29 @@ public sealed class DeviceVendorProfileCatalogTests
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("KMS_PKCS11_CONFIG", StringComparison.Ordinal));
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("PIN is ignored", StringComparison.Ordinal));
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Cloud KMS lifecycle/control-plane", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetSelectionId_ReturnsKnownOracleProfileSelection()
+    {
+        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(OracleVendor);
+
+        Assert.Equal("oracle-oci-dedicated-kms-standard", selectionId);
+    }
+
+    [Fact]
+    public void GetGuidance_ReturnsOracleSpecificSummaryAndHints()
+    {
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(OracleVendor);
+
+        Assert.True(guidance.IsKnownProfile);
+        Assert.False(guidance.IsVendorNeutral);
+        Assert.Equal("Oracle", guidance.Title);
+        Assert.Equal("OCI Dedicated KMS / standard PKCS#11", guidance.ProfileName);
+        Assert.Contains("Dedicated KMS", guidance.Summary);
+        Assert.Equal(3, guidance.Hints.Count);
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("oci-hsm-pkcs11", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("username:password", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Windows CNG/KSP", StringComparison.Ordinal));
     }
 }

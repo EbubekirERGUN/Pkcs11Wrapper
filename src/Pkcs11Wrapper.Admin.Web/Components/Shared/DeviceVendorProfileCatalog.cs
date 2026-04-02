@@ -118,6 +118,28 @@ internal static class DeviceVendorProfileCatalog
                     "Cloud KMS provisioning and policy remain outside this UI",
                     "Key rings, IAM, service accounts, protection-level choices, and broader Cloud KMS lifecycle/control-plane tasks stay in Google Cloud tooling and APIs. This profile only helps the repo/admin surface stay honest when consuming kmsp11 as a PKCS#11 module.",
                     DeviceVendorHintTone.Boundary)
+            ]),
+        new(
+            "oracle-oci-dedicated-kms-standard",
+            "Oracle OCI Dedicated KMS / standard PKCS#11",
+            "oracle",
+            "Oracle",
+            "oci-dedicated-kms-standard",
+            "OCI Dedicated KMS / standard PKCS#11",
+            "Use this when the device profile points at Oracle Cloud Infrastructure Dedicated KMS on a host that already has the OCI Linux PKCS#11 client/runtime configured. The direct PKCS#11 fit is Dedicated KMS, not generic OCI Vault or Windows CNG/KSP flows.",
+            [
+                new DeviceVendorHint(
+                    "Run the admin app where the OCI Linux client and daemon are already working",
+                    "Point the profile at the exact OCI PKCS#11 library path visible to the running host/container and make sure the host already has the oci-hsm-client and oci-hsm-pkcs11 packages, the required cert-c/pkey-c/partitionOwnerCert.pem material, and a working client_daemon configuration before relying on the app operationally.",
+                    DeviceVendorHintTone.Info),
+                new DeviceVendorHint(
+                    "Treat the direct PKCS#11 path as Linux-first and CU-scoped",
+                    "Oracle's reviewed docs currently publish the PKCS#11 package for Oracle Linux and document C_Login CU credentials in the form username:password. Windows docs focus on CNG/KSP plus n3fips_password rather than the PKCS#11 module boundary this app consumes, so the current repo guidance keeps direct OCI PKCS#11 usage on the Linux client path.",
+                    DeviceVendorHintTone.Warning),
+                new DeviceVendorHint(
+                    "Vault/control-plane/user administration stay outside this UI",
+                    "This profile is for OCI Dedicated KMS as a standard PKCS#11 module only. OCI Vault/private-vault service operations, HSM-cluster provisioning, user/certificate bootstrap, and Windows CNG/KSP administration remain outside the current admin surface.",
+                    DeviceVendorHintTone.Boundary)
             ])
     ];
 
