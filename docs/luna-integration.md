@@ -138,8 +138,10 @@ The admin panel already supports Luna in the current repo shape, but only throug
    - **Name**: your operational label for the HSM/partition
    - **PKCS#11 Module Path**: the exact Luna library path on that host
    - **Default Token Label**: the Luna partition/keyring label you expect operators to use most often
+   - **Vendor profile**: **Thales Luna / standard PKCS#11** to attach Luna-specific setup reminders without changing the standard PKCS#11 execution model
    - **Notes**: optional client/version/host reminders
 4. use the built-in **Test** action before relying on the profile operationally
+5. once selected, the Devices / Slots / Keys / PKCS#11 Lab pages will surface Luna-aware setup hints and scope boundaries, but they still intentionally stop short of Luna-only operational APIs
 
 ### What to use in the UI
 

@@ -67,6 +67,8 @@
     </div>
 </div>
 
+<DeviceVendorHintsPanel Vendor="SelectedDevice?.Vendor" Heading="Selected device guidance" ShowWhenVendorNeutral="false" />
+
 @if (_slots.Count != 0)
 {
     <div class="row g-3 mb-4">
@@ -244,6 +246,10 @@
     private string _sortMode = "slot";
 
     private IReadOnlyList<HsmSlotSummary> FilteredSlots => ApplyOrdering(_slots.Where(MatchesFilters)).ToArray();
+    private HsmDeviceProfile? SelectedDevice
+        => Guid.TryParse(_selectedDeviceId, out Guid deviceId)
+            ? _devices.FirstOrDefault(device => device.Id == deviceId)
+            : null;
 
     private IReadOnlyList<AdminSessionSnapshot> CurrentDeviceSessions
         => Guid.TryParse(_selectedDeviceId, out Guid deviceId)

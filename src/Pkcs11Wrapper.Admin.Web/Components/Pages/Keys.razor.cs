@@ -41,6 +41,10 @@ public partial class Keys
     private bool _statusIsError;
     private bool _isOperator;
 
+    private HsmDeviceProfile? SelectedDevice
+        => Guid.TryParse(_selectedDeviceId, out Guid deviceId)
+            ? _devices.FirstOrDefault(device => device.Id == deviceId)
+            : null;
     private bool CanLoadKeys => Guid.TryParse(_selectedDeviceId, out _) && nuint.TryParse(_selectedSlotId, out _);
     private bool CanManageKeys => CanLoadKeys && !string.IsNullOrWhiteSpace(_userPin);
     private bool CanGenerateAes => CanManageKeys && _slotCapabilities?.SupportsAesKeyGeneration == true;

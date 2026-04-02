@@ -107,6 +107,11 @@ public partial class Pkcs11Lab
 
     private sealed record LabHistoryItem(DateTimeOffset RecordedAt, Pkcs11LabRequest Request, Pkcs11LabExecutionResult Result);
 
+    private HsmDeviceProfile? SelectedDevice
+        => Guid.TryParse(_selectedDeviceId, out Guid deviceId)
+            ? _devices.FirstOrDefault(device => device.Id == deviceId)
+            : null;
+
     private bool RequiresSlot => _request.Operation is Pkcs11LabOperation.MechanismList
         or Pkcs11LabOperation.MechanismInfo
         or Pkcs11LabOperation.SessionInfo

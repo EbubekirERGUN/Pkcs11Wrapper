@@ -13,7 +13,11 @@ public sealed class ConfigurationTransferTests
     {
         HsmAdminService service = CreateService(
         [
-            CreateProfile(Guid.NewGuid(), "Primary HSM", "/usr/lib/libpkcs11.so")
+            CreateProfile(
+                Guid.NewGuid(),
+                "Primary HSM",
+                "/usr/lib/libpkcs11.so",
+                new HsmDeviceVendorMetadata("thales", "Thales", "luna-standard", "Luna / standard PKCS#11"))
         ]);
 
         AdminConfigurationExportBundle bundle = await service.ExportConfigurationAsync();
@@ -25,6 +29,8 @@ public sealed class ConfigurationTransferTests
         Assert.Contains("ProtectedPinCache", bundle.ExcludedSections);
         Assert.Single(bundle.DeviceProfiles);
         Assert.Equal("Primary HSM", bundle.DeviceProfiles[0].Name);
+        Assert.Equal("Thales", bundle.DeviceProfiles[0].Vendor?.VendorName);
+        Assert.Equal("luna-standard", bundle.DeviceProfiles[0].Vendor?.ProfileId);
     }
 
     [Fact]
@@ -106,10 +112,10 @@ public sealed class ConfigurationTransferTests
         return new HsmAdminService(deviceProfiles, auditLog, new AdminSessionRegistry(), new AllowAllAuthorizationService());
     }
 
-    private static HsmDeviceProfile CreateProfile(Guid id, string name, string modulePath)
+    private static HsmDeviceProfile CreateProfile(Guid id, string name, string modulePath, HsmDeviceVendorMetadata? vendor = null)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        return new HsmDeviceProfile(id, name, modulePath, null, null, true, now, now);
+        return new HsmDeviceProfile(id, name, modulePath, null, null, true, now, now, vendor);
     }
 
     private sealed class InMemoryDeviceProfileStore(IReadOnlyList<HsmDeviceProfile> seed) : IDeviceProfileStore
