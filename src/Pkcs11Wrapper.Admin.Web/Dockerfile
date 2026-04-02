@@ -27,12 +27,17 @@ ENV ASPNETCORE_URLS=http://+:8080 \
     DOTNET_RUNNING_IN_CONTAINER=true \
     DOTNET_EnableDiagnostics=0 \
     AdminStorage__DataRoot=/var/lib/pkcs11wrapper-admin \
-    AdminRuntime__DisableHttpsRedirection=true
+    AdminRuntime__DisableHttpsRedirection=true \
+    HOME=/var/lib/pkcs11wrapper-admin/home \
+    TMPDIR=/var/lib/pkcs11wrapper-admin/tmp
 WORKDIR /app
 COPY --from=publish /app/publish ./
-RUN mkdir -p /var/lib/pkcs11wrapper-admin /opt/pkcs11/lib \
+RUN mkdir -p /var/lib/pkcs11wrapper-admin/home /var/lib/pkcs11wrapper-admin/keys /var/lib/pkcs11wrapper-admin/tmp /opt/pkcs11/lib \
     && chown -R ${APP_UID}:0 /app /var/lib/pkcs11wrapper-admin /opt/pkcs11/lib \
     && chmod -R g=u /app /var/lib/pkcs11wrapper-admin /opt/pkcs11/lib
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["dotnet", "Pkcs11Wrapper.Admin.Web.dll", "--container-healthcheck", "http://127.0.0.1:8080/health/ready"]
 
 VOLUME ["/var/lib/pkcs11wrapper-admin"]
 EXPOSE 8080

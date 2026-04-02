@@ -47,6 +47,12 @@ services:
     volumes:
       - admin-data:/var/lib/pkcs11wrapper-admin
       - softhsm-state:/opt/pkcs11/softhsm
+    healthcheck:
+      test: ["CMD", "dotnet", "Pkcs11Wrapper.Admin.Web.dll", "--container-healthcheck", "http://127.0.0.1:8080/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
 volumes:
   admin-data:

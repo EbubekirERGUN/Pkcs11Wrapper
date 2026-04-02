@@ -19,6 +19,7 @@ If you need the **standalone container deployment** path for the admin panel, us
 - `admin` - a lab-flavored admin-panel image that preserves the existing container runtime contract for local use:
   - `AdminStorage__DataRoot=/var/lib/pkcs11wrapper-admin`
   - `AdminRuntime__DisableHttpsRedirection=true`
+  - built-in `/health/live` and `/health/ready` endpoints plus a compose healthcheck wired to the readiness probe
   - SoftHSM module exposed at `/opt/pkcs11/lib/libsofthsm2.so`
 - `softhsm` - a utility/backend container that owns the shared SoftHSM config/token store and can seed or reset the token with `softhsm2-util` + `pkcs11-tool`
 
@@ -32,6 +33,12 @@ cp .env.example .env
 # edit .env if you want different admin credentials, token label, or PINs
 
 docker compose up --build -d
+```
+
+You can optionally confirm both services reached a healthy state with:
+
+```bash
+docker compose ps
 ```
 
 Then open <http://localhost:8080> and sign in with the bootstrap admin credential from `.env`.
@@ -96,6 +103,7 @@ docker compose down -v
 
 - This stack is for **local/dev/lab** usage only.
 - The admin service still runs without HTTPS redirection, by design, to stay friction-free for local compose use.
+- The admin service now reports healthy only after its storage-backed readiness probe succeeds, which makes startup status easier to understand from `docker compose ps`.
 - Rotate the bootstrap admin password from the `Users` page after first sign-in if the stack will live longer than a quick demo.
 - The `admin-data` volume includes the bootstrap notice, local users, Data Protection keys, device profiles, telemetry retention files, audit log, lab templates, and protected PIN cache.
 - The SoftHSM lab state lives entirely in the `softhsm-state` named volume; deleting that volume resets the token/config.
