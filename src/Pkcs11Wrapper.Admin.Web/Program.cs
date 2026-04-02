@@ -31,16 +31,13 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 AdminStorageOptions adminStorage = builder.Configuration.GetSection("AdminStorage").Get<AdminStorageOptions>() ?? new();
-if (string.IsNullOrWhiteSpace(adminStorage.DataRoot))
-{
-    adminStorage.DataRoot = Path.Combine(builder.Environment.ContentRootPath, "App_Data");
-}
-
+adminStorage.DataRoot = AdminHostDefaults.ResolveStorageRoot(adminStorage.DataRoot, builder.Environment.ContentRootPath);
 Directory.CreateDirectory(adminStorage.DataRoot);
 
 AdminSessionRegistryOptions sessionOptions = builder.Configuration.GetSection("AdminSessionRegistry").Get<AdminSessionRegistryOptions>() ?? new();
 LocalAdminLoginThrottleOptions throttleOptions = builder.Configuration.GetSection("LocalAdminLoginThrottle").Get<LocalAdminLoginThrottleOptions>() ?? new();
 LocalAdminBootstrapOptions bootstrapOptions = builder.Configuration.GetSection("LocalAdminBootstrap").Get<LocalAdminBootstrapOptions>() ?? new();
+AdminBootstrapDeviceOptions bootstrapDeviceOptions = builder.Configuration.GetSection("AdminBootstrapDevice").Get<AdminBootstrapDeviceOptions>() ?? new();
 AdminRuntimeOptions runtimeOptions = builder.Configuration.GetSection("AdminRuntime").Get<AdminRuntimeOptions>() ?? new();
 AdminPkcs11TelemetryOptions telemetryOptions = builder.Configuration.GetSection("AdminTelemetry").Get<AdminPkcs11TelemetryOptions>() ?? new();
 
@@ -50,6 +47,8 @@ builder.Services.AddSingleton(sessionOptions);
 builder.Services.AddSingleton(throttleOptions);
 builder.Services.AddSingleton(bootstrapOptions);
 builder.Services.AddSingleton<IOptions<LocalAdminBootstrapOptions>>(Options.Create(bootstrapOptions));
+builder.Services.AddSingleton(bootstrapDeviceOptions);
+builder.Services.AddSingleton<IOptions<AdminBootstrapDeviceOptions>>(Options.Create(bootstrapDeviceOptions));
 builder.Services.AddSingleton(runtimeOptions);
 builder.Services.AddSingleton<IOptions<AdminRuntimeOptions>>(Options.Create(runtimeOptions));
 builder.Services.AddSingleton(telemetryOptions);
@@ -63,6 +62,7 @@ builder.Services.AddSingleton<ProtectedPinStore>();
 builder.Services.AddSingleton<Pkcs11LabTemplateStore>();
 builder.Services.AddSingleton<IDeviceDependencyCleanupService, DeviceDependencyCleanupService>();
 builder.Services.AddSingleton<DeviceProfileService>();
+builder.Services.AddSingleton<AdminBootstrapDeviceSeeder>();
 builder.Services.AddSingleton(sp => new AdminSessionRegistry(sp.GetRequiredService<AdminSessionRegistryOptions>()));
 builder.Services.AddSingleton<LocalAdminUserStore>();
 builder.Services.AddSingleton(sp => new LocalAdminLoginThrottleService(sp.GetRequiredService<LocalAdminLoginThrottleOptions>()));
@@ -77,6 +77,7 @@ builder.Services.AddScoped<HsmAdminService>();
 var app = builder.Build();
 
 await app.Services.GetRequiredService<LocalAdminUserStore>().EnsureSeedDataAsync();
+await app.Services.GetRequiredService<AdminBootstrapDeviceSeeder>().EnsureSeedDataAsync();
 
 if (!app.Environment.IsDevelopment())
 {
