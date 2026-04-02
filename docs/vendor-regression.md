@@ -4,6 +4,7 @@ See also: `docs/luna-integration.md` for the practical Luna client/module setup 
 See also: `docs/luna-compatibility-audit.md` for the current Thales Luna-specific scope boundary and extension-gap audit.
 See also: `docs/cloudhsm-integration.md` and `docs/cloudhsm-compatibility-audit.md` for the current AWS CloudHSM support boundary.
 See also: `docs/google-cloud-hsm-integration.md` and `docs/google-cloud-hsm-compatibility-audit.md` for the current Google Cloud HSM / kmsp11 support boundary.
+See also: `docs/ibm-cloud-hpcs-integration.md` and `docs/ibm-cloud-hpcs-compatibility-audit.md` for the current IBM Cloud Hyper Protect Crypto Services support boundary.
 See also: `docs/oci-dedicated-kms-integration.md` and `docs/oci-dedicated-kms-compatibility-audit.md` for the current Oracle OCI Dedicated KMS support boundary.
 See also: `docs/luna-vendor-extension-design.md` for the proposed package/boundary/loading strategy for future Luna-only `CA_*` support.
 
@@ -182,6 +183,28 @@ So the current Google support slice is:
 - strong documentation
 - admin-panel readiness improvements and guardrails
 - explicit wrapper/admin setup guidance
+
+rather than a premature vendor-lane profile that would overstate validation depth.
+
+## Why there is not yet a checked-in IBM Cloud HPCS profile
+
+See also: `docs/ibm-cloud-hpcs-integration.md` and `docs/ibm-cloud-hpcs-compatibility-audit.md`.
+
+IBM Cloud Hyper Protect Crypto Services is now a documented target for the repo, but there is intentionally **no** checked-in `ibm-*` vendor-regression profile yet.
+
+Reason:
+
+- the direct PKCS#11 path depends on a real HPCS instance, EP11 endpoint reachability, `grep11client.yaml`, keystore UUIDs, and IBM IAM service-ID/API-key setup
+- IBM's reviewed public docs publish a stronger PKCS#11 function table than several other cloud vendors, but honest end-to-end validation still requires a live cloud environment that was not available during issue #69
+- optional authenticated-keystore passwords and optional EP11 mutual TLS add more runtime/bootstrap state that the current generic vendor lane cannot verify offline
+- IBM also publishes a separate GREP11 gRPC path, and a checked-in vendor profile should not blur that boundary by implying all IBM HPCS integration styles are already covered by the current PKCS#11 lane
+- IBM's reviewed direct-client packaging is Linux-only for the current repo boundary, so a checked-in cross-platform vendor profile would overstate maturity
+
+So the current IBM support slice is:
+
+- strong documentation
+- admin-panel vendor-profile guidance
+- explicit direct-PKCS#11-vs-GREP11 boundary clarification
 
 rather than a premature vendor-lane profile that would overstate validation depth.
 

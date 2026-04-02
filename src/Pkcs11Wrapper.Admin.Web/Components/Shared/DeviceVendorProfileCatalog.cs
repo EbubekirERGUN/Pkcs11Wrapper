@@ -120,6 +120,28 @@ internal static class DeviceVendorProfileCatalog
                     DeviceVendorHintTone.Boundary)
             ]),
         new(
+            "ibm-cloud-hpcs-standard",
+            "IBM Cloud HPCS / EP11 PKCS#11",
+            "ibm",
+            "IBM Cloud",
+            "hyper-protect-crypto-services-ep11",
+            "Hyper Protect Crypto Services / EP11 PKCS#11",
+            "Use this when the device profile points at IBM Cloud Hyper Protect Crypto Services through IBM's direct EP11 PKCS#11 client library. The practical fit is direct PKCS#11 on Linux; IBM's separate GREP11 gRPC path stays outside the current repo boundary.",
+            [
+                new DeviceVendorHint(
+                    "Run the admin app where the IBM Linux client and config already exist",
+                    "Point the profile at the exact IBM PKCS#11 library path visible to the running host/container and make sure the same runtime already has a valid grep11client.yaml file in /etc/ep11client or exposed through EP11CLIENT_CFG. IBM's reviewed public direct-client packaging is Linux GLIBC only, so treat this path as Linux-first rather than a Windows device profile.",
+                    DeviceVendorHintTone.Info),
+                new DeviceVendorHint(
+                    "Expect IBM IAM-backed login and keystore setup prerequisites",
+                    "IBM HPCS uses service-ID/API-key-backed PKCS#11 users. In practice the anonymous-user API key lives in grep11client.yaml, while SO/normal-user credentials flow through C_Login. If you use authenticated keystores or optional EP11 mutual TLS, those settings and secrets must already be configured outside the UI before relying on the profile operationally.",
+                    DeviceVendorHintTone.Warning),
+                new DeviceVendorHint(
+                    "Keep GREP11 and IBM control-plane work outside this UI",
+                    "This profile is only for the direct EP11 PKCS#11 module boundary. GREP11 gRPC integration, instance initialization, endpoint discovery, IAM policy setup, and certificate administration remain IBM-specific operational paths rather than current admin-panel features.",
+                    DeviceVendorHintTone.Boundary)
+            ]),
+        new(
             "oracle-oci-dedicated-kms-standard",
             "Oracle OCI Dedicated KMS / standard PKCS#11",
             "oracle",
