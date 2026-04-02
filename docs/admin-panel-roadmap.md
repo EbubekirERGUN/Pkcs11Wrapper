@@ -116,6 +116,7 @@ Goals:
 - Phase E fourth polish slice delivered: configuration-page summary/safety affordances plus PKCS#11 Lab quick-operation palette, summary cards, and filterable scenario-history UX backed by a reusable/tested `Pkcs11LabView` helper
 - Phase E fifth polish slice delivered: persistent PKCS#11 Lab saved templates/favorites with App_Data-backed storage, search/category filters, quick apply/delete actions, and explicit PIN stripping via a tested `Pkcs11LabTemplateStore`
 - Phase E sixth polish slice delivered: dashboard/widget expansion for failure categories, invalidated-session grouping, configuration-export freshness, bootstrap hardening visibility, and recent Lab-template awareness via a reusable/tested `AdminDashboardView` helper
+- Phase E seventh polish slice delivered: admin-facing PKCS#11 telemetry viewer backed by a local JSONL store, with redacted field rendering plus device/slot/operation/mechanism/status/time-window filtering via a reusable/tested `Pkcs11TelemetryView` helper
 - capability/mechanism-aware key-management UX: slot-level mechanism probing, pre-submit warnings, and disabled generate/import actions when the selected slot obviously cannot satisfy them
 - object edit affordances are now more object-aware: obvious unsupported toggles are disabled based on object class + `CKA_MODIFIABLE` visibility
 - object copy workflow delivered via `C_CopyObject`, including label/ID/capability override template fields and admin-layer validation

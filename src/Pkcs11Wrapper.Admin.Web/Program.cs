@@ -47,6 +47,7 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(adminStorage.DataRoot, "keys")));
 builder.Services.AddSingleton<IDeviceProfileStore, JsonDeviceProfileStore>();
 builder.Services.AddSingleton<IAuditLogStore, JsonLineAuditLogStore>();
+builder.Services.AddSingleton<IPkcs11TelemetryStore, JsonLinePkcs11TelemetryStore>();
 builder.Services.AddSingleton<ProtectedPinStore>();
 builder.Services.AddSingleton<Pkcs11LabTemplateStore>();
 builder.Services.AddSingleton<IDeviceDependencyCleanupService, DeviceDependencyCleanupService>();
@@ -57,6 +58,7 @@ builder.Services.AddSingleton(sp => new LocalAdminLoginThrottleService(sp.GetReq
 builder.Services.AddScoped<IAdminActorContext, HttpContextAdminActorContext>();
 builder.Services.AddScoped<IAdminAuthorizationService, HttpContextAdminAuthorizationService>();
 builder.Services.AddScoped<AuditLogService>();
+builder.Services.AddScoped<Pkcs11TelemetryService>();
 builder.Services.AddScoped<LocalAdminSecurityService>();
 builder.Services.AddScoped<LocalAdminLoginService>();
 builder.Services.AddScoped<HsmAdminService>();

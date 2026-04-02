@@ -91,7 +91,25 @@ If integrity is reported as invalid:
 
 In the current app shape, integrity warnings should be treated as operationally significant.
 
-## 6. Protected PIN cache expectations
+## 6. PKCS#11 telemetry review
+
+Use `PKCS#11 Telemetry` when a workflow fails but you still need the underlying wrapper-level context.
+
+What this page is good for:
+
+- correlating failures to a specific device, slot, or mechanism
+- checking whether the wrapper is returning `Succeeded`, `ReturnedFalse`, or `Failed`
+- reviewing the safe redacted field set emitted by the PKCS#11 telemetry pipeline
+
+Important limits:
+
+- the viewer only stores the latest redacted PKCS#11 event stream written by the admin host
+- raw PINs, payloads, wrapped blobs, and secret-bearing attributes are never persisted there
+- raw exception messages are intentionally not retained in this viewer because they are outside the explicit field-redaction contract
+
+Use `Audit Logs` for actor/action accountability and `PKCS#11 Telemetry` for low-level call correlation.
+
+## 7. Protected PIN cache expectations
 
 Protected PIN storage is designed for convenience on the same host, not as a centralized secret-management solution.
 
@@ -102,7 +120,7 @@ Important limits:
 - they depend on local ASP.NET Core Data Protection material
 - moving the app to another host does not carry this cache with it automatically
 
-## 7. What this does not replace
+## 8. What this does not replace
 
 Current admin hardening is strong for a local embedded deployment, but it does not replace:
 

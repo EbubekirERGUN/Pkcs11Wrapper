@@ -142,11 +142,53 @@ public sealed class JsonStoresTests
         }
     }
 
+    [Fact]
+    public async Task JsonPkcs11TelemetryStoreReturnsNewestWindow()
+    {
+        string root = CreateTempDirectory();
+        try
+        {
+            JsonLinePkcs11TelemetryStore store = new(new AdminStorageOptions { DataRoot = root });
+            for (int i = 0; i < 20; i++)
+            {
+                await store.AppendAsync(CreateTelemetry($"Operation-{i}", DateTimeOffset.UtcNow.AddSeconds(i)));
+            }
+
+            IReadOnlyList<AdminPkcs11TelemetryEntry> logs = await store.ReadRecentAsync(3);
+
+            Assert.Equal(3, logs.Count);
+            Assert.Equal("Operation-19", logs[0].OperationName);
+            Assert.Equal("Operation-17", logs[^1].OperationName);
+            Assert.Equal("Masked", Assert.Single(logs[0].Fields).Classification);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static HsmDeviceProfile CreateProfile(string name)
         => new(Guid.NewGuid(), name, "/tmp/libpkcs11.so", null, null, true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     private static AdminAuditLogEntry CreateAudit(string target, string details, DateTimeOffset timestamp)
         => new(Guid.NewGuid(), timestamp, "tester", ["admin"], "cookie", "Device", "Add", target, "Success", details, 0, null, string.Empty, "127.0.0.1", "trace-1", "test-agent", Environment.MachineName);
+
+    private static AdminPkcs11TelemetryEntry CreateTelemetry(string operationName, DateTimeOffset timestamp)
+        => new(
+            Guid.NewGuid(),
+            timestamp,
+            Guid.NewGuid(),
+            "Primary",
+            operationName,
+            $"C_{operationName}",
+            "Succeeded",
+            1.23,
+            "CKR_OK",
+            1,
+            2,
+            0x1082,
+            null,
+            [new AdminPkcs11TelemetryField("credential.pin", "Masked", "set(len=8)")]);
 
     private static string CreateTempDirectory()
     {
