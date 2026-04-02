@@ -5,10 +5,17 @@ using Pkcs11Wrapper.Admin.Infrastructure;
 using Pkcs11Wrapper.Admin.Web.Lab;
 using Pkcs11Wrapper.Admin.Web.Components;
 using Pkcs11Wrapper.Admin.Web.Configuration;
+using Pkcs11Wrapper.Admin.Web.Health;
 using Pkcs11Wrapper.Admin.Web.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+
+if (await AdminContainerHealthProbe.TryExecuteAsync(args))
+{
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseStaticWebAssets();
@@ -29,10 +36,15 @@ builder.Services.AddAuthorizationBuilder()
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+builder.Services.AddHealthChecks()
+    .AddCheck<AdminStorageHealthCheck>("admin-storage", tags: ["ready"]);
 
 AdminStorageOptions adminStorage = builder.Configuration.GetSection("AdminStorage").Get<AdminStorageOptions>() ?? new();
 adminStorage.DataRoot = AdminHostDefaults.ResolveStorageRoot(adminStorage.DataRoot, builder.Environment.ContentRootPath);
 Directory.CreateDirectory(adminStorage.DataRoot);
+Directory.CreateDirectory(AdminHostDefaults.GetKeysRoot(adminStorage.DataRoot));
+Directory.CreateDirectory(AdminHostDefaults.GetHomeRoot(adminStorage.DataRoot));
+Directory.CreateDirectory(AdminHostDefaults.GetTempRoot(adminStorage.DataRoot));
 
 AdminSessionRegistryOptions sessionOptions = builder.Configuration.GetSection("AdminSessionRegistry").Get<AdminSessionRegistryOptions>() ?? new();
 LocalAdminLoginThrottleOptions throttleOptions = builder.Configuration.GetSection("LocalAdminLoginThrottle").Get<LocalAdminLoginThrottleOptions>() ?? new();
@@ -54,7 +66,7 @@ builder.Services.AddSingleton<IOptions<AdminRuntimeOptions>>(Options.Create(runt
 builder.Services.AddSingleton(telemetryOptions);
 builder.Services.AddSingleton<IOptions<AdminPkcs11TelemetryOptions>>(Options.Create(telemetryOptions));
 builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(adminStorage.DataRoot, "keys")));
+    .PersistKeysToFileSystem(new DirectoryInfo(AdminHostDefaults.GetKeysRoot(adminStorage.DataRoot)));
 builder.Services.AddSingleton<IDeviceProfileStore, JsonDeviceProfileStore>();
 builder.Services.AddSingleton<IAuditLogStore, JsonLineAuditLogStore>();
 builder.Services.AddSingleton<IPkcs11TelemetryStore, JsonLinePkcs11TelemetryStore>();
@@ -94,6 +106,16 @@ if (!runtimeOptions.DisableHttpsRedirection)
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+app.MapHealthChecks(AdminHostDefaults.HealthLivePath, new HealthCheckOptions
+{
+    Predicate = static _ => false,
+    ResponseWriter = AdminHealthResponseWriter.WriteAsync
+});
+app.MapHealthChecks(AdminHostDefaults.HealthReadyPath, new HealthCheckOptions
+{
+    Predicate = static registration => registration.Tags.Contains("ready", StringComparer.Ordinal),
+    ResponseWriter = AdminHealthResponseWriter.WriteAsync
+});
 app.MapStaticAssets();
 app.MapPost("/account/login", (Delegate)AccountEndpoints.LoginAsync);
 app.MapPost("/account/logout", (Delegate)AccountEndpoints.LogoutAsync);

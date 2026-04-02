@@ -47,13 +47,35 @@ The main image sets these defaults:
 - `DOTNET_EnableDiagnostics=0`
 - `AdminStorage__DataRoot=/var/lib/pkcs11wrapper-admin`
 - `AdminRuntime__DisableHttpsRedirection=true`
+- `HOME=/var/lib/pkcs11wrapper-admin/home`
+- `TMPDIR=/var/lib/pkcs11wrapper-admin/tmp`
 
 The image also creates:
 
 - `/var/lib/pkcs11wrapper-admin` - default persisted admin data root
+- `/var/lib/pkcs11wrapper-admin/keys` - ASP.NET Core Data Protection key ring location
+- `/var/lib/pkcs11wrapper-admin/home` - explicit writable home directory for non-root runtime helpers
+- `/var/lib/pkcs11wrapper-admin/tmp` - explicit writable temp path so the app can stay compatible with read-only root filesystem deployments
 - `/opt/pkcs11/lib` - convenient mount point for PKCS#11 modules/client libraries
 
 The container runs as non-root UID `64198` by default.
+
+## Built-in health endpoints and container healthcheck
+
+The admin image now exposes two unauthenticated health endpoints:
+
+- `/health/live` - lightweight liveness probe for process availability
+- `/health/ready` - readiness probe that verifies the admin storage root plus the app's writable runtime directories are present and writable
+
+The image also bakes in a Docker `HEALTHCHECK` that probes `http://127.0.0.1:8080/health/ready` from inside the container, so a plain `docker ps` / `docker inspect` workflow can see whether the container is healthy without extra operator wiring.
+
+Operationally, this is meant to catch practical container problems such as:
+
+- mounted admin storage that is missing or no longer writable
+- read-only or permission-broken runtime writable paths
+- an app process that is up but not actually ready to serve requests
+
+The readiness check is intentionally **storage-focused** and low-risk. It does **not** attempt to prove that a specific HSM is online or that every configured PKCS#11 module is reachable, because those concerns can legitimately vary across operators, maintenance windows, and device states.
 
 ## Environment template
 
@@ -130,6 +152,8 @@ Typical files/directories include:
 | `lab-templates.json` | saved PKCS#11 Lab templates |
 | `protected-pins.json` | locally protected cached PIN metadata/storage |
 | `keys/` | ASP.NET Core Data Protection key ring |
+| `home/` | explicit writable non-root home directory used by the container runtime when needed |
+| `tmp/` | explicit writable temp directory used by readiness checks and runtime temporary files |
 | `*.bak` companions for JSON files | crash-safe replacement backups kept during atomic writes |
 
 Operationally, this means the storage-root volume is where these concerns live together:
@@ -180,16 +204,28 @@ This example uses:
 - a persistent named volume for admin state
 - a read-only bind mount for PKCS#11 libraries
 - an env file for first-run bootstrap/device settings
+- low-risk hardening flags that fit the current image contract
 
 ```bash
 docker run --rm \
   --name pkcs11wrapper-admin \
   -p 8080:8080 \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --pids-limit 256 \
   --env-file /etc/pkcs11wrapper/admin-panel.env \
   -v pkcs11wrapper-admin-data:/var/lib/pkcs11wrapper-admin \
   -v /srv/pkcs11wrapper-admin/pkcs11-client:/opt/pkcs11/lib:ro \
   pkcs11wrapper-admin
 ```
+
+Why these flags are practical here:
+
+- `--read-only` works with the current image because the admin app's writable home/temp/key material is already redirected under the persisted storage root
+- `--cap-drop ALL` removes Linux capabilities the app does not need for its normal HTTP + file-backed admin workflow
+- `--security-opt no-new-privileges:true` prevents privilege escalation through executed child processes
+- `--pids-limit 256` adds a simple guardrail against runaway process creation without getting orchestration-specific
 
 If your vendor library requires additional writable client-side state, add a **separate** mount for that vendor path rather than making `/opt/pkcs11/lib` writable.
 
@@ -347,6 +383,8 @@ Minimum practical guidance:
 - rotate the bootstrap password immediately and retire the plaintext bootstrap notice file
 - prefer operator-managed secrets/env injection over leaving example credentials in files
 - persist and back up the storage root deliberately
+- keep the built-in `/health/live` and `/health/ready` probes available to your local Docker or upstream monitoring path
+- prefer `--read-only`, `--cap-drop ALL`, and `--security-opt no-new-privileges:true` when your runtime allows them
 - mount PKCS#11 modules read-only whenever possible
 - separate vendor-client writable state from admin app state
 - understand that the current app auth model is local-user/cookie based, not external IdP/MFA/secret-vault integrated

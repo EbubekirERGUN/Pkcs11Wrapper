@@ -202,11 +202,14 @@ export LocalAdminBootstrap__Password="$admin_password"
 server_pid="$!"
 server_running=true
 
-if ! wait_for_http "$admin_base_url/login"; then
-  printf 'Admin runtime failed to become ready at %s\n' "$admin_base_url/login" >&2
+if ! wait_for_http "$admin_base_url/health/ready"; then
+  printf 'Admin runtime failed to become ready at %s\n' "$admin_base_url/health/ready" >&2
   tail -n 200 "$artifact_root/admin-web.log" >&2 || true
   exit 1
 fi
+
+curl -fsS "$admin_base_url/health/live" > "$artifact_root/admin-health-live.json"
+curl -fsS "$admin_base_url/health/ready" > "$artifact_root/admin-health-ready.json"
 
 export ADMIN_E2E_BASE_URL="$admin_base_url"
 export ADMIN_E2E_USERNAME="$admin_user"
