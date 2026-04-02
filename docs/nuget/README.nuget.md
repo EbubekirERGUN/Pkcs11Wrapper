@@ -38,6 +38,16 @@ Console.WriteLine($"Discovered {slotCount} slot(s).");
 - Windows runtime validation with SoftHSM-for-Windows
 - BenchmarkDotNet baseline and CI reporting
 
+## Telemetry integrations
+
+The wrapper exposes opt-in structured PKCS#11 telemetry through `IPkcs11OperationTelemetryListener`. On top of that listener model, the main `Pkcs11Wrapper` package also includes ready-made adapters for:
+
+- `ILogger` via `Pkcs11LoggerTelemetryListener`
+- `ActivitySource` / OpenTelemetry-style tracing via `Pkcs11ActivityTelemetryListener`
+- fan-out composition via `Pkcs11CompositeTelemetryListener` and `Pkcs11TelemetryListeners.Create(...)`
+
+Those adapters reuse the same redacted metadata emitted by the native telemetry layer, so credentials, payloads, and secret-bearing attributes stay masked/hashed/length-only.
+
 ## Documentation
 
 - Repository: https://github.com/EbubekirERGUN/Pkcs11Wrapper

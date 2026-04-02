@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Pkcs11Wrapper;
 using Pkcs11Wrapper.Native;
 using Pkcs11Wrapper.Native.Interop;
@@ -33,6 +35,13 @@ public sealed class ManagedApiSurfaceTests
         Assert.NotNull(typeof(Pkcs11Module).GetProperty(nameof(Pkcs11Module.TelemetryListener)));
         Assert.NotNull(typeof(Pkcs11NativeModule).GetProperty(nameof(Pkcs11NativeModule.TelemetryListener)));
         Assert.NotNull(typeof(IPkcs11OperationTelemetryListener).GetMethod(nameof(IPkcs11OperationTelemetryListener.OnOperationCompleted)));
+        Assert.NotNull(typeof(Pkcs11CompositeTelemetryListener).GetConstructor([typeof(IPkcs11OperationTelemetryListener[])]));
+        Assert.NotNull(typeof(Pkcs11LoggerTelemetryListener).GetConstructor([typeof(ILogger)]));
+        Assert.NotNull(typeof(Pkcs11LoggerTelemetryListener).GetConstructor([typeof(ILogger), typeof(Pkcs11LoggerTelemetryOptions)]));
+        Assert.NotNull(typeof(Pkcs11ActivityTelemetryListener).GetConstructor([typeof(ActivitySource)]));
+        Assert.NotNull(typeof(Pkcs11ActivityTelemetryListener).GetConstructor([typeof(ActivitySource), typeof(Pkcs11ActivityTelemetryOptions)]));
+        Assert.NotNull(typeof(Pkcs11TelemetryListeners).GetMethod(nameof(Pkcs11TelemetryListeners.Combine), [typeof(IPkcs11OperationTelemetryListener[])]));
+        Assert.NotNull(typeof(Pkcs11TelemetryListeners).GetMethod(nameof(Pkcs11TelemetryListeners.Create), [typeof(ILogger), typeof(ActivitySource), typeof(Pkcs11LoggerTelemetryOptions), typeof(Pkcs11ActivityTelemetryOptions)]));
 
         Pkcs11OperationTelemetryField field = new(
             Name: "credential.pin",

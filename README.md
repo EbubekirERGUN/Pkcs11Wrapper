@@ -130,6 +130,31 @@ module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperating
 
 You can also swap the listener at runtime through `Pkcs11Module.TelemetryListener`.
 
+Built-in opt-in adapters let you project the same redacted event stream into `ILogger` and `ActivitySource` / OpenTelemetry-style tracing without coupling the PKCS#11 call path to a specific logging stack:
+
+```csharp
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Pkcs11Wrapper;
+
+using ILoggerFactory loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+ILogger logger = loggerFactory.CreateLogger("Pkcs11");
+using ActivitySource activitySource = new("MyCompany.Security.Pkcs11");
+
+IPkcs11OperationTelemetryListener? telemetry = Pkcs11TelemetryListeners.Create(
+    logger: logger,
+    activitySource: activitySource);
+
+using Pkcs11Module module = Pkcs11Module.Load("/path/to/pkcs11/module", telemetry);
+module.Initialize();
+```
+
+- `Pkcs11LoggerTelemetryListener` maps success / returned-false / failure outcomes to `Information` / `Warning` / `Error` by default and emits structured scope properties for slot, session, mechanism, return value, and redacted fields.
+- `Pkcs11ActivityTelemetryListener` creates short-lived internal activities (`pkcs11.{OperationName}` by default), attaches the same redacted metadata as tags, and records failures as errored activities with an exception event when applicable.
+- `Pkcs11CompositeTelemetryListener` and `Pkcs11TelemetryListeners.Combine/Create(...)` let you fan out to multiple sinks while keeping the core wrapper telemetry listener model unchanged.
+
+See [docs/telemetry-integrations.md](docs/telemetry-integrations.md) for detailed examples and the emitted scope/tag shape.
+
 ### 2) Run the admin panel
 
 ```bash
@@ -233,6 +258,8 @@ Current capabilities include:
 - [docs/luna-compatibility-audit.md](docs/luna-compatibility-audit.md) - public-doc audit of Thales Luna standard compatibility vs current wrapper/admin/runtime scope
 - [docs/luna-vendor-extension-design.md](docs/luna-vendor-extension-design.md) - proposed package/boundary/loading/test strategy for future Luna-only `CA_*` support
 - [docs/smoke.md](docs/smoke.md) - smoke sample behavior and troubleshooting
+- [docs/telemetry-redaction.md](docs/telemetry-redaction.md) - PKCS#11 telemetry redaction policy
+- [docs/telemetry-integrations.md](docs/telemetry-integrations.md) - `ILogger` and `ActivitySource` / OpenTelemetry integration guidance
 - [docs/release.md](docs/release.md) - release checklist and packaging discipline
 - [docs/versioning.md](docs/versioning.md) - centralized versioning model and tag strategy
 - [docs/admin-panel-roadmap.md](docs/admin-panel-roadmap.md) - admin panel roadmap
