@@ -120,6 +120,28 @@ internal static class DeviceVendorProfileCatalog
                     DeviceVendorHintTone.Boundary)
             ]),
         new(
+            "azure-cloud-hsm-standard",
+            "Azure Cloud HSM / standard PKCS#11",
+            "azure",
+            "Azure",
+            "cloud-hsm-standard",
+            "Cloud HSM / standard PKCS#11",
+            "Use this when the device profile points at Azure Cloud HSM through Microsoft's direct SDK/client PKCS#11 library. The practical fit is direct PKCS#11 on a prepared Azure host runtime, not Azure Managed HSM or broader Key Vault control-plane workflows.",
+            [
+                new DeviceVendorHint(
+                    "Run the admin app where the Azure SDK, config, and client service already exist",
+                    "Point the profile at the exact Azure PKCS#11 library path visible to the running host/container and make sure the same runtime already has azcloudhsm_client, azcloudhsm_resource.cfg, azcloudhsm_application.cfg, and PO.crt in place before relying on the app operationally.",
+                    DeviceVendorHintTone.Info),
+                new DeviceVendorHint(
+                    "Expect direct Cloud HSM login/runtime semantics rather than Key Vault semantics",
+                    "Azure Cloud HSM documents C_Login credentials in the form username:password and supports password-based authentication only. It also documents shared host-side client-session behavior, so operators should avoid assuming Azure utilities and the admin app can hold independent sessions on the same machine without coordination.",
+                    DeviceVendorHintTone.Warning),
+                new DeviceVendorHint(
+                    "Keep Managed HSM and Azure control-plane work outside this UI",
+                    "This profile is only for Azure Cloud HSM as a standard PKCS#11 module. Managed HSM / Key Vault APIs, private-endpoint provisioning, SSH/onboarding steps, CO/CU administration, backup/restore, and broader Azure service-encryption workflows remain outside the current admin surface.",
+                    DeviceVendorHintTone.Boundary)
+            ]),
+        new(
             "ibm-cloud-hpcs-standard",
             "IBM Cloud HPCS / EP11 PKCS#11",
             "ibm",

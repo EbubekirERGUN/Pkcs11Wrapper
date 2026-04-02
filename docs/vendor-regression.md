@@ -3,6 +3,7 @@
 See also: `docs/luna-integration.md` for the practical Luna client/module setup path across wrapper, admin panel, smoke, and vendor regression.
 See also: `docs/luna-compatibility-audit.md` for the current Thales Luna-specific scope boundary and extension-gap audit.
 See also: `docs/cloudhsm-integration.md` and `docs/cloudhsm-compatibility-audit.md` for the current AWS CloudHSM support boundary.
+See also: `docs/azure-cloud-hsm-integration.md` and `docs/azure-cloud-hsm-compatibility-audit.md` for the current Azure Cloud HSM support boundary.
 See also: `docs/google-cloud-hsm-integration.md` and `docs/google-cloud-hsm-compatibility-audit.md` for the current Google Cloud HSM / kmsp11 support boundary.
 See also: `docs/ibm-cloud-hpcs-integration.md` and `docs/ibm-cloud-hpcs-compatibility-audit.md` for the current IBM Cloud Hyper Protect Crypto Services support boundary.
 See also: `docs/oci-dedicated-kms-integration.md` and `docs/oci-dedicated-kms-compatibility-audit.md` for the current Oracle OCI Dedicated KMS support boundary.
@@ -161,6 +162,28 @@ So the current CloudHSM support slice is:
 - strong documentation
 - admin-panel readiness improvements
 - explicit wrapper/admin setup guidance
+
+rather than a premature vendor-lane profile that would overstate validation depth.
+
+## Why there is not yet a checked-in Azure Cloud HSM profile
+
+See also: `docs/azure-cloud-hsm-integration.md` and `docs/azure-cloud-hsm-compatibility-audit.md`.
+
+Azure Cloud HSM is now a documented target for the repo, but there is intentionally **no** checked-in `azure-*` vendor-regression profile yet.
+
+Reason:
+
+- the direct PKCS#11 path depends on a prepared Azure host runtime that includes `azcloudhsm_client`, `azcloudhsm_resource.cfg`, `azcloudhsm_application.cfg`, `PO.crt`, and private-network reachability to the cluster
+- Azure's reviewed public docs publish a broad standard PKCS#11 function table, but honest end-to-end validation still requires a live Azure Cloud HSM environment that was not available during issue #70
+- Azure documents shared host-side client-session behavior, so a naive checked-in profile could mislead operators into expecting isolated local/CI semantics that are not guaranteed on a shared host
+- Azure's Cloud-HSM-vs-Managed-HSM product boundary matters, and a checked-in vendor profile should not blur that by implying Azure Key Vault Managed HSM or broader Azure service-encryption scenarios are already covered by the current PKCS#11 lane
+- the current generic vendor lane does not provision Azure networking, onboarding, SSH/bootstrap, or user synchronization state, so a checked-in profile would overstate operational maturity
+
+So the current Azure support slice is:
+
+- strong documentation
+- admin-panel vendor-profile guidance
+- explicit Azure Cloud HSM vs Azure Managed HSM boundary clarification
 
 rather than a premature vendor-lane profile that would overstate validation depth.
 
