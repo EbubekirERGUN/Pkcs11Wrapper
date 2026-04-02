@@ -132,23 +132,24 @@ Depoda artık performans işlerini tahminle değil ölçümle takip etmek için 
 - managed template/provisioning helper'ları
 - module lifecycle + mechanism discovery
 - session open/login/info akışları
-- object lookup, attribute read, create/update/destroy
+- object lookup, büyük slot page browse, attribute read, create/update/destroy
 - AES key generate ve RSA keypair generate
 - random, digest, encrypt, decrypt, sign, verify
 
 Güncel commitlenmiş Linux + SoftHSM baseline (`docs/benchmarks/latest-linux-softhsm.md`):
 
-- Yayınlanan benchmark tarihi (UTC): **2026-03-31 10:57**
+- Yayınlanan benchmark tarihi (UTC): **2026-04-02 10:17**
 - Benchmark ortamı: **Arch Linux + SoftHSM + .NET SDK 10.0.201 / Runtime 10.0.5**
 
 | Benchmark | Baseline |
 | --- | ---: |
-| `LoadInitializeGetInfoFinalizeDispose` | `1.904 μs` |
-| `OpenReadOnlySessionAndGetInfo` | `232.799 ns` |
-| `GenerateRandom32` | `149.407 ns` |
-| `EncryptAesCbcPad_1KiB` | `6.249 μs` |
-| `VerifySha256RsaPkcs_1KiB` | `19.652 μs` |
-| `GenerateDestroyRsaKeyPair` | `26.19 ms` |
+| `LoadInitializeGetInfoFinalizeDispose` | `1.934 μs` |
+| `OpenReadOnlySessionAndGetInfo` | `8.036 μs` |
+| `GenerateRandom32` | `149.094 ns` |
+| `EncryptAesCbcPad_1KiB` | `6.352 μs` |
+| `VerifySha256RsaPkcs_1KiB` | `19.607 μs` |
+| `BrowseFirstDataObjectPage64Of256` | `49.451 μs` |
+| `GenerateDestroyRsaKeyPair` | `25.145 ms` |
 
 Detaylı benchmark rehberi ve tekrar çalıştırma akışı:
 

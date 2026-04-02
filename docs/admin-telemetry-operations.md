@@ -44,6 +44,8 @@ Retention is enforced during read/write lifecycle operations:
 
 Because rotation + pruning happen inside the telemetry store, storage growth stays bounded even if the viewer/export surface is never opened manually.
 
+Recent-window reads now stream retained JSONL files line-by-line and keep only the requested tail window in memory, so opening the telemetry view no longer requires materializing every retained line when the archive set grows.
+
 ## Configuration
 
 Configure the lifecycle policy under `AdminTelemetry`:

@@ -251,6 +251,13 @@ public sealed class ManagedApiSurfaceTests
     }
 
     [Fact]
+    public void ObjectVisitApiRemainsAvailableForStreamingSearches()
+    {
+        Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.VisitObjects), [typeof(Pkcs11ObjectSearchParameters), typeof(Func<Pkcs11ObjectHandle, bool>), typeof(int)]));
+        Assert.Equal(typeof(void), typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.VisitObjects), [typeof(Pkcs11ObjectSearchParameters), typeof(Func<Pkcs11ObjectHandle, bool>), typeof(int)])!.ReturnType);
+    }
+
+    [Fact]
     public void Phase10DigestAndRandomApisRemainSpanFirst()
     {
         Assert.NotNull(typeof(Pkcs11Session).GetMethod(nameof(Pkcs11Session.GetDigestOutputLength), [typeof(Pkcs11Mechanism), typeof(ReadOnlySpan<byte>)]));

@@ -18,7 +18,7 @@ The suite covers the operation families that matter most in this repository:
 - managed provisioning-template helpers
 - module lifecycle and mechanism discovery
 - session open / login / info paths, including concurrent session-info bursts that expose lock contention in hot wrapper validation
-- object search and attribute reads
+- object search, large-slot page browsing, and attribute reads
 - object create / update / destroy flows
 - AES key generation and RSA keypair generation
 - random generation, digest, encrypt, decrypt, sign, verify

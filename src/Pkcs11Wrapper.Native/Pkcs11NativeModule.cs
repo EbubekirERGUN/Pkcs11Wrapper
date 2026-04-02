@@ -1011,6 +1011,95 @@ public sealed unsafe class Pkcs11NativeModule : IDisposable
         }
     }
 
+    public void VisitObjects(CK_SESSION_HANDLE sessionHandle, ReadOnlySpan<CK_ATTRIBUTE> template, Func<CK_OBJECT_HANDLE, bool> visitor, int batchSize = 64)
+    {
+        ArgumentNullException.ThrowIfNull(visitor);
+        if (batchSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(batchSize), batchSize, "Batch size must be greater than zero.");
+        }
+
+        Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(VisitObjects), "C_FindObjects", sessionHandle: sessionHandle);
+        if (telemetry.IsEnabled)
+        {
+            telemetry.AddFields(Pkcs11TelemetryRedaction.Template("searchTemplate", template));
+            telemetry.AddField(Pkcs11TelemetryRedaction.Safe("search.batchSize", batchSize));
+        }
+
+        EnsureInitialized();
+
+        EnsureFunctionAvailable((void*)FunctionList->C_FindObjectsInit, "C_FindObjectsInit");
+        EnsureFunctionAvailable((void*)FunctionList->C_FindObjects, "C_FindObjects");
+        EnsureFunctionAvailable((void*)FunctionList->C_FindObjectsFinal, "C_FindObjectsFinal");
+
+        CK_OBJECT_HANDLE[] buffer = ArrayPool<CK_OBJECT_HANDLE>.Shared.Rent(batchSize);
+        bool searchInitialized = false;
+        int visited = 0;
+        bool stoppedEarly = false;
+
+        try
+        {
+            fixed (CK_ATTRIBUTE* templatePointer = template)
+            {
+                CK_RV initResult = FunctionList->C_FindObjectsInit(sessionHandle, templatePointer, (CK_ULONG)(nuint)template.Length);
+                ThrowIfFailed(initResult, "C_FindObjectsInit");
+            }
+
+            searchInitialized = true;
+
+            while (true)
+            {
+                CK_ULONG objectCount = (CK_ULONG)(nuint)batchSize;
+                CK_RV result;
+                fixed (CK_OBJECT_HANDLE* bufferPointer = buffer)
+                {
+                    result = FunctionList->C_FindObjects(sessionHandle, bufferPointer, objectCount, &objectCount);
+                }
+
+                ThrowIfFailed(result, "C_FindObjects");
+                int written = ToInt32Checked(objectCount, "object count");
+                if (written == 0)
+                {
+                    break;
+                }
+
+                for (int i = 0; i < written; i++)
+                {
+                    visited++;
+                    if (!visitor(buffer[i]))
+                    {
+                        stoppedEarly = true;
+                        goto Completed;
+                    }
+                }
+            }
+
+        Completed:
+            if (telemetry.IsEnabled)
+            {
+                telemetry.AddField(Pkcs11TelemetryRedaction.Safe("search.visitedCount", visited));
+                telemetry.AddField(Pkcs11TelemetryRedaction.Safe("search.stoppedEarly", stoppedEarly));
+            }
+
+            telemetry.Succeeded(CK_RV.Ok);
+        }
+        catch (Exception ex)
+        {
+            telemetry.Failed(ex);
+            throw;
+        }
+        finally
+        {
+            ArrayPool<CK_OBJECT_HANDLE>.Shared.Return(buffer);
+
+            if (searchInitialized)
+            {
+                CK_RV finalResult = FunctionList->C_FindObjectsFinal(sessionHandle);
+                ThrowIfFailed(finalResult, "C_FindObjectsFinal");
+            }
+        }
+    }
+
     public Pkcs11NativeAttributeQuery QueryAttributeValue(CK_SESSION_HANDLE sessionHandle, CK_OBJECT_HANDLE objectHandle, CK_ATTRIBUTE_TYPE attributeType)
     {
         Pkcs11OperationTelemetryScope telemetry = BeginTelemetry(nameof(QueryAttributeValue), "C_GetAttributeValue", sessionHandle: sessionHandle);

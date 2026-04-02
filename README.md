@@ -207,23 +207,24 @@ Current benchmark coverage includes:
 - managed template/provisioning helpers
 - module lifecycle + mechanism discovery
 - session open/login/info paths
-- object lookup, attribute reads, create/update/destroy
+- object lookup, large-slot page browse, attribute reads, create/update/destroy
 - AES key generation and RSA keypair generation
 - random, digest, encrypt, decrypt, sign, verify
 
 Latest committed Linux + SoftHSM baseline (`docs/benchmarks/latest-linux-softhsm.md`):
 
-- Published benchmark date (UTC): **2026-04-01 17:24**
+- Published benchmark date (UTC): **2026-04-02 10:17**
 - Benchmark environment: **Arch Linux + SoftHSM + .NET SDK 10.0.201 / Runtime 10.0.5**
 
 | Benchmark | Baseline |
 | --- | ---: |
-| `LoadInitializeGetInfoFinalizeDispose` | `1.933 μs` |
-| `OpenReadOnlySessionAndGetInfo` | `235.345 ns` |
-| `GenerateRandom32` | `149.717 ns` |
-| `EncryptAesCbcPad_1KiB` | `6.723 μs` |
-| `VerifySha256RsaPkcs_1KiB` | `19.744 μs` |
-| `GenerateDestroyRsaKeyPair` | `23.579 ms` |
+| `LoadInitializeGetInfoFinalizeDispose` | `1.934 μs` |
+| `OpenReadOnlySessionAndGetInfo` | `8.036 μs` |
+| `GenerateRandom32` | `149.094 ns` |
+| `EncryptAesCbcPad_1KiB` | `6.352 μs` |
+| `VerifySha256RsaPkcs_1KiB` | `19.607 μs` |
+| `BrowseFirstDataObjectPage64Of256` | `49.451 μs` |
+| `GenerateDestroyRsaKeyPair` | `25.145 ms` |
 
 Automated GitHub benchmark runs now publish a GitHub-friendly report per run with:
 

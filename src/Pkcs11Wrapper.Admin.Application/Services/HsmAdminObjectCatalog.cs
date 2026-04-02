@@ -110,43 +110,39 @@ internal static class HsmAdminObjectCatalog
     public static List<Pkcs11ObjectHandle> EnumerateObjectHandles(Pkcs11Session session, Pkcs11ObjectSearchParameters search)
     {
         List<Pkcs11ObjectHandle> results = [];
-        Pkcs11ObjectHandle[] buffer = new Pkcs11ObjectHandle[64];
-        bool hasMore;
-        do
+        session.VisitObjects(search, handle =>
         {
-            session.TryFindObjects(search, buffer, out int written, out hasMore);
-            for (int i = 0; i < written; i++)
-            {
-                results.Add(buffer[i]);
-            }
-        }
-        while (hasMore);
+            results.Add(handle);
+            return true;
+        });
 
         return results;
     }
 
     public static List<Pkcs11ObjectHandle> EnumerateObjectHandles(Pkcs11Session session, Pkcs11ObjectSearchParameters search, int maxCount, out bool truncated)
     {
-        List<Pkcs11ObjectHandle> results = [];
-        Pkcs11ObjectHandle[] buffer = new Pkcs11ObjectHandle[Math.Min(Math.Max(maxCount, 1), 64)];
-        bool hasMore;
-        truncated = false;
-
-        do
+        if (maxCount <= 0)
         {
-            session.TryFindObjects(search, buffer, out int written, out hasMore);
-            for (int i = 0; i < written; i++)
-            {
-                results.Add(buffer[i]);
-                if (results.Count >= maxCount)
-                {
-                    truncated = hasMore || i + 1 < written;
-                    return results;
-                }
-            }
+            truncated = false;
+            return [];
         }
-        while (hasMore);
 
+        List<Pkcs11ObjectHandle> results = [];
+        bool wasTruncated = false;
+        session.VisitObjects(search, handle =>
+        {
+            results.Add(handle);
+            if (results.Count <= maxCount)
+            {
+                return true;
+            }
+
+            results.RemoveAt(results.Count - 1);
+            wasTruncated = true;
+            return false;
+        });
+
+        truncated = wasTruncated;
         return results;
     }
 

@@ -378,6 +378,91 @@ public sealed class Pkcs11Module : IDisposable
         }
     }
 
+    internal unsafe void VisitObjects(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectSearchParameters search, Func<Pkcs11ObjectHandle, bool> visitor, int batchSize)
+    {
+        EnsureSessionIsUsable(generation, slotId, slotGeneration);
+        ArgumentNullException.ThrowIfNull(visitor);
+
+        Span<CK_ATTRIBUTE> template = stackalloc CK_ATTRIBUTE[10];
+        int attributeCount = 0;
+        CK_OBJECT_CLASS objectClass = default;
+        CK_KEY_TYPE keyType = default;
+        CK_BBOOL requireEncrypt = default;
+        CK_BBOOL requireDecrypt = default;
+        CK_BBOOL requireSign = default;
+        CK_BBOOL requireVerify = default;
+        CK_BBOOL requireWrap = default;
+        CK_BBOOL requireUnwrap = default;
+
+        fixed (byte* labelPointer = search.Label)
+        fixed (byte* idPointer = search.Id)
+        {
+            if (!search.Label.IsEmpty)
+            {
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Label.NativeValue, labelPointer, search.Label.Length);
+            }
+
+            if (!search.Id.IsEmpty)
+            {
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Id.NativeValue, idPointer, search.Id.Length);
+            }
+
+            if (search.ObjectClass is Pkcs11ObjectClass searchObjectClass)
+            {
+                objectClass = searchObjectClass.NativeValue;
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Class.NativeValue, &objectClass, sizeof(CK_OBJECT_CLASS));
+            }
+
+            if (search.KeyType is Pkcs11KeyType searchKeyType)
+            {
+                keyType = searchKeyType.NativeValue;
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.KeyType.NativeValue, &keyType, sizeof(CK_KEY_TYPE));
+            }
+
+            if (search.RequireEncrypt is bool canEncrypt)
+            {
+                requireEncrypt = canEncrypt ? CK_BBOOL.True : CK_BBOOL.False;
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Encrypt.NativeValue, &requireEncrypt, sizeof(CK_BBOOL));
+            }
+
+            if (search.RequireDecrypt is bool canDecrypt)
+            {
+                requireDecrypt = canDecrypt ? CK_BBOOL.True : CK_BBOOL.False;
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Decrypt.NativeValue, &requireDecrypt, sizeof(CK_BBOOL));
+            }
+
+            if (search.RequireSign is bool canSign)
+            {
+                requireSign = canSign ? CK_BBOOL.True : CK_BBOOL.False;
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Sign.NativeValue, &requireSign, sizeof(CK_BBOOL));
+            }
+
+            if (search.RequireVerify is bool canVerify)
+            {
+                requireVerify = canVerify ? CK_BBOOL.True : CK_BBOOL.False;
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Verify.NativeValue, &requireVerify, sizeof(CK_BBOOL));
+            }
+
+            if (search.RequireWrap is bool canWrap)
+            {
+                requireWrap = canWrap ? CK_BBOOL.True : CK_BBOOL.False;
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Wrap.NativeValue, &requireWrap, sizeof(CK_BBOOL));
+            }
+
+            if (search.RequireUnwrap is bool canUnwrap)
+            {
+                requireUnwrap = canUnwrap ? CK_BBOOL.True : CK_BBOOL.False;
+                template[attributeCount++] = CreateAttribute(Pkcs11AttributeTypes.Unwrap.NativeValue, &requireUnwrap, sizeof(CK_BBOOL));
+            }
+
+            _nativeModule.VisitObjects(
+                sessionHandle,
+                template[..attributeCount],
+                handle => visitor(new Pkcs11ObjectHandle(handle.Value)),
+                batchSize);
+        }
+    }
+
     internal Pkcs11AttributeReadResult GetAttributeValueInfo(CK_SESSION_HANDLE sessionHandle, int generation, Pkcs11SlotId slotId, int slotGeneration, Pkcs11ObjectHandle objectHandle, Pkcs11AttributeType attributeType)
     {
         EnsureSessionIsUsable(generation, slotId, slotGeneration);

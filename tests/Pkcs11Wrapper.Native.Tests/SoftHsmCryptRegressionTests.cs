@@ -1483,6 +1483,73 @@ public sealed class SoftHsmCryptRegressionTests
     }
 
     [Fact]
+    public void VisitObjectsStreamsLargeDataObjectSetsAcrossMultipleNativeReads()
+    {
+        string? modulePath = Environment.GetEnvironmentVariable("PKCS11_MODULE_PATH");
+        string? tokenLabel = Environment.GetEnvironmentVariable("PKCS11_TOKEN_LABEL");
+        string? userPin = Environment.GetEnvironmentVariable("PKCS11_USER_PIN");
+
+        if (string.IsNullOrWhiteSpace(modulePath) ||
+            string.IsNullOrWhiteSpace(tokenLabel) ||
+            string.IsNullOrWhiteSpace(userPin))
+        {
+            return;
+        }
+
+        using var module = Pkcs11Module.Load(modulePath);
+        module.Initialize();
+
+        Pkcs11SlotId slotId = FindSlotByTokenLabel(module, tokenLabel);
+        using Pkcs11Session session = module.OpenSession(slotId, readWrite: true);
+
+        byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin);
+        LoginUser(session, pinUtf8);
+
+        List<Pkcs11ObjectHandle> created = [];
+        try
+        {
+            byte[] application = Encoding.UTF8.GetBytes("phase51");
+            for (int i = 0; i < 130; i++)
+            {
+                byte[] label = Encoding.UTF8.GetBytes($"phase51-browse-{Guid.NewGuid():N}-{i:D3}");
+                byte[] value = [(byte)i, (byte)(i >> 8), 0x51];
+                created.Add(session.CreateObject(
+                [
+                    Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.Data),
+                    Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Token, false),
+                    Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Private, false),
+                    Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Modifiable, true),
+                    Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, label),
+                    Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Application, application),
+                    Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Value, value)
+                ]));
+            }
+
+            HashSet<nuint> seen = [];
+            session.VisitObjects(
+                new Pkcs11ObjectSearchParameters(objectClass: Pkcs11ObjectClasses.Data),
+                handle =>
+                {
+                    seen.Add(handle.Value);
+                    return true;
+                },
+                batchSize: 32);
+
+            Assert.True(created.All(handle => seen.Contains(handle.Value)));
+            Assert.True(seen.Count >= created.Count);
+        }
+        finally
+        {
+            for (int i = created.Count - 1; i >= 0; i--)
+            {
+                TryDestroyObject(session, created[i]);
+            }
+
+            session.Logout();
+        }
+    }
+
+    [Fact]
     public void CopyObjectClonesDataObjectWithTemplateOverrides()
     {
         if (!TryCreateGenerateContext(out GenerateContext? context))
