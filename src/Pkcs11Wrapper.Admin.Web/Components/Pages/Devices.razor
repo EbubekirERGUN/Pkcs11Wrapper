@@ -9,11 +9,12 @@
     <div class="page-hero-copy">
         <div class="page-eyebrow">Device inventory</div>
         <h1>HSM Devices</h1>
-        <p class="page-lead">PKCS#11 module path'lerini tanımla, bağlantı testi yap ve admin panelinin hangi cihazlara erişeceğini yönet. Hedef burada sadece CRUD değil; cihaz envanterini okunaklı, güven veren ve operatörün hızlı karar verebileceği bir yüzeyde sunmak.</p>
+        <p class="page-lead">PKCS#11 module path'lerini tanımla, bağlantı testi yap ve admin panelinin hangi cihazlara erişeceğini yönet. Bu yüzey artık vendor metadata/profile seçimini de taşıyor; böylece operatör, standart PKCS#11 sınırını korurken cihazın vendor'a özgü kurulum caveat'larını da aynı yerden görebiliyor.</p>
         <div class="page-hero-tags">
             <span class="page-tag">Profile catalog</span>
             <span class="page-tag">Connection testing</span>
             <span class="page-tag">Operational filtering</span>
+            <span class="page-tag">Vendor-aware hints</span>
             @if (_isAdmin)
             {
                 <span class="page-tag">Admin-managed changes</span>
@@ -24,7 +25,7 @@
         <div class="hero-panel">
             <div class="hero-panel-title">Change authority</div>
             <div class="hero-panel-value">@(_isAdmin ? "Admin write access" : "Read / test only")</div>
-            <div class="hero-panel-copy">Only admin accounts can create, edit, or delete profiles; operators focus on inspection and connection verification.</div>
+            <div class="hero-panel-copy">Only admin accounts can create, edit, or delete profiles; operators focus on inspection, connection verification, and reading the attached vendor guidance.</div>
         </div>
         <div class="hero-panel">
             <div class="hero-panel-title">Primary outcome</div>
@@ -61,8 +62,9 @@
         <div class="col-xl-3 col-md-6">
             <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="metric-label">Disabled devices</div>
-                    <div class="display-6 metric-meta">@_devices.Count(device => !device.IsEnabled)</div>
+                    <div class="metric-label">Vendor-tagged profiles</div>
+                    <div class="display-6 metric-meta">@_devices.Count(device => device.Vendor is not null)</div>
+                    <div class="small metric-note">Generic profiles still work without vendor selection.</div>
                 </div>
             </div>
         </div>
@@ -80,7 +82,7 @@
 
 <div class="row g-4">
     <div class="col-lg-4">
-        <div class="card shadow-sm feature-card">
+        <div class="card shadow-sm feature-card mb-4">
             <div class="card-header">@(_editingId is null ? "Add Device" : "Edit Device")</div>
             <div class="card-body">
                 <EditForm Model="_input" OnValidSubmit="SaveAsync">
@@ -100,6 +102,41 @@
                         <InputText class="form-control" @bind-Value="_input.DefaultTokenLabel" data-testid="device-token-label" />
                     </div>
                     <div class="mb-3">
+                        <label class="form-label">Vendor profile</label>
+                        <select class="form-select" @bind="_vendorSelection" @bind:after="OnVendorSelectionChanged" data-testid="device-vendor-profile">
+                            <option value="@DeviceVendorProfileCatalog.VendorNeutralSelectionId">Vendor-neutral / generic</option>
+                            @foreach (DeviceVendorProfileDefinition profile in DeviceVendorProfileCatalog.Profiles)
+                            {
+                                <option value="@profile.SelectionId">@profile.DisplayName</option>
+                            }
+                            <option value="@DeviceVendorProfileCatalog.CustomSelectionId">Custom vendor metadata</option>
+                        </select>
+                        <div class="form-text">Optional. Use a built-in profile for reusable hints, or keep the profile generic when you only want standard PKCS#11 behavior.</div>
+                    </div>
+
+                    @if (SelectedCatalogProfile is not null)
+                    {
+                        <div class="surface-item mb-3">
+                            <div class="fw-semibold">@SelectedCatalogProfile.DisplayName</div>
+                            <div class="small text-muted mt-1">@SelectedCatalogProfile.Summary</div>
+                        </div>
+                    }
+                    else if (_vendorSelection == DeviceVendorProfileCatalog.CustomSelectionId)
+                    {
+                        <div class="row g-3 mb-3">
+                            <div class="col-12">
+                                <label class="form-label">Vendor name</label>
+                                <InputText class="form-control" @bind-Value="_input.VendorName" data-testid="device-vendor-name" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Vendor profile label</label>
+                                <InputText class="form-control" @bind-Value="_input.VendorProfileName" data-testid="device-vendor-profile-name" />
+                                <div class="form-text">Optional label such as client family, module wrapper, or standard PKCS#11 track for this vendor.</div>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="mb-3">
                         <label class="form-label">Notes</label>
                         <InputTextArea class="form-control" @bind-Value="_input.Notes" data-testid="device-notes" />
                     </div>
@@ -118,6 +155,8 @@
                 </EditForm>
             </div>
         </div>
+
+        <DeviceVendorHintsPanel Vendor="VendorPreview" Heading="Selected profile guidance" ShowWhenVendorNeutral="true" />
     </div>
 
     <div class="col-lg-8">
@@ -129,7 +168,7 @@
             <div class="card-body border-bottom row g-3 align-items-end">
                 <div class="col-lg-5">
                     <label class="form-label">Search</label>
-                    <input class="form-control" @bind="_searchText" @bind:event="oninput" placeholder="name, path, token, notes..." />
+                    <input class="form-control" @bind="_searchText" @bind:event="oninput" placeholder="name, path, token, vendor, notes..." />
                 </div>
                 <div class="col-lg-3 col-md-6">
                     <label class="form-label">Status</label>
@@ -168,6 +207,7 @@
                                     <th>Name</th>
                                     <th>Module Path</th>
                                     <th>Token</th>
+                                    <th>Vendor</th>
                                     <th>Status</th>
                                     <th>Updated</th>
                                     <th class="text-end">Actions</th>
@@ -179,10 +219,29 @@
                                     <tr class="@(_editingId == device.Id ? "table-active" : null)">
                                         <td>
                                             <div class="fw-semibold">@device.Name</div>
-                                            <div class="small text-muted">@device.Notes</div>
+                                            @if (!string.IsNullOrWhiteSpace(device.Notes))
+                                            {
+                                                <div class="small text-muted">@device.Notes</div>
+                                            }
                                         </td>
                                         <td><code>@device.ModulePath</code></td>
                                         <td>@(string.IsNullOrWhiteSpace(device.DefaultTokenLabel) ? "—" : device.DefaultTokenLabel)</td>
+                                        <td>
+                                            @if (device.Vendor is null)
+                                            {
+                                                <span class="small text-muted">Generic</span>
+                                            }
+                                            else
+                                            {
+                                                <div class="d-flex flex-wrap gap-2">
+                                                    <span class="table-pill">@device.Vendor.VendorName</span>
+                                                    @if (!string.IsNullOrWhiteSpace(device.Vendor.ProfileName))
+                                                    {
+                                                        <span class="table-pill">@device.Vendor.ProfileName</span>
+                                                    }
+                                                </div>
+                                            }
+                                        </td>
                                         <td>
                                             @if (device.IsEnabled)
                                             {
@@ -223,8 +282,11 @@
     private string _searchText = string.Empty;
     private string _statusFilter = "all";
     private string _sortMode = "name";
+    private string _vendorSelection = DeviceVendorProfileCatalog.VendorNeutralSelectionId;
 
     private IReadOnlyList<HsmDeviceProfile> FilteredDevices => ApplyOrdering(_devices.Where(MatchesFilters)).ToArray();
+    private DeviceVendorProfileDefinition? SelectedCatalogProfile => DeviceVendorProfileCatalog.FindBySelectionId(_vendorSelection);
+    private HsmDeviceVendorMetadata? VendorPreview => BuildVendorPreview();
 
     protected override async Task OnInitializedAsync()
     {
@@ -273,6 +335,11 @@
         _input.DefaultTokenLabel = device.DefaultTokenLabel;
         _input.Notes = device.Notes;
         _input.IsEnabled = device.IsEnabled;
+        _input.VendorId = device.Vendor?.VendorId;
+        _input.VendorName = device.Vendor?.VendorName;
+        _input.VendorProfileId = device.Vendor?.ProfileId;
+        _input.VendorProfileName = device.Vendor?.ProfileName;
+        _vendorSelection = DeviceVendorProfileCatalog.GetSelectionId(device.Vendor);
     }
 
     private void ResetForm()
@@ -283,28 +350,75 @@
         _input.DefaultTokenLabel = string.Empty;
         _input.Notes = string.Empty;
         _input.IsEnabled = true;
+        ClearVendorMetadata();
+        _vendorSelection = DeviceVendorProfileCatalog.VendorNeutralSelectionId;
+    }
+
+    private void OnVendorSelectionChanged()
+    {
+        if (_vendorSelection == DeviceVendorProfileCatalog.VendorNeutralSelectionId)
+        {
+            ClearVendorMetadata();
+            return;
+        }
+
+        if (_vendorSelection == DeviceVendorProfileCatalog.CustomSelectionId)
+        {
+            _input.VendorName ??= string.Empty;
+            _input.VendorProfileName ??= string.Empty;
+            _input.VendorId ??= string.Empty;
+            _input.VendorProfileId ??= string.Empty;
+            return;
+        }
+
+        DeviceVendorProfileDefinition? profile = SelectedCatalogProfile;
+        if (profile is null)
+        {
+            return;
+        }
+
+        _input.VendorId = profile.VendorId;
+        _input.VendorName = profile.VendorName;
+        _input.VendorProfileId = profile.ProfileId;
+        _input.VendorProfileName = profile.ProfileName;
     }
 
     private async Task TestAsync(Guid id)
     {
-        HsmConnectionTestResult result = await Admin.TestConnectionAsync(id);
-        _statusMessage = result.Success
-            ? $"{result.Message} Manufacturer={result.ManufacturerId}, Library={result.LibraryDescription}, InterfaceDiscovery={result.SupportsInterfaceDiscovery}."
-            : $"Connection test failed: {result.Message}";
-        _statusIsError = !result.Success;
+        try
+        {
+            HsmConnectionTestResult result = await Admin.TestConnectionAsync(id);
+            _statusMessage = result.Success
+                ? $"{result.Message} Manufacturer={result.ManufacturerId}, Library={result.LibraryDescription}, InterfaceDiscovery={result.SupportsInterfaceDiscovery}."
+                : $"Connection test failed: {result.Message}";
+            _statusIsError = !result.Success;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
     }
 
     private async Task DeleteAsync(Guid id)
     {
-        await Admin.DeleteDeviceAsync(id);
-        _statusMessage = "Device deleted.";
-        _statusIsError = false;
-        if (_editingId == id)
+        try
         {
-            ResetForm();
-        }
+            await Admin.DeleteDeviceAsync(id);
+            _statusMessage = "Device deleted.";
+            _statusIsError = false;
+            if (_editingId == id)
+            {
+                ResetForm();
+            }
 
-        await LoadAsync();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
     }
 
     private bool MatchesFilters(HsmDeviceProfile device)
@@ -315,7 +429,9 @@
             bool matchesSearch = Contains(device.Name, term)
                 || Contains(device.ModulePath, term)
                 || Contains(device.DefaultTokenLabel, term)
-                || Contains(device.Notes, term);
+                || Contains(device.Notes, term)
+                || Contains(device.Vendor?.VendorName, term)
+                || Contains(device.Vendor?.ProfileName, term);
             if (!matchesSearch)
             {
                 return false;
@@ -338,6 +454,71 @@
             "enabled" => devices.OrderByDescending(device => device.IsEnabled).ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase),
             _ => devices.OrderBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
         };
+
+    private HsmDeviceVendorMetadata? BuildVendorPreview()
+    {
+        string? vendorId = NormalizePreviewPart(_input.VendorId) ?? ToPreviewIdentifier(_input.VendorName);
+        string? vendorName = NormalizePreviewPart(_input.VendorName);
+        string? profileId = NormalizePreviewPart(_input.VendorProfileId) ?? ToPreviewIdentifier(_input.VendorProfileName);
+        string? profileName = NormalizePreviewPart(_input.VendorProfileName);
+
+        if (vendorId is null && vendorName is null && profileId is null && profileName is null)
+        {
+            return null;
+        }
+
+        vendorId ??= ToPreviewIdentifier(vendorName);
+        if (vendorId is null)
+        {
+            return null;
+        }
+
+        vendorName ??= vendorId;
+        profileName ??= profileId;
+        return new(vendorId, vendorName, profileId, profileName);
+    }
+
+    private void ClearVendorMetadata()
+    {
+        _input.VendorId = string.Empty;
+        _input.VendorName = string.Empty;
+        _input.VendorProfileId = string.Empty;
+        _input.VendorProfileName = string.Empty;
+    }
+
+    private static string? NormalizePreviewPart(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? ToPreviewIdentifier(string? value)
+    {
+        string? normalized = NormalizePreviewPart(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        System.Text.StringBuilder builder = new(normalized.Length);
+        bool pendingSeparator = false;
+        foreach (char character in normalized)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                if (pendingSeparator && builder.Length > 0)
+                {
+                    builder.Append('-');
+                }
+
+                builder.Append(char.ToLowerInvariant(character));
+                pendingSeparator = false;
+            }
+            else
+            {
+                pendingSeparator = builder.Length > 0;
+            }
+        }
+
+        return builder.Length == 0 ? null : builder.ToString();
+    }
 
     private static bool Contains(string? value, string term)
         => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;

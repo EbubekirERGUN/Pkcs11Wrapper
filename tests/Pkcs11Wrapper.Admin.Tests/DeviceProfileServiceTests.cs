@@ -40,6 +40,59 @@ public sealed class DeviceProfileServiceTests
     }
 
     [Fact]
+    public async Task UpsertAsyncStoresVendorMetadata()
+    {
+        InMemoryDeviceProfileStore store = new();
+        DeviceProfileService service = new(store);
+
+        HsmDeviceProfile created = await service.UpsertAsync(null, new HsmDeviceProfileInput
+        {
+            Name = "Vendor tagged",
+            ModulePath = "/usr/lib/libpkcs11.so",
+            VendorId = "Thales",
+            VendorName = "Thales",
+            VendorProfileId = "Luna Standard",
+            VendorProfileName = "Luna / standard PKCS#11"
+        });
+
+        Assert.NotNull(created.Vendor);
+        Assert.Equal("thales", created.Vendor!.VendorId);
+        Assert.Equal("Thales", created.Vendor.VendorName);
+        Assert.Equal("luna-standard", created.Vendor.ProfileId);
+        Assert.Equal("Luna / standard PKCS#11", created.Vendor.ProfileName);
+    }
+
+    [Fact]
+    public async Task ImportAsyncNormalizesVendorMetadataForCustomProfiles()
+    {
+        InMemoryDeviceProfileStore store = new();
+        DeviceProfileService service = new(store);
+
+        AdminConfigurationImportResult result = await service.ImportAsync(
+        [
+            new HsmDeviceProfile(
+                Guid.NewGuid(),
+                "Imported",
+                "/opt/vendor-pkcs11.so",
+                null,
+                null,
+                true,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                new HsmDeviceVendorMetadata("", "Future Vendor", null, "Client Wrapper A"))
+        ],
+        AdminConfigurationImportMode.Merge);
+
+        HsmDeviceProfile imported = Assert.Single(await service.GetAllAsync());
+        Assert.NotNull(imported.Vendor);
+        Assert.Equal("future-vendor", imported.Vendor!.VendorId);
+        Assert.Equal("Future Vendor", imported.Vendor.VendorName);
+        Assert.Equal("client-wrapper-a", imported.Vendor.ProfileId);
+        Assert.Equal("Client Wrapper A", imported.Vendor.ProfileName);
+        Assert.Equal(1, result.AddedDeviceProfileCount);
+    }
+
+    [Fact]
     public async Task UpsertAsyncRejectsMissingNameOrModulePath()
     {
         InMemoryDeviceProfileStore store = new();

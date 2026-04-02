@@ -1,3 +1,4 @@
+using System.Text;
 using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
 
@@ -20,6 +21,7 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
         string normalizedModulePath = ValidateModulePath(input.ModulePath);
         string? normalizedTokenLabel = Normalize(input.DefaultTokenLabel);
         string? normalizedNotes = Normalize(input.Notes);
+        HsmDeviceVendorMetadata? normalizedVendor = NormalizeVendorMetadata(input.VendorId, input.VendorName, input.VendorProfileId, input.VendorProfileName);
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
         EnsureUniqueName(devices, normalizedName, id);
@@ -40,7 +42,8 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
                 DefaultTokenLabel = normalizedTokenLabel,
                 Notes = normalizedNotes,
                 IsEnabled = input.IsEnabled,
-                UpdatedUtc = now
+                UpdatedUtc = now,
+                Vendor = normalizedVendor
             };
 
             devices[index] = updated;
@@ -56,7 +59,8 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
             normalizedNotes,
             input.IsEnabled,
             now,
-            now);
+            now,
+            normalizedVendor);
 
         devices.Add(created);
         await store.SaveAllAsync(devices, cancellationToken);
@@ -203,7 +207,8 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
             DefaultTokenLabel = Normalize(profile.DefaultTokenLabel),
             Notes = Normalize(profile.Notes),
             CreatedUtc = createdUtc,
-            UpdatedUtc = updatedUtc
+            UpdatedUtc = updatedUtc,
+            Vendor = NormalizeVendorMetadata(profile.Vendor)
         };
     }
 
@@ -223,6 +228,74 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
             {
                 throw new InvalidOperationException($"Imported configuration contains duplicate device name '{profile.Name}'.");
             }
+        }
+    }
+
+    private static HsmDeviceVendorMetadata? NormalizeVendorMetadata(HsmDeviceVendorMetadata? vendor)
+        => vendor is null ? null : NormalizeVendorMetadata(vendor.VendorId, vendor.VendorName, vendor.ProfileId, vendor.ProfileName);
+
+    private static HsmDeviceVendorMetadata? NormalizeVendorMetadata(string? vendorId, string? vendorName, string? profileId, string? profileName)
+    {
+        string? normalizedVendorId = NormalizeIdentifier(vendorId);
+        string? normalizedVendorName = Normalize(vendorName);
+        string? normalizedProfileId = NormalizeIdentifier(profileId);
+        string? normalizedProfileName = Normalize(profileName);
+
+        if (normalizedVendorId is null && normalizedVendorName is null && normalizedProfileId is null && normalizedProfileName is null)
+        {
+            return null;
+        }
+
+        normalizedVendorId ??= NormalizeIdentifier(normalizedVendorName)
+            ?? throw new ArgumentException("Vendor metadata requires a vendor id or vendor name.", nameof(vendorId));
+        normalizedVendorName ??= normalizedVendorId;
+        normalizedProfileId ??= NormalizeIdentifier(normalizedProfileName);
+        normalizedProfileName ??= normalizedProfileId;
+
+        ValidateOptionalLength(normalizedVendorId, 64, "Vendor id");
+        ValidateOptionalLength(normalizedVendorName, 128, "Vendor name");
+        ValidateOptionalLength(normalizedProfileId, 64, "Vendor profile id");
+        ValidateOptionalLength(normalizedProfileName, 128, "Vendor profile name");
+
+        return new(normalizedVendorId, normalizedVendorName, normalizedProfileId, normalizedProfileName);
+    }
+
+    private static string? NormalizeIdentifier(string? value)
+    {
+        string? normalized = Normalize(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        StringBuilder builder = new(normalized.Length);
+        bool pendingSeparator = false;
+        foreach (char character in normalized)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                if (pendingSeparator && builder.Length > 0)
+                {
+                    builder.Append('-');
+                }
+
+                builder.Append(char.ToLowerInvariant(character));
+                pendingSeparator = false;
+            }
+            else
+            {
+                pendingSeparator = builder.Length > 0;
+            }
+        }
+
+        return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    private static void ValidateOptionalLength(string? value, int maxLength, string description)
+    {
+        if (value is not null && value.Length > maxLength)
+        {
+            throw new ArgumentException($"{description} must be {maxLength} characters or fewer.", description);
         }
     }
 

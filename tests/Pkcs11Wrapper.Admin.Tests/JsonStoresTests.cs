@@ -13,13 +13,24 @@ public sealed class JsonStoresTests
         try
         {
             JsonDeviceProfileStore store = new(new AdminStorageOptions { DataRoot = root });
-            HsmDeviceProfile profile = new(Guid.NewGuid(), "Test", "/tmp/libpkcs11.so", "token", "notes", true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            HsmDeviceProfile profile = new(
+                Guid.NewGuid(),
+                "Test",
+                "/tmp/libpkcs11.so",
+                "token",
+                "notes",
+                true,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                new HsmDeviceVendorMetadata("thales", "Thales", "luna-standard", "Luna / standard PKCS#11"));
             await store.SaveAllAsync([profile]);
 
             IReadOnlyList<HsmDeviceProfile> loaded = await store.GetAllAsync();
             Assert.Single(loaded);
             Assert.Equal(profile.Name, loaded[0].Name);
             Assert.Equal(profile.ModulePath, loaded[0].ModulePath);
+            Assert.Equal("Thales", loaded[0].Vendor?.VendorName);
+            Assert.Equal("luna-standard", loaded[0].Vendor?.ProfileId);
         }
         finally
         {

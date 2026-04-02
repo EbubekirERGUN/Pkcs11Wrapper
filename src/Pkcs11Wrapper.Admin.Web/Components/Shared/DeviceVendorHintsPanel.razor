@@ -1,0 +1,78 @@
+@using Pkcs11Wrapper.Admin.Application.Models
+
+@if (_guidance is not null)
+{
+    <div class="card shadow-sm feature-card accent-card-info vendor-guidance-card">
+        <div class="card-header d-flex justify-content-between align-items-center gap-3">
+            <span>@Heading</span>
+            <span class="small text-muted">@(_guidance.IsVendorNeutral ? "Generic guidance" : (_guidance.IsKnownProfile ? "Catalog profile" : "Custom metadata"))</span>
+        </div>
+        <div class="card-body d-flex flex-column gap-3">
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <span class="table-pill">@_guidance.Title</span>
+                @if (!string.IsNullOrWhiteSpace(_guidance.ProfileName))
+                {
+                    <span class="table-pill">@_guidance.ProfileName</span>
+                }
+            </div>
+
+            <div class="small text-muted">@_guidance.Summary</div>
+
+            <div class="surface-stack">
+                @foreach (DeviceVendorHint hint in VisibleHints)
+                {
+                    <div class="surface-item vendor-hint-item">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                            <div class="fw-semibold">@hint.Title</div>
+                            <span class="badge @GetBadgeClass(hint.Tone)">@GetToneLabel(hint.Tone)</span>
+                        </div>
+                        <div class="small text-muted">@hint.Body</div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string Heading { get; set; } = "Vendor setup guidance";
+
+    [Parameter]
+    public HsmDeviceVendorMetadata? Vendor { get; set; }
+
+    [Parameter]
+    public bool ShowWhenVendorNeutral { get; set; } = true;
+
+    [Parameter]
+    public int MaxHints { get; set; } = 3;
+
+    private DeviceVendorGuidance? _guidance;
+
+    private IReadOnlyList<DeviceVendorHint> VisibleHints
+        => _guidance is null
+            ? []
+            : _guidance.Hints.Take(Math.Max(1, MaxHints)).ToArray();
+
+    protected override void OnParametersSet()
+    {
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(Vendor);
+        _guidance = !ShowWhenVendorNeutral && guidance.IsVendorNeutral ? null : guidance;
+    }
+
+    private static string GetBadgeClass(DeviceVendorHintTone tone)
+        => tone switch
+        {
+            DeviceVendorHintTone.Warning => "text-bg-warning",
+            DeviceVendorHintTone.Boundary => "text-bg-secondary",
+            _ => "text-bg-primary"
+        };
+
+    private static string GetToneLabel(DeviceVendorHintTone tone)
+        => tone switch
+        {
+            DeviceVendorHintTone.Warning => "Caveat",
+            DeviceVendorHintTone.Boundary => "Boundary",
+            _ => "Hint"
+        };
+}

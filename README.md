@@ -48,6 +48,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - Blazor Server admin UI
 - local auth with `viewer` / `operator` / `admin` roles
 - HSM device profile management + configuration export/import
+- vendor-aware device profiles with optional catalog metadata + setup hints
 - slot/token inspection
 - key/object browsing, detail, edit, copy, generate, import, and destroy flows
 - tracked session visibility and control (`login` / `logout` / `cancel` / `close-all` + invalidation visibility)
@@ -245,10 +246,11 @@ The admin panel is designed as an operational layer **on top of** the library in
 
 Current capabilities include:
 
-- device profile CRUD
+- device profile CRUD with optional vendor metadata/profile selection
 - local cookie auth with `viewer` / `operator` / `admin` roles
 - local user management, password rotation, and bootstrap credential lifecycle controls
 - PKCS#11 module connection testing
+- vendor-aware setup hints/caveats on Devices, Slots, Keys, and PKCS#11 Lab when a vendor-tagged profile is selected
 - slot and token browsing
 - key/object listing, detail, edit, copy, generate, import, destroy workflows
 - tracked session login/logout/cancel controls + slot-level close-all

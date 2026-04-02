@@ -2,6 +2,12 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Pkcs11Wrapper.Admin.Application.Models;
 
+public sealed record HsmDeviceVendorMetadata(
+    string VendorId,
+    string VendorName,
+    string? ProfileId,
+    string? ProfileName);
+
 public sealed record HsmDeviceProfile(
     Guid Id,
     string Name,
@@ -10,7 +16,8 @@ public sealed record HsmDeviceProfile(
     string? Notes,
     bool IsEnabled,
     DateTimeOffset CreatedUtc,
-    DateTimeOffset UpdatedUtc);
+    DateTimeOffset UpdatedUtc,
+    HsmDeviceVendorMetadata? Vendor = null);
 
 public sealed class HsmDeviceProfileInput
 {
@@ -27,6 +34,18 @@ public sealed class HsmDeviceProfileInput
 
     [StringLength(2048)]
     public string? Notes { get; set; }
+
+    [StringLength(64)]
+    public string? VendorId { get; set; }
+
+    [StringLength(128)]
+    public string? VendorName { get; set; }
+
+    [StringLength(64)]
+    public string? VendorProfileId { get; set; }
+
+    [StringLength(128)]
+    public string? VendorProfileName { get; set; }
 
     public bool IsEnabled { get; set; } = true;
 }
