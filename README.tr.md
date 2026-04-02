@@ -186,6 +186,7 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/luna-integration.md](docs/luna-integration.md) - wrapper, admin panel, smoke ve vendor regression için pratik Thales Luna client/module kurulum rehberi
 - [docs/luna-compatibility-audit.md](docs/luna-compatibility-audit.md) - Thales Luna genel dokümantasyonuna göre mevcut wrapper/admin/runtime kapsamı uyumluluk denetimi
 - [docs/luna-vendor-extension-design.md](docs/luna-vendor-extension-design.md) - gelecekteki Luna-only `CA_*` desteği için önerilen paket/sınır/yükleme/test stratejisi
+- [docs/vendor-audit-integration.md](docs/vendor-audit-integration.md) - wrapper telemetry ile vendor-native HSM audit farkını ve Thales Luna için CLI/syslog/export/API entegrasyon seçeneklerini değerlendiren not
 - [docs/smoke.md](docs/smoke.md) - smoke sample davranışı ve troubleshooting
 - [docs/release.md](docs/release.md) - release checklist ve packaging disiplini
 - [docs/versioning.md](docs/versioning.md) - merkezi versioning modeli ve tag stratejisi

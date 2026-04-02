@@ -5,6 +5,7 @@ See also:
 - `docs/luna-compatibility-audit.md` for the current standard-vs-extension support boundary
 - `docs/vendor-regression.md` for the opt-in Luna-oriented vendor regression profile
 - `docs/luna-vendor-extension-design.md` for the future `CA_*` extension-layer plan
+- `docs/vendor-audit-integration.md` for the vendor-native audit vs wrapper-telemetry boundary and Luna audit-integration evaluation
 
 ## Purpose
 

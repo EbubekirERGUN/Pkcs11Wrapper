@@ -110,6 +110,8 @@ Telemetry is opt-in and disabled by default. When you attach a listener, the wra
 
 Listener failures are swallowed so observational code does not break the underlying PKCS#11 call flow. The wrapper never emits raw PINs, key material, plaintext/ciphertext payloads, unwrap/import blobs, or secret PKCS#11 attributes. See `docs/telemetry-redaction.md` for the full policy.
 
+This telemetry is intentionally **wrapper-side observability**, not a replacement for **vendor-native HSM audit logs**. It tells you what this process did through `Pkcs11Wrapper`; it does not automatically prove everything the HSM saw across other clients, appliance roles, or vendor-specific control planes. See `docs/vendor-audit-integration.md` for the conservative boundary and the Thales Luna audit-integration evaluation.
+
 ```csharp
 using Pkcs11Wrapper;
 using Pkcs11Wrapper.Native;
@@ -259,6 +261,7 @@ Current capabilities include:
 - [docs/luna-integration.md](docs/luna-integration.md) - practical Thales Luna client/module setup guidance for wrapper, admin panel, smoke, and vendor regression
 - [docs/luna-compatibility-audit.md](docs/luna-compatibility-audit.md) - public-doc audit of Thales Luna standard compatibility vs current wrapper/admin/runtime scope
 - [docs/luna-vendor-extension-design.md](docs/luna-vendor-extension-design.md) - proposed package/boundary/loading/test strategy for future Luna-only `CA_*` support
+- [docs/vendor-audit-integration.md](docs/vendor-audit-integration.md) - vendor-native audit evaluation starting with Thales Luna, including CLI/syslog/export/API path trade-offs vs wrapper telemetry
 - [docs/smoke.md](docs/smoke.md) - smoke sample behavior and troubleshooting
 - [docs/telemetry-redaction.md](docs/telemetry-redaction.md) - PKCS#11 telemetry redaction policy
 - [docs/telemetry-integrations.md](docs/telemetry-integrations.md) - `ILogger` and `ActivitySource` / OpenTelemetry integration guidance
