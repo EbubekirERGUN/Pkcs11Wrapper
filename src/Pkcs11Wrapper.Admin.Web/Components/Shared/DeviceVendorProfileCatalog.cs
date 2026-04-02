@@ -96,6 +96,28 @@ internal static class DeviceVendorProfileCatalog
                     "Cluster/user administration stays outside this UI",
                     "This profile is for standard PKCS#11 device, slot, object, and lab workflows only. Cluster bootstrap, CloudHSM CLI/CMU user management, trust-anchor/TLS bootstrap, and other AWS control-plane operations remain out of scope here.",
                     DeviceVendorHintTone.Boundary)
+            ]),
+        new(
+            "google-cloud-kms-kmsp11",
+            "Google Cloud KMS / Cloud HSM via kmsp11",
+            "google",
+            "Google Cloud",
+            "cloud-kms-kmsp11",
+            "Cloud KMS / Cloud HSM via kmsp11",
+            "Use this when the device profile points at Google's kmsp11 PKCS#11 adapter for Cloud KMS-backed keys. The practical fit is indirect PKCS#11 through Cloud KMS, not a direct network-HSM client SDK.",
+            [
+                new DeviceVendorHint(
+                    "Config + Google auth must already exist on the admin host",
+                    "Point the profile at the exact kmsp11 library path visible to the running host/container and make sure the host already has a valid kmsp11 config file plus Google authentication/IAM in place. In the current repo slice, the admin host should provide KMS_PKCS11_CONFIG before starting the app because the wrapper does not yet pass kmsp11 config through C_Initialize pReserved.",
+                    DeviceVendorHintTone.Info),
+                new DeviceVendorHint(
+                    "Expect a narrower PKCS#11 surface than a classic token",
+                    "kmsp11 maps Cloud KMS into PKCS#11, so login is optional and any supplied PIN is ignored, but object import/copy/edit, wrap/unwrap, derive, PIN-admin, and several other classic token flows are not available. The current admin UI therefore treats Google support primarily as browse/test/destroy plus wrapper-level integration guidance rather than full generic key-management parity.",
+                    DeviceVendorHintTone.Warning),
+                new DeviceVendorHint(
+                    "Cloud KMS provisioning and policy remain outside this UI",
+                    "Key rings, IAM, service accounts, protection-level choices, and broader Cloud KMS lifecycle/control-plane tasks stay in Google Cloud tooling and APIs. This profile only helps the repo/admin surface stay honest when consuming kmsp11 as a PKCS#11 module.",
+                    DeviceVendorHintTone.Boundary)
             ])
     ];
 

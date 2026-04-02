@@ -2,6 +2,8 @@
 
 See also: `docs/luna-integration.md` for the practical Luna client/module setup path across wrapper, admin panel, smoke, and vendor regression.
 See also: `docs/luna-compatibility-audit.md` for the current Thales Luna-specific scope boundary and extension-gap audit.
+See also: `docs/cloudhsm-integration.md` and `docs/cloudhsm-compatibility-audit.md` for the current AWS CloudHSM support boundary.
+See also: `docs/google-cloud-hsm-integration.md` and `docs/google-cloud-hsm-compatibility-audit.md` for the current Google Cloud HSM / kmsp11 support boundary.
 See also: `docs/luna-vendor-extension-design.md` for the proposed package/boundary/loading strategy for future Luna-only `CA_*` support.
 
 ## Purpose
@@ -156,6 +158,28 @@ So the current CloudHSM support slice is:
 
 - strong documentation
 - admin-panel readiness improvements
+- explicit wrapper/admin setup guidance
+
+rather than a premature vendor-lane profile that would overstate validation depth.
+
+## Why there is not yet a checked-in Google Cloud HSM profile
+
+See also: `docs/google-cloud-hsm-integration.md` and `docs/google-cloud-hsm-compatibility-audit.md`.
+
+Google Cloud HSM is now a documented target for the repo, but there is intentionally **no** checked-in `google-*` vendor-regression profile yet.
+
+Reason:
+
+- the official Google PKCS#11 path is **indirect** through `kmsp11` and Cloud KMS rather than a direct local HSM client/runtime contract
+- kmsp11 requires a real config file plus real Google authentication/IAM, so a checked-in profile would risk implying repeatable local/CI coverage that the repo cannot honestly provide without live cloud access
+- Google's documented function table intentionally excludes operations assumed elsewhere in the broader vendor lane, including `C_CreateObject`, `C_CopyObject`, `C_SetAttributeValue`, `C_WrapKey`, `C_UnwrapKey`, `C_DeriveKey`, `C_InitToken`, `C_InitPIN`, `C_SetPIN`, `C_Digest*`, and operation-state paths
+- kmsp11 key creation depends on Google-specific `CKA_KMS_*` template attributes, which the current generic vendor lane does not model cleanly
+- the current wrapper/admin path depends on host-level `KMS_PKCS11_CONFIG` rather than a repo-managed per-profile initialize-argument channel
+
+So the current Google support slice is:
+
+- strong documentation
+- admin-panel readiness improvements and guardrails
 - explicit wrapper/admin setup guidance
 
 rather than a premature vendor-lane profile that would overstate validation depth.
