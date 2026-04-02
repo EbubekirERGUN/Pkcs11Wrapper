@@ -23,6 +23,7 @@ public sealed class Pkcs11TelemetryViewTests
             slotFilter: "2",
             operationFilter: "SignData",
             mechanismFilter: "0x40",
+            minDurationMilliseconds: null,
             statusFilter: "failed",
             timeRangeFilter: "24h",
             nowUtc: now);
@@ -56,10 +57,10 @@ public sealed class Pkcs11TelemetryViewTests
             CreateEntry("Primary", "OpenSession", "Succeeded", now.AddMinutes(-1), slotId: 3, mechanismType: null)
         ];
 
-        IReadOnlyList<AdminPkcs11TelemetryEntry> byReturnValue = Pkcs11TelemetryView.Apply(items, "pin_incorrect", null, null, null, null, "all", "all", now);
-        IReadOnlyList<AdminPkcs11TelemetryEntry> byFieldName = Pkcs11TelemetryView.Apply(items, "credential.pin", null, null, null, null, "all", "all", now);
-        IReadOnlyList<AdminPkcs11TelemetryEntry> byActor = Pkcs11TelemetryView.Apply(items, "alice", null, null, null, null, "all", "all", now);
-        IReadOnlyList<AdminPkcs11TelemetryEntry> byTrace = Pkcs11TelemetryView.Apply(items, "trace-1", null, null, null, null, "all", "all", now);
+        IReadOnlyList<AdminPkcs11TelemetryEntry> byReturnValue = Pkcs11TelemetryView.Apply(items, "pin_incorrect", null, null, null, null, null, "all", "all", now);
+        IReadOnlyList<AdminPkcs11TelemetryEntry> byFieldName = Pkcs11TelemetryView.Apply(items, "credential.pin", null, null, null, null, null, "all", "all", now);
+        IReadOnlyList<AdminPkcs11TelemetryEntry> byActor = Pkcs11TelemetryView.Apply(items, "alice", null, null, null, null, null, "all", "all", now);
+        IReadOnlyList<AdminPkcs11TelemetryEntry> byTrace = Pkcs11TelemetryView.Apply(items, "trace-1", null, null, null, null, null, "all", "all", now);
 
         Assert.Single(byReturnValue);
         Assert.Single(byFieldName);
@@ -82,10 +83,27 @@ public sealed class Pkcs11TelemetryViewTests
             CreateEntry("Primary", "SignData", "Failed", now.AddMinutes(-1), slotId: 1, mechanismType: 0x40)
         ];
 
-        IReadOnlyList<AdminPkcs11TelemetryEntry> filtered = Pkcs11TelemetryView.Apply(items, null, null, null, null, null, "non-success", "all", now);
+        IReadOnlyList<AdminPkcs11TelemetryEntry> filtered = Pkcs11TelemetryView.Apply(items, null, null, null, null, null, null, "non-success", "all", now);
 
         Assert.Equal(2, filtered.Count);
         Assert.DoesNotContain(filtered, item => item.Status == "Succeeded");
+    }
+
+    [Fact]
+    public void ApplyFiltersByMinimumDuration()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        AdminPkcs11TelemetryEntry[] items =
+        [
+            CreateEntry("Primary", "OpenSession", "Succeeded", now.AddMinutes(-3), slotId: 1, mechanismType: null, durationMilliseconds: 4.2),
+            CreateEntry("Primary", "FindObjects", "Succeeded", now.AddMinutes(-2), slotId: 1, mechanismType: null, durationMilliseconds: 250),
+            CreateEntry("Primary", "SignData", "Failed", now.AddMinutes(-1), slotId: 1, mechanismType: 0x40, durationMilliseconds: 851.3)
+        ];
+
+        IReadOnlyList<AdminPkcs11TelemetryEntry> filtered = Pkcs11TelemetryView.Apply(items, null, null, null, null, null, 250, "all", "all", now);
+
+        Assert.Equal(2, filtered.Count);
+        Assert.DoesNotContain(filtered, item => item.OperationName == "OpenSession");
     }
 
     [Fact]
@@ -108,7 +126,8 @@ public sealed class Pkcs11TelemetryViewTests
         string? actor = null,
         string? sessionId = null,
         string? correlationId = null,
-        AdminPkcs11TelemetryField[]? fields = null)
+        AdminPkcs11TelemetryField[]? fields = null,
+        double durationMilliseconds = 4.2)
         => new(
             Guid.NewGuid(),
             timestampUtc,
@@ -117,7 +136,7 @@ public sealed class Pkcs11TelemetryViewTests
             operationName,
             $"C_{operationName}",
             status,
-            4.2,
+            durationMilliseconds,
             returnValue,
             slotId,
             99,

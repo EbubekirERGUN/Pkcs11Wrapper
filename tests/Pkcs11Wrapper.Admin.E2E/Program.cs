@@ -194,16 +194,20 @@ internal static class AdminRuntimeE2E
 
     private static async Task ExerciseTelemetryAsync(IPage page, TestConfig config, List<string> eventLog)
     {
-        eventLog.Add("Telemetry: refreshing and filtering event stream");
+        eventLog.Add("Telemetry: refreshing, filtering, and checking operator summaries");
         await NavigateToAsync(page, config.BaseUrl, "/telemetry");
         await page.ClickAsync("[data-testid='telemetry-refresh']");
         await WaitForCountAtLeastAsync(page.Locator("[data-testid='telemetry-table'] tbody tr"), 1, 20000);
+        await WaitForVisibleAsync(page, "[data-testid='telemetry-trend']");
+        await WaitForCountAtLeastAsync(page.Locator("[data-testid='telemetry-top-operations'] tbody tr"), 1, 20000);
         await page.SelectOptionAsync("[data-testid='telemetry-device-filter']", new[] { new SelectOptionValue { Label = config.DeviceName } });
         await page.FillAsync("[data-testid='telemetry-search']", "FindObjects");
-        await page.PressAsync("[data-testid='telemetry-search']", "Tab");
+        await page.FillAsync("[data-testid='telemetry-min-duration']", "0");
+        await page.PressAsync("[data-testid='telemetry-min-duration']", "Tab");
         await WaitForTextAsync(page.Locator("[data-testid='telemetry-table']"), config.DeviceName, 20000);
         await WaitForTextAsync(page.Locator("[data-testid='telemetry-table']"), "FindObjects", 20000);
-        eventLog.Add("Telemetry: verified filtered PKCS#11 event stream");
+        await WaitForTextAsync(page.Locator("[data-testid='telemetry-top-operations']"), "FindObjects", 20000);
+        eventLog.Add("Telemetry: verified filtered PKCS#11 event stream plus operator summary widgets");
     }
 
     private static async Task NavigateToAsync(IPage page, string baseUrl, string expectedPath)

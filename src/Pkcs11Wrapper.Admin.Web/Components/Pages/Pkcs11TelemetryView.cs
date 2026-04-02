@@ -13,6 +13,7 @@ public static class Pkcs11TelemetryView
         string? slotFilter,
         string? operationFilter,
         string? mechanismFilter,
+        double? minDurationMilliseconds,
         string statusFilter,
         string timeRangeFilter,
         DateTimeOffset nowUtc)
@@ -24,6 +25,7 @@ public static class Pkcs11TelemetryView
                 SlotFilter: slotFilter,
                 OperationFilter: operationFilter,
                 MechanismFilter: mechanismFilter,
+                MinDurationMilliseconds: minDurationMilliseconds,
                 StatusFilter: statusFilter,
                 TimeRangeFilter: timeRangeFilter),
             nowUtc);

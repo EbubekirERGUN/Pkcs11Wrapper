@@ -16,6 +16,7 @@ public static class TelemetryEndpoints
         [FromQuery(Name = "slot")] string? slotFilter,
         [FromQuery(Name = "operation")] string? operationFilter,
         [FromQuery(Name = "mechanism")] string? mechanismFilter,
+        [FromQuery(Name = "minDurationMs")] double? minDurationMilliseconds,
         [FromQuery(Name = "status")] string? statusFilter,
         [FromQuery(Name = "timeRange")] string? timeRangeFilter,
         CancellationToken cancellationToken)
@@ -28,6 +29,7 @@ public static class TelemetryEndpoints
                 SlotFilter: slotFilter,
                 OperationFilter: operationFilter,
                 MechanismFilter: mechanismFilter,
+                MinDurationMilliseconds: minDurationMilliseconds,
                 StatusFilter: statusFilter ?? "all",
                 TimeRangeFilter: timeRangeFilter ?? "all"),
             cancellationToken);

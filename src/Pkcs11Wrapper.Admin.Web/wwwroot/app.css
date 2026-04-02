@@ -586,6 +586,64 @@ textarea::placeholder {
     font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
 
+.telemetry-pill-danger {
+    border-color: rgba(220, 38, 38, 0.24);
+    background: rgba(254, 242, 242, 0.95);
+    color: #991b1b;
+}
+
+.telemetry-metric-text {
+    font-size: clamp(1.35rem, 1rem + 0.55vw, 2.1rem);
+    line-height: 1.15;
+    word-break: break-word;
+}
+
+.telemetry-trend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+    gap: 0.85rem;
+    align-items: end;
+    min-height: 12rem;
+}
+
+.telemetry-trend-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: end;
+    gap: 0.35rem;
+    text-align: center;
+}
+
+.telemetry-trend-bar {
+    position: relative;
+    width: 100%;
+    min-height: 1.5rem;
+    border-radius: 0.95rem 0.95rem 0.65rem 0.65rem;
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.96) 0%, rgba(37, 99, 235, 0.78) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    overflow: hidden;
+}
+
+.telemetry-trend-bar-empty {
+    border-style: dashed;
+    border-color: rgba(148, 163, 184, 0.45);
+    background: linear-gradient(180deg, rgba(226, 232, 240, 0.6) 0%, rgba(203, 213, 225, 0.42) 100%);
+}
+
+.telemetry-trend-bar-fail {
+    position: absolute;
+    inset: auto 0 0 0;
+    background: linear-gradient(180deg, rgba(248, 113, 113, 0.96) 0%, rgba(220, 38, 38, 0.88) 100%);
+}
+
+.telemetry-trend-count {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+
 .capability-text {
     color: #475569;
     line-height: 1.6;

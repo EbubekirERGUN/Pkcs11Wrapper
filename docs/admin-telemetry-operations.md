@@ -82,6 +82,7 @@ Supported query parameters mirror the viewer filters:
 - `slot`
 - `operation`
 - `mechanism`
+- `minDurationMs`
 - `status`
 - `timeRange`
 
@@ -102,6 +103,14 @@ The telemetry viewer now surfaces request/audit correlation when the admin actio
 - auth type badge
 - request/session trace text
 - direct link into `/audit?q=...`
+
+The page now also adds an operator-focused console layer on top of the raw event table:
+
+- failure rate, slow-call threshold, P95 latency, and hottest-operation summary cards
+- one-click focus shortcuts for failures, returned-false paths, slow calls, and the last hour window
+- recent activity trend buckets that show where non-success volume is clustering
+- top-operation and failure-hotspot panels with direct “focus/investigate” actions that pre-fill the raw table filters
+- optional `minDurationMs` filtering so slow-path investigations and exports stay aligned
 
 The audit page search now matches session trace ids, remote IP, and user agent text so a telemetry row can pivot into a narrower operational review trail quickly.
 

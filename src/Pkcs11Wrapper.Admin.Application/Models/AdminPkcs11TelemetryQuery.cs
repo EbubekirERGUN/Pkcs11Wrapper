@@ -7,5 +7,6 @@ public sealed record AdminPkcs11TelemetryQuery(
     string? SlotFilter = null,
     string? OperationFilter = null,
     string? MechanismFilter = null,
+    double? MinDurationMilliseconds = null,
     string StatusFilter = "all",
     string TimeRangeFilter = "all");
