@@ -13,3 +13,4 @@ TestResults/
 *.tmp
 *.log
 BenchmarkDotNet.Artifacts/
+deploy/compose/softhsm-lab/.env

@@ -77,6 +77,29 @@ After first startup:
 - if a vendor library depends on additional shared libraries, mount/install those dependencies so the dynamic loader can resolve them inside the container too
 - keep the module mount read-only unless the vendor explicitly requires writable side files elsewhere
 
+## Local/dev/lab SoftHSM compose stack
+
+For a reproducible **local/dev/lab** stack that brings up the admin panel together with a SoftHSM-backed token environment, use `deploy/compose/softhsm-lab`.
+
+Quick start:
+
+```bash
+cd deploy/compose/softhsm-lab
+cp .env.example .env
+# optional: edit .env for different admin credentials / token label / PINs
+
+docker compose up --build -d
+```
+
+This bundle is intentionally lab-oriented rather than production orchestration:
+
+- the admin panel still uses the current container defaults (`AdminStorage__DataRoot=/var/lib/pkcs11wrapper-admin`, `AdminRuntime__DisableHttpsRedirection=true`)
+- the seeded bootstrap device points at `/opt/pkcs11/lib/libsofthsm2.so`
+- a shared named volume carries `SOFTHSM2_CONF` plus the SoftHSM token store so the admin container and the helper/backend container see the same state
+- the SoftHSM helper can re-seed or reset the local token with `docker compose exec softhsm seed-token ...`
+
+See `deploy/compose/softhsm-lab/README.md` for the full setup flow, default credentials/PINs, reset commands, and caveats.
+
 ## Data kept under the storage root
 
 The configured storage root contains the admin panel's mutable state, including:
