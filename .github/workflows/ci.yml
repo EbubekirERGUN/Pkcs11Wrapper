@@ -59,7 +59,7 @@ jobs:
         run: mkdir -p "$CI_ARTIFACT_ROOT"
 
       - name: Make engineering scripts executable
-        run: chmod +x eng/build-pkcs11-v3-shim.sh eng/setup-softhsm-fixture.sh eng/run-regression-tests.sh eng/run-smoke-aot.sh
+        run: chmod +x eng/build-pkcs11-v3-shim.sh eng/build-luna-extension-shim.sh eng/setup-softhsm-fixture.sh eng/run-regression-tests.sh eng/run-smoke-aot.sh
 
       - name: Restore
         run: dotnet restore Pkcs11Wrapper.sln

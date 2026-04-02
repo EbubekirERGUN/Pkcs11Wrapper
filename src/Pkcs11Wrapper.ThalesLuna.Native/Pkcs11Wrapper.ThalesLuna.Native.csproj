@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Pkcs11Wrapper.ThalesLuna.Native</AssemblyName>
+    <RootNamespace>Pkcs11Wrapper.ThalesLuna.Native</RootNamespace>
+    <PackageId>Pkcs11Wrapper.ThalesLuna.Native</PackageId>
+    <Description>Conservative low-level Thales Luna CA_GetFunctionList bootstrap layer for Pkcs11Wrapper.</Description>
+    <PackageTags>pkcs11;cryptoki;hsm;thales;luna;nativeaot</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.nuget.md</PackageReadmeFile>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pkcs11Wrapper.Native\Pkcs11Wrapper.Native.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\docs\nuget\README.nuget.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>

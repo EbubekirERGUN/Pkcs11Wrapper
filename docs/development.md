@@ -4,7 +4,10 @@
 
 - `src/Pkcs11Wrapper` - managed API surface used by consumers
 - `src/Pkcs11Wrapper.Native` - low-level PKCS#11 function table and native interop layer
+- `src/Pkcs11Wrapper.ThalesLuna.Native` - conservative Thales Luna `CA_GetFunctionList` bootstrap/interp layer for Luna-only extensions
+- `src/Pkcs11Wrapper.ThalesLuna` - managed Luna extension entry point and capability/family facades
 - `tests/Pkcs11Wrapper.Native.Tests` - xUnit regression suite covering layout, API shape, and SoftHSM-backed behavior
+- `tests/Pkcs11Wrapper.ThalesLuna.Tests` - xUnit suite covering the Luna extension skeleton API, minimal interop layout, and shim-backed bootstrap behavior
 - `samples/Pkcs11Wrapper.Smoke` - executable smoke sample used by runtime and NativeAOT validation paths
 - `eng` - engineering scripts for fixture setup, regression execution, smoke validation, benchmarks, release verification, and package inspection
 - `artifacts` - generated outputs such as `artifacts/smoke-aot/linux-x64`
@@ -24,7 +27,7 @@ dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 
 Notes:
 
-- `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, builds a tiny PKCS#11 v3 runtime shim on Linux, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
+- `eng/run-regression-tests.sh` provisions its own temporary SoftHSM fixture, builds a tiny PKCS#11 v3 runtime shim plus a Luna `CA_GetFunctionList` bootstrap shim on Linux, validates the expected AES and RSA objects, then runs `dotnet test` on `Pkcs11Wrapper.sln`.
 - `eng/run-regression-tests.sh --use-existing-env` skips fixture provisioning and uses existing `PKCS11_*` environment variables. This is intended for optional vendor-module validation and now supports the default `baseline-rsa-aes` profile plus the documented `luna-rsa-aes` Thales Luna profile in `docs/vendor-regression.md`.
 - `eng/run-smoke-aot.sh` provisions its own temporary fixture, publishes `samples/Pkcs11Wrapper.Smoke` with `/p:PublishAot=true`, then executes the produced binary with strict output validation.
 - `eng/run-benchmarks.sh` provisions its own temporary fixture, runs the `BenchmarkDotNet` suite, and writes the latest benchmark summary under `artifacts/benchmarks/latest/summary.md` plus machine-readable JSON.
@@ -42,6 +45,12 @@ Notes:
 - Interop layout checks - `NativeTypeLayoutTests.cs` validates native type and function-list expectations.
 - SoftHSM-backed regressions - `SoftHsmCryptRegressionTests.cs` validates realistic runtime flows against a PKCS#11 module.
 - PKCS#11 v3 shim regressions - `Pkcs11V3ShimRuntimeTests.cs` validates interface discovery plus real v3 login/session-cancel/message-encrypt flows against a deterministic Linux-only shim.
+
+`tests/Pkcs11Wrapper.ThalesLuna.Tests` adds the first Luna-specific validation layer:
+
+- API and namespace checks for the managed/native Luna skeleton packages
+- minimal native layout validation for the conservative Luna function-list header
+- Linux shim-backed bootstrap checks for missing export, successful `CA_GetFunctionList`, `CKR_FUNCTION_NOT_SUPPORTED`, and null-pointer contract failures
 
 The SoftHSM regression layer currently exercises:
 

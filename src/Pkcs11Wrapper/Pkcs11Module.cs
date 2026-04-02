@@ -33,6 +33,8 @@ public sealed class Pkcs11Module : IDisposable
         set => _nativeModule.TelemetryListener = value;
     }
 
+    internal Pkcs11NativeModule NativeModule => _nativeModule;
+
     public static Pkcs11Module Load(string libraryPath) => new(Pkcs11NativeModule.Load(libraryPath));
 
     public static Pkcs11Module Load(string libraryPath, IPkcs11OperationTelemetryListener? telemetryListener)

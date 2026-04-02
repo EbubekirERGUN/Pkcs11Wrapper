@@ -92,21 +92,34 @@ dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 
 dotnet pack src/Pkcs11Wrapper.Native/Pkcs11Wrapper.Native.csproj -c Release --no-build -o "$package_dir" /p:PackageVersion="$version" /p:ContinuousIntegrationBuild=true
 dotnet pack src/Pkcs11Wrapper/Pkcs11Wrapper.csproj -c Release --no-build -o "$package_dir" /p:PackageVersion="$version" /p:ContinuousIntegrationBuild=true
+dotnet pack src/Pkcs11Wrapper.ThalesLuna.Native/Pkcs11Wrapper.ThalesLuna.Native.csproj -c Release --no-build -o "$package_dir" /p:PackageVersion="$version" /p:ContinuousIntegrationBuild=true
+dotnet pack src/Pkcs11Wrapper.ThalesLuna/Pkcs11Wrapper.ThalesLuna.csproj -c Release --no-build -o "$package_dir" /p:PackageVersion="$version" /p:ContinuousIntegrationBuild=true
 
 dotnet run --project eng/Pkcs11Wrapper.ReleaseValidation/Pkcs11Wrapper.ReleaseValidation.csproj -- "$package_dir" "$version"
 
-create_consumer_project \
-  "$consumer_root/Pkcs11Wrapper" \
-  "Pkcs11Wrapper" \
-  'using Pkcs11Wrapper;\n\nPkcs11InitializeFlags flags = Pkcs11InitializeFlags.UseOperatingSystemLocking;\nConsole.WriteLine($"Managed package OK: {flags}");'
+create_consumer_project   "$consumer_root/Pkcs11Wrapper"   "Pkcs11Wrapper"   'using Pkcs11Wrapper;
 
-create_consumer_project \
-  "$consumer_root/Pkcs11Wrapper.Native" \
-  "Pkcs11Wrapper.Native" \
-  'using Pkcs11Wrapper.Native;\n\nConsole.WriteLine($"Native package OK: {Pkcs11NativeTypeValidation.IsBlittable<int>()}");'
+Pkcs11InitializeFlags flags = Pkcs11InitializeFlags.UseOperatingSystemLocking;
+Console.WriteLine($"Managed package OK: {flags}");'
+
+create_consumer_project   "$consumer_root/Pkcs11Wrapper.Native"   "Pkcs11Wrapper.Native"   'using Pkcs11Wrapper.Native;
+
+Console.WriteLine($"Native package OK: {Pkcs11NativeTypeValidation.IsBlittable<int>()}");'
+
+create_consumer_project   "$consumer_root/Pkcs11Wrapper.ThalesLuna.Native"   "Pkcs11Wrapper.ThalesLuna.Native"   'using Pkcs11Wrapper.ThalesLuna.Native;
+
+LunaNativeCapabilities capabilities = new(true, false, false, false, false, false, false);
+Console.WriteLine($"Luna native package OK: {capabilities.HasFunctionList}");'
+
+create_consumer_project   "$consumer_root/Pkcs11Wrapper.ThalesLuna"   "Pkcs11Wrapper.ThalesLuna"   'using Pkcs11Wrapper.ThalesLuna;
+
+LunaCapabilities capabilities = new(true, false, false, false, false, false, false);
+Console.WriteLine($"Luna managed package OK: {capabilities.HasFunctionList}");'
 
 validate_consumer_project "$consumer_root/Pkcs11Wrapper" managed-package-consumer
 validate_consumer_project "$consumer_root/Pkcs11Wrapper.Native" native-package-consumer
+validate_consumer_project "$consumer_root/Pkcs11Wrapper.ThalesLuna.Native" luna-native-package-consumer
+validate_consumer_project "$consumer_root/Pkcs11Wrapper.ThalesLuna" luna-managed-package-consumer
 
 ls -lh "$package_dir"
 printf 'Release package validation artifacts: %s\n' "$validation_root"

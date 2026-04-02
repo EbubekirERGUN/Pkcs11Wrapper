@@ -6,6 +6,8 @@ Modern .NET 10 PKCS#11 wrapper focused on explicit APIs, NativeAOT-aware interop
 
 - `Pkcs11Wrapper` — high-level managed wrapper over a PKCS#11 / Cryptoki module
 - `Pkcs11Wrapper.Native` — lower-level NativeAOT-friendly interop layer used by the main package
+- `Pkcs11Wrapper.ThalesLuna.Native` — conservative low-level Thales Luna `CA_GetFunctionList` bootstrap package
+- `Pkcs11Wrapper.ThalesLuna` — managed Thales Luna extension entry point and capability/family facade package
 
 ## Install
 
@@ -17,6 +19,13 @@ Low-level interop package:
 
 ```bash
 dotnet add package Pkcs11Wrapper.Native
+```
+
+Luna extension bootstrap packages:
+
+```bash
+dotnet add package Pkcs11Wrapper.ThalesLuna
+dotnet add package Pkcs11Wrapper.ThalesLuna.Native
 ```
 
 ## Minimal example
@@ -60,4 +69,5 @@ Those adapters reuse the same redacted metadata emitted by the native telemetry 
 
 - Runtime behavior still depends on the target PKCS#11 module / token / HSM policy.
 - PKCS#11 v3 support is capability-gated based on what the module actually exports.
+- The initial Luna packages intentionally stop at `CA_GetFunctionList` bootstrap + capability wiring; they do not yet claim broad `CA_*` family support.
 - SourceLink-enabled symbols are produced for package debugging scenarios.
