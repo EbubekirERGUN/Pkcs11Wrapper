@@ -68,6 +68,13 @@ public sealed class Pkcs11Session : IDisposable
         return _module.TryFindObjects(_sessionHandle, _generation, SlotId, _slotGeneration, search, destination, out written, out hasMore);
     }
 
+    public void VisitObjects(Pkcs11ObjectSearchParameters search, Func<Pkcs11ObjectHandle, bool> visitor, int batchSize = 64)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(visitor);
+        _module.VisitObjects(_sessionHandle, _generation, SlotId, _slotGeneration, search, visitor, batchSize);
+    }
+
     public bool TryFindObject(Pkcs11ObjectSearchParameters search, out Pkcs11ObjectHandle handle)
     {
         ThrowIfDisposed();

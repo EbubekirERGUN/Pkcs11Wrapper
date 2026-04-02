@@ -13,14 +13,18 @@ public class SessionAndObjectBenchmarks : SoftHsmBenchmarkBase
     private const nuint CkrUserAlreadyLoggedIn = 0x00000100u;
     private const int ConcurrentIterationsPerWorker = 256;
 
+    private const int BrowseFixtureObjectCount = 256;
+
     private int _sequence;
     private Pkcs11Session[] _concurrentSessions8 = [];
     private Pkcs11Session[] _concurrentSessions32 = [];
+    private Pkcs11ObjectHandle[] _browseDataHandles = [];
 
     [GlobalSetup]
     public void GlobalSetup()
     {
         InitializeEnvironment();
+        _browseDataHandles = CreateBrowseFixtureObjects(BrowseFixtureObjectCount);
         _concurrentSessions8 = OpenConcurrentSessions(workerCount: 8);
         _concurrentSessions32 = OpenConcurrentSessions(workerCount: 32);
     }
@@ -28,6 +32,7 @@ public class SessionAndObjectBenchmarks : SoftHsmBenchmarkBase
     [GlobalCleanup]
     public void GlobalCleanup()
     {
+        DestroyObjects(_browseDataHandles);
         DisposeSessions(_concurrentSessions32);
         DisposeSessions(_concurrentSessions8);
         DisposeEnvironment();
@@ -77,6 +82,23 @@ public class SessionAndObjectBenchmarks : SoftHsmBenchmarkBase
             out Pkcs11ObjectHandle handle);
 
         return handle.Value;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("Object", "Scalability")]
+    public int BrowseFirstDataObjectPage64Of256()
+    {
+        int visited = 0;
+        Environment.Session.VisitObjects(
+            new Pkcs11ObjectSearchParameters(objectClass: Pkcs11ObjectClasses.Data),
+            _ =>
+            {
+                visited++;
+                return visited < 65;
+            },
+            batchSize: 32);
+
+        return visited;
     }
 
     [Benchmark]
@@ -181,6 +203,49 @@ public class SessionAndObjectBenchmarks : SoftHsmBenchmarkBase
         }
         catch (Pkcs11Exception ex) when (ex.Result.Value == CkrUserAlreadyLoggedIn)
         {
+        }
+    }
+
+    private Pkcs11ObjectHandle[] CreateBrowseFixtureObjects(int count)
+    {
+        Pkcs11ObjectHandle[] handles = new Pkcs11ObjectHandle[count];
+        byte[] application = Encoding.UTF8.GetBytes("bench-browse");
+
+        for (int i = 0; i < handles.Length; i++)
+        {
+            byte[] label = Encoding.UTF8.GetBytes($"bench-browse-{i:D4}");
+            byte[] value = [(byte)(i & 0xFF), (byte)((i >> 8) & 0xFF), 0x51];
+            handles[i] = Environment.Session.CreateObject(
+            [
+                Pkcs11ObjectAttribute.ObjectClass(Pkcs11AttributeTypes.Class, Pkcs11ObjectClasses.Data),
+                Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Token, false),
+                Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Private, false),
+                Pkcs11ObjectAttribute.Boolean(Pkcs11AttributeTypes.Modifiable, true),
+                Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Label, label),
+                Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Application, application),
+                Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Value, value)
+            ]);
+        }
+
+        return handles;
+    }
+
+    private void DestroyObjects(Pkcs11ObjectHandle[] handles)
+    {
+        for (int i = handles.Length - 1; i >= 0; i--)
+        {
+            if (handles[i].Value == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                Environment.Session.DestroyObject(handles[i]);
+            }
+            catch
+            {
+            }
         }
     }
 

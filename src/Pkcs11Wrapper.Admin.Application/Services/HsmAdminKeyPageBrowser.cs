@@ -98,51 +98,48 @@ internal static class HsmAdminKeyPageBrowser
     private static HsmKeyObjectPage ReadStreamingHandlePage(Guid deviceId, nuint slotIdValue, Pkcs11Session session, KeyObjectPageRequest request)
     {
         Pkcs11ObjectSearchParameters search = BuildSearch(request);
-        Pkcs11ObjectHandle[] buffer = new Pkcs11ObjectHandle[64];
         nuint? cursorHandle = DecodeHandleCursor(request.Cursor);
         bool collect = cursorHandle is null;
-        bool hasMore;
         int scanned = 0;
         int summaryReads = 0;
         List<HsmKeyObjectSummary> items = [];
         string? nextCursor = null;
+        bool hasNextPage = false;
 
-        do
+        session.VisitObjects(search, handle =>
         {
-            session.TryFindObjects(search, buffer, out int written, out hasMore);
-            for (int i = 0; i < written; i++)
+            scanned++;
+            HsmKeyObjectSummary summary = HsmAdminObjectCatalog.ReadObjectSummary(deviceId, slotIdValue, session, handle);
+            summaryReads++;
+
+            if (!HsmKeyObjectQuery.MatchesSearch(summary, request.SearchText))
             {
-                scanned++;
-                HsmKeyObjectSummary summary = HsmAdminObjectCatalog.ReadObjectSummary(deviceId, slotIdValue, session, buffer[i]);
-                summaryReads++;
-
-                if (!HsmKeyObjectQuery.MatchesSearch(summary, request.SearchText))
-                {
-                    continue;
-                }
-
-                if (!collect)
-                {
-                    if (summary.Handle == cursorHandle)
-                    {
-                        collect = true;
-                    }
-
-                    continue;
-                }
-
-                if (items.Count == request.PageSize)
-                {
-                    nextCursor = EncodeHandleCursor(items[^1].Handle);
-                    return new HsmKeyObjectPage(items, request.PageSize, request.SortMode, request.Cursor, nextCursor, true, scanned, summaryReads, true);
-                }
-
-                items.Add(summary);
+                return true;
             }
-        }
-        while (hasMore);
 
-        return new HsmKeyObjectPage(items, request.PageSize, request.SortMode, request.Cursor, null, false, scanned, summaryReads, true);
+            if (!collect)
+            {
+                if (summary.Handle == cursorHandle)
+                {
+                    collect = true;
+                }
+
+                return true;
+            }
+
+            items.Add(summary);
+            if (items.Count <= request.PageSize)
+            {
+                return true;
+            }
+
+            items.RemoveAt(items.Count - 1);
+            nextCursor = EncodeHandleCursor(items[^1].Handle);
+            hasNextPage = true;
+            return false;
+        });
+
+        return new HsmKeyObjectPage(items, request.PageSize, request.SortMode, request.Cursor, nextCursor, hasNextPage, scanned, summaryReads, true);
     }
 
     private static HsmKeyObjectPage ReadSortedFallbackPage(Guid deviceId, nuint slotIdValue, Pkcs11Session session, KeyObjectPageRequest request)

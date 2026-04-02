@@ -2324,49 +2324,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return string.IsNullOrWhiteSpace(value) ? null : new HsmObjectAttributeView(descriptor.Name, value);
     }
 
-    private static List<Pkcs11ObjectHandle> EnumerateObjectHandles(Pkcs11Session session, Pkcs11ObjectSearchParameters search)
-    {
-        List<Pkcs11ObjectHandle> results = [];
-        Pkcs11ObjectHandle[] buffer = new Pkcs11ObjectHandle[64];
-        bool hasMore;
-        do
-        {
-            session.TryFindObjects(search, buffer, out int written, out hasMore);
-            for (int i = 0; i < written; i++)
-            {
-                results.Add(buffer[i]);
-            }
-        }
-        while (hasMore);
-
-        return results;
-    }
-
-    private static List<Pkcs11ObjectHandle> EnumerateObjectHandles(Pkcs11Session session, Pkcs11ObjectSearchParameters search, int maxCount, out bool truncated)
-    {
-        List<Pkcs11ObjectHandle> results = [];
-        Pkcs11ObjectHandle[] buffer = new Pkcs11ObjectHandle[Math.Min(Math.Max(maxCount, 1), 64)];
-        bool hasMore;
-        truncated = false;
-
-        do
-        {
-            session.TryFindObjects(search, buffer, out int written, out hasMore);
-            for (int i = 0; i < written; i++)
-            {
-                results.Add(buffer[i]);
-                if (results.Count >= maxCount)
-                {
-                    truncated = hasMore || i + 1 < written;
-                    return results;
-                }
-            }
-        }
-        while (hasMore);
-
-        return results;
-    }
-
     private static void LoginUserToleratingAlreadyLoggedIn(Pkcs11Session session, string userPin)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userPin);

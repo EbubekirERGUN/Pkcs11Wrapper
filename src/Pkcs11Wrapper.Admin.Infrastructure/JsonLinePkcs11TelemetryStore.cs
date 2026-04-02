@@ -92,6 +92,16 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
 
     private async Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadEntriesAsync(int? take, CancellationToken cancellationToken)
     {
+        if (take is int newestTake)
+        {
+            return await ReadNewestEntriesAsync(Math.Max(1, newestTake), cancellationToken);
+        }
+
+        return await ReadAllEntriesAsync(cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadNewestEntriesAsync(int take, CancellationToken cancellationToken)
+    {
         List<AdminPkcs11TelemetryEntry> entries = [];
         foreach (string path in GetRetainedFilesNewestFirst())
         {
@@ -100,24 +110,71 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
                 continue;
             }
 
-            string[] lines = await File.ReadAllLinesAsync(path, cancellationToken);
-            for (int index = lines.Length - 1; index >= 0; index--)
+            IReadOnlyList<AdminPkcs11TelemetryEntry> fileEntries = await ReadNewestEntriesFromFileAsync(path, take - entries.Count, cancellationToken);
+            entries.AddRange(fileEntries);
+            if (entries.Count >= take)
             {
-                string line = lines[index].Trim();
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                entries.Add(DeserializeEntry(line, path));
-                if (take.HasValue && entries.Count >= take.Value)
-                {
-                    return SortEntries(entries);
-                }
+                return SortEntries(entries);
             }
         }
 
         return SortEntries(entries);
+    }
+
+    private async Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadAllEntriesAsync(CancellationToken cancellationToken)
+    {
+        List<AdminPkcs11TelemetryEntry> entries = [];
+        foreach (string path in GetRetainedFilesNewestFirst())
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            await foreach (string line in ReadLinesAsync(path, cancellationToken))
+            {
+                entries.Add(DeserializeEntry(line, path));
+            }
+        }
+
+        return SortEntries(entries);
+    }
+
+    private static async Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadNewestEntriesFromFileAsync(string path, int take, CancellationToken cancellationToken)
+    {
+        if (take <= 0)
+        {
+            return [];
+        }
+
+        Queue<string> tail = new();
+        await foreach (string line in ReadLinesAsync(path, cancellationToken))
+        {
+            tail.Enqueue(line);
+            if (tail.Count > take)
+            {
+                tail.Dequeue();
+            }
+        }
+
+        return tail
+            .Reverse()
+            .Select(line => DeserializeEntry(line, path))
+            .ToArray();
+    }
+
+    private static async IAsyncEnumerable<string> ReadLinesAsync(string path, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using FileStream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using StreamReader reader = new(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            string trimmed = line.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmed))
+            {
+                yield return trimmed;
+            }
+        }
     }
 
     private async Task RotateIfNeededForAppendAsync(int incomingLineBytes, CancellationToken cancellationToken)
