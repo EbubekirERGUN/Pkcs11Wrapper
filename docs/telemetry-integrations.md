@@ -8,6 +8,8 @@
 
 That design keeps the wrapper decoupled while still making it easy to plug into `ILogger`, `ActivitySource`, and OpenTelemetry-style collectors.
 
+It is intentionally **not** the same thing as vendor-native HSM audit ingestion. If you need to understand that boundary, see [vendor-audit-integration.md](vendor-audit-integration.md).
+
 ## Available adapters
 
 The main `Pkcs11Wrapper` package exposes these ready-made listeners:

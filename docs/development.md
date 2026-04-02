@@ -111,5 +111,6 @@ Notable current assumptions:
 - Thales Luna integration guide: `docs/luna-integration.md`
 - Thales Luna audit: `docs/luna-compatibility-audit.md`
 - Thales Luna vendor-extension design: `docs/luna-vendor-extension-design.md`
+- Vendor-native audit evaluation: `docs/vendor-audit-integration.md`
 - Release discipline: `docs/release.md`
 - Performance baselines: `docs/benchmarks.md`
