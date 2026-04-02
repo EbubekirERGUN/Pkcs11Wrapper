@@ -2,6 +2,8 @@
 
 Use this file as the source of truth for repository presentation settings that cannot be stored directly in git.
 
+The current committed README showcase assets live under [`docs/showcase/2026-04-final/`](showcase/2026-04-final/README.md). This final set intentionally supersedes the earlier preview-only PR #63 concept instead of keeping a second preview gallery around.
+
 ## Suggested repository description
 
 Modern .NET 10 PKCS#11 wrapper with Linux and Windows support, PKCS#11 v3 interface/message awareness, and a Blazor Server admin panel for HSM operations.
@@ -36,19 +38,19 @@ Recommended composition:
 - small badges or callouts:
   - Linux + Windows
   - PKCS#11 v3 aware
-  - HSM / Slots / Keys / Sessions / Audit
-- optional screenshot crop from the admin dashboard
+  - HSM / Slots / Devices / Sessions
+- base visual: crop from `docs/showcase/2026-04-final/admin-dashboard.png`
 
 ## Suggested pinned release headline
 
 `Pkcs11Wrapper: modern .NET 10 PKCS#11 wrapper with Windows/Linux support and Blazor admin panel`
 
-## Suggested README showcase assets to add later
+## Current committed README showcase assets
 
-If you want the repo to look even better, the next assets to add are:
+The README now uses this smaller final set:
 
-1. dashboard screenshot
-2. devices screen screenshot
-3. keys screen screenshot
-4. sessions + audit screenshot
-5. short admin panel gif/demo clip
+1. `docs/showcase/2026-04-final/admin-dashboard.png`
+2. `docs/showcase/2026-04-final/admin-devices.png`
+3. `docs/showcase/2026-04-final/admin-slots.png`
+
+If the repo needs one more follow-up asset later, add a **single short admin panel clip** instead of expanding back into a large screenshot dump.

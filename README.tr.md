@@ -12,6 +12,25 @@ Modern bir **.NET 10 PKCS#11 wrapper**; Linux tarafında güçlü doğrulama, Wi
 
 > İngilizce README: [README.md](README.md)
 
+## Admin panel vitrin görüntüleri
+
+<p align="center">
+  <img src="docs/showcase/2026-04-final/admin-dashboard.png" alt="Pkcs11Wrapper admin dashboard görünümü" />
+</p>
+
+<p align="center">
+  <img src="docs/showcase/2026-04-final/admin-devices.png" alt="Pkcs11Wrapper admin cihaz profilleri yüzeyi" width="49%" />
+  <img src="docs/showcase/2026-04-final/admin-slots.png" alt="Pkcs11Wrapper admin slot ve token yüzeyi" width="49%" />
+</p>
+
+Admin panelin güncel ve küçük bir vitrin kesiti:
+
+- **Dashboard** — recovery-first operasyon özeti ve role-aware konsol çerçevesi
+- **Devices** — HSM profil envanteri, bağlantı yönetişimi akışı ve vendor-aware yönetim yüzeyi
+- **Slots** — key/session işlerine geçmeden önce token görünürlüğü ve slot seviyesinde operasyon giriş noktası
+
+Capture akışı ve doğrulama notları için: [docs/showcase/2026-04-final/README.md](docs/showcase/2026-04-final/README.md)
+
 ## Bu proje neden var?
 
 PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanımı çoğu zaman yorucu ve dağınıktır. `Pkcs11Wrapper` şu alanlar için daha temiz, daha açık, daha test edilebilir ve daha üretim odaklı bir temel sunmayı hedefler:
@@ -193,6 +212,7 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/versioning.md](docs/versioning.md) - merkezi versioning modeli ve tag stratejisi
 - [docs/admin-panel-roadmap.md](docs/admin-panel-roadmap.md) - admin panel yol haritası
 - [docs/github-showcase.md](docs/github-showcase.md) - önerilen GitHub description/topics/social preview metinleri
+- [docs/showcase/2026-04-final/README.md](docs/showcase/2026-04-final/README.md) - commitlenmiş admin-panel vitrin görselleri + capture akışı
 
 ## Güncel sınırlar
 
