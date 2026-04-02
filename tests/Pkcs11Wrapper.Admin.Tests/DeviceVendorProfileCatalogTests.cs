@@ -11,6 +11,12 @@ public sealed class DeviceVendorProfileCatalogTests
         "cloud-kms-kmsp11",
         "Cloud KMS / Cloud HSM via kmsp11");
 
+    private static readonly HsmDeviceVendorMetadata IbmVendor = new(
+        "ibm",
+        "IBM Cloud",
+        "hyper-protect-crypto-services-ep11",
+        "Hyper Protect Crypto Services / EP11 PKCS#11");
+
     private static readonly HsmDeviceVendorMetadata OracleVendor = new(
         "oracle",
         "Oracle",
@@ -39,6 +45,30 @@ public sealed class DeviceVendorProfileCatalogTests
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("KMS_PKCS11_CONFIG", StringComparison.Ordinal));
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("PIN is ignored", StringComparison.Ordinal));
         Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Cloud KMS lifecycle/control-plane", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetSelectionId_ReturnsKnownIbmProfileSelection()
+    {
+        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(IbmVendor);
+
+        Assert.Equal("ibm-cloud-hpcs-standard", selectionId);
+    }
+
+    [Fact]
+    public void GetGuidance_ReturnsIbmSpecificSummaryAndHints()
+    {
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(IbmVendor);
+
+        Assert.True(guidance.IsKnownProfile);
+        Assert.False(guidance.IsVendorNeutral);
+        Assert.Equal("IBM Cloud", guidance.Title);
+        Assert.Equal("Hyper Protect Crypto Services / EP11 PKCS#11", guidance.ProfileName);
+        Assert.Contains("direct PKCS#11", guidance.Summary);
+        Assert.Equal(3, guidance.Hints.Count);
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("EP11CLIENT_CFG", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("C_Login", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("GREP11", StringComparison.Ordinal));
     }
 
     [Fact]

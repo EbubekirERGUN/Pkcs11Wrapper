@@ -313,6 +313,8 @@ Current capabilities include:
 - [docs/cloudhsm-compatibility-audit.md](docs/cloudhsm-compatibility-audit.md) - public-doc audit of AWS CloudHSM standard PKCS#11 compatibility vs current wrapper/admin/runtime scope
 - [docs/google-cloud-hsm-integration.md](docs/google-cloud-hsm-integration.md) - practical Google Cloud KMS / Cloud HSM via kmsp11 setup guidance for wrapper and admin-panel usage
 - [docs/google-cloud-hsm-compatibility-audit.md](docs/google-cloud-hsm-compatibility-audit.md) - public-doc audit of Google Cloud HSM's indirect kmsp11 PKCS#11 path vs current wrapper/admin/runtime scope
+- [docs/ibm-cloud-hpcs-integration.md](docs/ibm-cloud-hpcs-integration.md) - practical IBM Cloud Hyper Protect Crypto Services EP11 PKCS#11 setup guidance for wrapper/admin-panel usage and the direct-vs-GREP11 boundary
+- [docs/ibm-cloud-hpcs-compatibility-audit.md](docs/ibm-cloud-hpcs-compatibility-audit.md) - public-doc audit of IBM Cloud HPCS direct PKCS#11 fit vs current wrapper/admin/runtime scope
 - [docs/oci-dedicated-kms-integration.md](docs/oci-dedicated-kms-integration.md) - practical Oracle OCI Dedicated KMS setup guidance for wrapper/admin-panel usage and the direct-vs-OCI-Vault boundary
 - [docs/oci-dedicated-kms-compatibility-audit.md](docs/oci-dedicated-kms-compatibility-audit.md) - public-doc audit of Oracle OCI Dedicated KMS PKCS#11 fit vs current wrapper/admin/runtime scope
 - [docs/luna-vendor-extension-design.md](docs/luna-vendor-extension-design.md) - proposed package/boundary/loading/test strategy for future Luna-only `CA_*` support
