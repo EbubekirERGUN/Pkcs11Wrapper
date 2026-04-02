@@ -17,6 +17,7 @@
             <span class="page-tag">Mechanism correlation</span>
             <span class="page-tag">Retention aware</span>
             <span class="page-tag">Audit trace links</span>
+            <span class="page-tag">Ops summaries</span>
         </div>
     </div>
     <div class="page-hero-side">
@@ -35,7 +36,7 @@
 
 <div class="alert alert-info">
     <div class="fw-semibold">Safe telemetry surface</div>
-    <div class="small">Search and filter the redacted PKCS#11 event stream by device, slot, operation, mechanism, status, actor trace, and recent time window. Use <a href="audit">Audit Logs</a> when you need actor/action traceability; this page now links back into matching audit traces when request/session correlation is available.</div>
+    <div class="small">Search and filter the redacted PKCS#11 event stream by device, slot, operation, mechanism, slow-call threshold, status, actor trace, and recent time window. Use <a href="audit">Audit Logs</a> when you need actor/action traceability; this page now links back into matching audit traces when request/session correlation is available.</div>
 </div>
 
 @if (_storageStatus is not null)
@@ -46,70 +47,85 @@
     </div>
 }
 
+@{
+    IReadOnlyList<AdminPkcs11TelemetryEntry> filteredEntries = FilteredEntries;
+    Pkcs11TelemetryInsights insights = Pkcs11TelemetryInsights.Build(filteredEntries, DateTimeOffset.UtcNow, _slowOperationThresholdMilliseconds);
+}
+
 <div class="row g-3 mb-3">
-    <div class="col-xl-3 col-md-4 col-sm-6">
+    <div class="col-xl-2 col-md-4 col-sm-6">
         <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="metric-label">Loaded events</div>
+                <div class="metric-label">Loaded window</div>
                 <div class="display-6 metric-meta">@_entries.Count</div>
+                <div class="small metric-note">Newest events pulled from retained storage.</div>
             </div>
         </div>
     </div>
-    <div class="col-xl-3 col-md-4 col-sm-6">
+    <div class="col-xl-2 col-md-4 col-sm-6">
         <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="metric-label">Filtered events</div>
-                <div class="display-6 metric-meta">@FilteredEntries.Count</div>
+                <div class="metric-label">Current view</div>
+                <div class="display-6 metric-meta">@filteredEntries.Count</div>
+                <div class="small metric-note">Events after the current operator filters.</div>
             </div>
         </div>
     </div>
-    <div class="col-xl-3 col-md-4 col-sm-6">
+    <div class="col-xl-2 col-md-4 col-sm-6">
         <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="metric-label">Non-success</div>
-                <div class="display-6 metric-meta">@FilteredEntries.Count(entry => !Pkcs11TelemetryView.IsSuccess(entry))</div>
+                <div class="metric-label">Failure rate</div>
+                <div class="display-6 metric-meta">@FormatPercentage(insights.FailureRate)</div>
+                <div class="small metric-note">@insights.NonSuccessCount non-success event(s).</div>
             </div>
         </div>
     </div>
-    <div class="col-xl-3 col-md-4 col-sm-6">
+    <div class="col-xl-2 col-md-4 col-sm-6">
         <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="metric-label">Devices in window</div>
-                <div class="display-6 metric-meta">@AvailableDevices.Count</div>
+                <div class="metric-label">Slow ops</div>
+                <div class="display-6 metric-meta">@insights.SlowCount</div>
+                <div class="small metric-note">@FormatPercentage(insights.SlowRate) at or above @_slowOperationThresholdMilliseconds.ToString("0", CultureInfo.InvariantCulture) ms.</div>
             </div>
         </div>
     </div>
-    <div class="col-xl-3 col-md-4 col-sm-6">
+    <div class="col-xl-2 col-md-4 col-sm-6">
         <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="metric-label">Retained files</div>
-                <div class="display-6 metric-meta">@(_storageStatus?.RetainedFileCount ?? 0)</div>
+                <div class="metric-label">P95 latency</div>
+                <div class="display-6 metric-meta">@FormatDuration(insights.P95DurationMilliseconds)</div>
+                <div class="small metric-note">Worst-case in view: @FormatDuration(insights.MaxDurationMilliseconds).</div>
             </div>
         </div>
     </div>
-    <div class="col-xl-3 col-md-4 col-sm-6">
+    <div class="col-xl-2 col-md-4 col-sm-6">
         <div class="card shadow-sm h-100 metric-card">
             <div class="card-body">
-                <div class="metric-label">Retained size</div>
-                <div class="display-6 metric-meta">@FormatBytes(_storageStatus?.RetainedBytes ?? 0)</div>
+                <div class="metric-label">Hottest operation</div>
+                <div class="display-6 metric-meta telemetry-metric-text">@(string.IsNullOrWhiteSpace(insights.HottestOperationName) ? "—" : insights.HottestOperationName)</div>
+                <div class="small metric-note">@insights.HottestOperationCount call(s) in the current view.</div>
             </div>
         </div>
     </div>
-    <div class="col-xl-3 col-md-4 col-sm-6">
-        <div class="card shadow-sm h-100 metric-card">
-            <div class="card-body">
-                <div class="metric-label">Archive files</div>
-                <div class="display-6 metric-meta">@(_storageStatus?.ArchivedFileCount ?? 0)</div>
+</div>
+
+<div class="card shadow-sm mb-4 feature-card">
+    <div class="card-body d-flex flex-column gap-3">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+            <div>
+                <div class="metric-label">Operator focus</div>
+                <h2 class="h5 mb-1">Jump straight to likely problem slices</h2>
+                <div class="small text-muted">These shortcuts combine the existing filters into investigation-friendly presets so you can move from “there is noise” to “what exactly is failing or slow?” with one click.</div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-danger btn-sm" @onclick="FocusFailures" data-testid="telemetry-quick-failures">Focus failures</button>
+                <button class="btn btn-outline-warning btn-sm" @onclick="FocusReturnedFalse">Returned false</button>
+                <button class="btn btn-outline-primary btn-sm" @onclick="FocusSlowOperations" data-testid="telemetry-quick-slow">Slow ops &gt;= @_slowOperationThresholdMilliseconds.ToString("0", CultureInfo.InvariantCulture) ms</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="FocusLastHour" data-testid="telemetry-quick-last-hour">Last hour</button>
+                <button class="btn btn-outline-dark btn-sm" @onclick="ResetFilters" data-testid="telemetry-clear-filters">Clear focus</button>
             </div>
         </div>
-    </div>
-    <div class="col-xl-3 col-md-4 col-sm-6">
-        <div class="card shadow-sm h-100 metric-card">
-            <div class="card-body">
-                <div class="metric-label">Export cap</div>
-                <div class="display-6 metric-meta">@(_storageStatus?.ExportMaxEntries ?? 0)</div>
-            </div>
-        </div>
+        <div class="small text-muted">Current focus: @BuildFocusSummary()</div>
     </div>
 </div>
 
@@ -120,7 +136,7 @@
         </div>
         <div class="col-xl-3 col-lg-4 col-md-6">
             <a class="btn btn-outline-secondary" href="@BuildExportHref()" data-testid="telemetry-export">Download filtered JSON</a>
-            <div class="form-text">Exports only the redacted retained stream and respects the server-side export cap.</div>
+            <div class="form-text">Exports only the redacted retained stream, respects the server-side export cap, and carries the slow-call filter into the export query.</div>
         </div>
         <div class="col-xl-4 col-lg-5 col-md-6">
             <label class="form-label">Search</label>
@@ -146,6 +162,18 @@
                 }
             </select>
         </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Slot</label>
+            <input class="form-control" @bind="_slotFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="decimal or hex" />
+        </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Mechanism</label>
+            <input class="form-control" @bind="_mechanismFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="0x1082 or 4226" />
+        </div>
+        <div class="col-xl-2 col-lg-3 col-md-6">
+            <label class="form-label">Min duration (ms)</label>
+            <input class="form-control" @bind="_minDurationFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" inputmode="decimal" placeholder="250" data-testid="telemetry-min-duration" />
+        </div>
         <div class="col-xl-2 col-lg-4 col-md-6">
             <label class="form-label">Status</label>
             <select class="form-select" @bind="_statusFilter" @bind:after="OnFiltersChanged">
@@ -155,14 +183,6 @@
                 <option value="returned-false">Returned false</option>
                 <option value="failed">Failed</option>
             </select>
-        </div>
-        <div class="col-xl-2 col-lg-3 col-md-6">
-            <label class="form-label">Slot</label>
-            <input class="form-control" @bind="_slotFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="decimal or hex" />
-        </div>
-        <div class="col-xl-2 col-lg-3 col-md-6">
-            <label class="form-label">Mechanism</label>
-            <input class="form-control" @bind="_mechanismFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="0x1082 or 4226" />
         </div>
         <div class="col-xl-2 col-lg-3 col-md-6">
             <label class="form-label">Time range</label>
@@ -190,15 +210,157 @@
 {
     <div class="empty-state">No PKCS#11 telemetry has been captured yet.</div>
 }
-else if (FilteredEntries.Count == 0)
+else if (filteredEntries.Count == 0)
 {
     <div class="empty-state">No PKCS#11 telemetry matched the current filters.</div>
 }
 else
 {
+    <div class="row g-3 mb-4">
+        <div class="col-xl-4">
+            <div class="card shadow-sm h-100 feature-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                        <div>
+                            <div class="metric-label">Trend</div>
+                            <h2 class="h5 mb-1">Recent activity shape</h2>
+                            <div class="small text-muted">Each bucket shows total activity in the current view; the red segment highlights non-success volume.</div>
+                        </div>
+                        <span class="table-pill">@filteredEntries.Count event(s)</span>
+                    </div>
+                    <div class="telemetry-trend" data-testid="telemetry-trend">
+                        @foreach (Pkcs11TelemetryTrendBucket bucket in insights.Trend)
+                        {
+                            <div class="telemetry-trend-column">
+                                <div class="telemetry-trend-bar @(bucket.TotalCount == 0 ? "telemetry-trend-bar-empty" : string.Empty)" style="@BuildTrendBarStyle(bucket, insights.Trend)">
+                                    @if (bucket.NonSuccessCount > 0)
+                                    {
+                                        <div class="telemetry-trend-bar-fail" style="@BuildTrendFailureStyle(bucket)"></div>
+                                    }
+                                </div>
+                                <div class="telemetry-trend-count">@bucket.TotalCount</div>
+                                <div class="small text-muted">@bucket.Label</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-4">
+            <div class="card shadow-sm h-100 feature-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                        <div>
+                            <div class="metric-label">Top operations</div>
+                            <h2 class="h5 mb-1">Where the console is spending time</h2>
+                            <div class="small text-muted">Volume plus non-success count helps distinguish noisy-but-healthy calls from the paths that actually need attention.</div>
+                        </div>
+                        <span class="table-pill">Top @insights.TopOperations.Length</span>
+                    </div>
+
+                    @if (insights.TopOperations.Length == 0)
+                    {
+                        <div class="empty-state small">No operation summary is available for the current view.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive table-shell">
+                            <table class="table table-striped align-middle mb-0" data-testid="telemetry-top-operations">
+                                <thead>
+                                    <tr>
+                                        <th>Operation</th>
+                                        <th>Calls</th>
+                                        <th>Non-success</th>
+                                        <th>Avg / max</th>
+                                        <th>Focus</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (Pkcs11TelemetryOperationSummary summary in insights.TopOperations)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <div class="fw-semibold">@summary.OperationName</div>
+                                                <div class="small text-muted">@string.Join(", ", summary.Devices)</div>
+                                            </td>
+                                            <td><span class="table-pill table-pill-code">@summary.TotalCount</span></td>
+                                            <td><span class="table-pill @(summary.NonSuccessCount > 0 ? "telemetry-pill-danger" : string.Empty)">@summary.NonSuccessCount</span></td>
+                                            <td>
+                                                <div>@FormatDuration(summary.AverageDurationMilliseconds)</div>
+                                                <div class="small text-muted">max @FormatDuration(summary.MaxDurationMilliseconds)</div>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => FocusOperation(summary.OperationName)" data-testid="telemetry-top-operation-focus">Focus</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-4">
+            <div class="card shadow-sm h-100 feature-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                        <div>
+                            <div class="metric-label">Failure hotspots</div>
+                            <h2 class="h5 mb-1">What is failing, where, and how</h2>
+                            <div class="small text-muted">Grouped by operation, device, and failure signature so operators can jump into the exact noisy slice instead of reading the raw table first.</div>
+                        </div>
+                        <span class="table-pill @(insights.FailureHotspots.Length > 0 ? "telemetry-pill-danger" : string.Empty)">@insights.FailureHotspots.Length hotspot(s)</span>
+                    </div>
+
+                    @if (insights.FailureHotspots.Length == 0)
+                    {
+                        <div class="empty-state small">No failure hotspot is visible in the current view.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive table-shell">
+                            <table class="table table-striped align-middle mb-0" data-testid="telemetry-failure-hotspots">
+                                <thead>
+                                    <tr>
+                                        <th>Failure slice</th>
+                                        <th>Count</th>
+                                        <th>Latest</th>
+                                        <th>Focus</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (Pkcs11TelemetryFailureHotspot hotspot in insights.FailureHotspots)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <div class="fw-semibold">@hotspot.OperationName</div>
+                                                <div class="small text-muted">@hotspot.DeviceName • @hotspot.FailureSignature</div>
+                                            </td>
+                                            <td>
+                                                <div><span class="table-pill telemetry-pill-danger">@hotspot.Count</span></div>
+                                                <div class="small text-muted">max @FormatDuration(hotspot.MaxDurationMilliseconds)</div>
+                                            </td>
+                                            <td>
+                                                <span class="table-pill table-pill-code">@hotspot.LatestTimestampUtc.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-outline-danger btn-sm" @onclick="() => FocusHotspot(hotspot)" data-testid="telemetry-hotspot-focus">Investigate</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
         <div class="small text-muted">
-            Showing @CurrentRangeStart-@CurrentRangeEnd of @FilteredEntries.Count filtered event(s) from the latest @_entries.Count loaded item(s).
+            Showing @CurrentRangeStart-@CurrentRangeEnd of @filteredEntries.Count filtered event(s) from the latest @_entries.Count loaded item(s).
         </div>
         <div class="small text-muted">Page @CurrentPageIndex of @TotalPages</div>
     </div>
@@ -238,7 +400,7 @@ else
                         <td>
                             <span class="badge @Pkcs11TelemetryView.GetStatusBadgeClass(entry)">@entry.Status</span>
                         </td>
-                        <td><span class="table-pill table-pill-code">@entry.DurationMilliseconds.ToString("F2") ms</span></td>
+                        <td><span class="table-pill table-pill-code">@FormatDuration(entry.DurationMilliseconds)</span></td>
                         <td>
                             <div class="d-flex flex-wrap gap-1 mb-1">
                                 @if (!string.IsNullOrWhiteSpace(entry.ReturnValue))
@@ -308,6 +470,7 @@ else
 
 @code {
     private const int _loadWindowSize = 500;
+    private const double _slowOperationThresholdMilliseconds = 250;
 
     private IReadOnlyList<AdminPkcs11TelemetryEntry> _entries = [];
     private AdminPkcs11TelemetryStorageStatus? _storageStatus;
@@ -316,6 +479,7 @@ else
     private string _slotFilter = string.Empty;
     private string _operationFilter = string.Empty;
     private string _mechanismFilter = string.Empty;
+    private string _minDurationFilter = string.Empty;
     private string _statusFilter = "all";
     private string _timeRangeFilter = "24h";
     private int _pageSize = 25;
@@ -333,6 +497,11 @@ else
         .OrderBy(operation => operation, StringComparer.Ordinal)
         .ToArray();
 
+    private double? MinDurationMilliseconds
+        => double.TryParse(_minDurationFilter, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) && value > 0
+            ? value
+            : null;
+
     private IReadOnlyList<AdminPkcs11TelemetryEntry> FilteredEntries => Pkcs11TelemetryView.Apply(
         _entries,
         _searchText,
@@ -340,6 +509,7 @@ else
         _slotFilter,
         _operationFilter,
         _mechanismFilter,
+        MinDurationMilliseconds,
         _statusFilter,
         _timeRangeFilter,
         DateTimeOffset.UtcNow);
@@ -386,6 +556,65 @@ else
         return Task.CompletedTask;
     }
 
+    private Task FocusFailures()
+    {
+        _statusFilter = "non-success";
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
+    private Task FocusReturnedFalse()
+    {
+        _statusFilter = "returned-false";
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
+    private Task FocusSlowOperations()
+    {
+        _minDurationFilter = _slowOperationThresholdMilliseconds.ToString("0", CultureInfo.InvariantCulture);
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
+    private Task FocusLastHour()
+    {
+        _timeRangeFilter = "1h";
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
+    private Task FocusOperation(string operationName)
+    {
+        _operationFilter = operationName;
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
+    private Task FocusHotspot(Pkcs11TelemetryFailureHotspot hotspot)
+    {
+        _operationFilter = hotspot.OperationName;
+        _deviceFilter = hotspot.DeviceName;
+        _searchText = hotspot.FailureSignature;
+        _statusFilter = "non-success";
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
+    private Task ResetFilters()
+    {
+        _searchText = string.Empty;
+        _deviceFilter = string.Empty;
+        _slotFilter = string.Empty;
+        _operationFilter = string.Empty;
+        _mechanismFilter = string.Empty;
+        _minDurationFilter = string.Empty;
+        _statusFilter = "all";
+        _timeRangeFilter = "24h";
+        _pageIndex = 1;
+        return Task.CompletedTask;
+    }
+
     private void PreviousPage()
     {
         if (_pageIndex > 1)
@@ -427,6 +656,7 @@ else
             ["slot"] = string.IsNullOrWhiteSpace(_slotFilter) ? null : _slotFilter,
             ["operation"] = string.IsNullOrWhiteSpace(_operationFilter) ? null : _operationFilter,
             ["mechanism"] = string.IsNullOrWhiteSpace(_mechanismFilter) ? null : _mechanismFilter,
+            ["minDurationMs"] = MinDurationMilliseconds?.ToString(CultureInfo.InvariantCulture),
             ["status"] = string.IsNullOrWhiteSpace(_statusFilter) ? null : _statusFilter,
             ["timeRange"] = string.IsNullOrWhiteSpace(_timeRangeFilter) ? null : _timeRangeFilter
         };
@@ -434,6 +664,63 @@ else
         return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
             "/telemetry/export",
             query.Where(pair => !string.IsNullOrWhiteSpace(pair.Value)).ToDictionary(pair => pair.Key, pair => pair.Value));
+    }
+
+    private string BuildFocusSummary()
+    {
+        List<string> parts = [];
+        if (!string.IsNullOrWhiteSpace(_deviceFilter))
+        {
+            parts.Add($"device={_deviceFilter}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_operationFilter))
+        {
+            parts.Add($"operation={_operationFilter}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_slotFilter))
+        {
+            parts.Add($"slot={_slotFilter}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_mechanismFilter))
+        {
+            parts.Add($"mechanism={_mechanismFilter}");
+        }
+
+        if (MinDurationMilliseconds.HasValue)
+        {
+            parts.Add($"min-duration={FormatDuration(MinDurationMilliseconds.Value)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            parts.Add($"search='{_searchText}'");
+        }
+
+        if (!string.Equals(_statusFilter, "all", StringComparison.Ordinal))
+        {
+            parts.Add($"status={_statusFilter}");
+        }
+
+        parts.Add($"time={_timeRangeFilter}");
+        return string.Join(" • ", parts);
+    }
+
+    private static string BuildTrendBarStyle(Pkcs11TelemetryTrendBucket bucket, IReadOnlyList<Pkcs11TelemetryTrendBucket> trend)
+    {
+        int maxCount = Math.Max(1, trend.Max(static point => point.TotalCount));
+        double height = 24 + ((bucket.TotalCount / (double)maxCount) * 112);
+        return FormattableString.Invariant($"height:{height:0.#}px");
+    }
+
+    private static string BuildTrendFailureStyle(Pkcs11TelemetryTrendBucket bucket)
+    {
+        double percentage = bucket.TotalCount == 0
+            ? 0
+            : (bucket.NonSuccessCount / (double)bucket.TotalCount) * 100;
+        return FormattableString.Invariant($"height:{percentage:0.#}%");
     }
 
     private static string FormatBytes(long bytes)
@@ -454,4 +741,12 @@ else
 
         return $"{value:0.#} {units[unitIndex]}";
     }
+
+    private static string FormatPercentage(double value)
+        => value <= 0
+            ? "0%"
+            : $"{value * 100:0.#}%";
+
+    private static string FormatDuration(double milliseconds)
+        => $"{milliseconds:0.##} ms";
 }

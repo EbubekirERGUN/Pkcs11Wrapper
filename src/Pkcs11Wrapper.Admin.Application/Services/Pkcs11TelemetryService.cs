@@ -44,10 +44,18 @@ public sealed class Pkcs11TelemetryService(IPkcs11TelemetryStore store, IAdminAc
         => new AdminPkcs11TelemetryListener(store, device, actorContext.GetCurrent(), Activity.Current?.TraceId.ToString());
 
     private AdminPkcs11TelemetryQuery NormalizeQuery(AdminPkcs11TelemetryQuery query)
-        => query with { Take = NormalizeTake(query.Take, defaultTake: 500) };
+        => query with
+        {
+            Take = NormalizeTake(query.Take, defaultTake: 500),
+            MinDurationMilliseconds = NormalizeMinDuration(query.MinDurationMilliseconds)
+        };
 
     private AdminPkcs11TelemetryQuery NormalizeExportQuery(AdminPkcs11TelemetryQuery query)
-        => query with { Take = NormalizeTake(query.Take, defaultTake: GetNormalizedExportMaxEntries()) };
+        => query with
+        {
+            Take = NormalizeTake(query.Take, defaultTake: GetNormalizedExportMaxEntries()),
+            MinDurationMilliseconds = NormalizeMinDuration(query.MinDurationMilliseconds)
+        };
 
     private int NormalizeTake(int take, int defaultTake)
     {
@@ -62,6 +70,11 @@ public sealed class Pkcs11TelemetryService(IPkcs11TelemetryStore store, IAdminAc
 
     private int GetNormalizedExportMaxEntries()
         => options.ExportMaxEntries <= 0 ? 5000 : options.ExportMaxEntries;
+
+    private static double? NormalizeMinDuration(double? minDurationMilliseconds)
+        => minDurationMilliseconds.HasValue && minDurationMilliseconds.Value > 0
+            ? minDurationMilliseconds.Value
+            : null;
 
     private sealed class AdminPkcs11TelemetryListener(IPkcs11TelemetryStore store, HsmDeviceProfile device, AdminActorInfo actor, string? activityTraceId) : IPkcs11OperationTelemetryListener
     {

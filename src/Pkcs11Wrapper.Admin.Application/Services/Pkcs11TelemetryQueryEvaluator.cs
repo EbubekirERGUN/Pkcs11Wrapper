@@ -58,6 +58,11 @@ public static class Pkcs11TelemetryQueryEvaluator
             filtered = filtered.Where(item => MatchesNumericFilter(item.MechanismType, mechanismTerm));
         }
 
+        if (query.MinDurationMilliseconds.HasValue && query.MinDurationMilliseconds.Value > 0)
+        {
+            filtered = filtered.Where(item => item.DurationMilliseconds >= query.MinDurationMilliseconds.Value);
+        }
+
         filtered = (query.StatusFilter ?? "all").ToLowerInvariant() switch
         {
             "success" => filtered.Where(IsSuccess),
