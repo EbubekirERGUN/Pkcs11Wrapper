@@ -1,4 +1,4 @@
-# Crypto API host scaffold + API key lifecycle + alias/policy slice
+# Crypto API host scaffold + API key lifecycle + first customer-facing operations
 
 `Pkcs11Wrapper.CryptoApi` is the first machine-facing service host for the repository.
 
@@ -22,19 +22,22 @@ That separation keeps the product model simple for now:
 
 > one admin dashboard + many stateless crypto API instances
 
-The admin app remains the place for operations and governance. The crypto API host becomes the place for future request/response signing, verification, encryption, decryption, wrapping, and key-resolution workflows.
+The admin app remains the place for operations and governance. The crypto API host is now the place for the first customer-facing sign / verify / random workflows, with future room for broader crypto contracts.
 
 ## Current scaffold contents
 
-The current slice is still deliberately small, but now includes the first practical API client / API key lifecycle foundation plus the first alias-routing / policy-enforcement slice for future multi-instance deployments:
+The current slice is still deliberately small, but now includes the first practical API client / API key lifecycle foundation plus the first useful customer-facing crypto endpoints:
 
 - dedicated `src/Pkcs11Wrapper.CryptoApi` project in the solution
 - ASP.NET Core host with DI + configuration binding
 - service document at `/`
 - versioned route group rooted at `/api/v1`
 - runtime descriptor endpoint at `/api/v1/runtime`
-- explicit future operation namespace at `/api/v1/operations`
+- explicit operation namespace at `/api/v1/operations`
 - alias-routing + policy-check endpoint at `/api/v1/operations/authorize`
+- customer-facing sign endpoint at `/api/v1/operations/sign`
+- customer-facing verify endpoint at `/api/v1/operations/verify`
+- customer-facing random endpoint at `/api/v1/operations/random`
 - shared-state descriptor endpoint at `/api/v1/shared-state`
 - authenticated self-introspection endpoint at `/api/v1/auth/self`
 - liveness endpoint at `/health/live`
@@ -48,7 +51,7 @@ The current slice is still deliberately small, but now includes the first practi
   - client-to-policy and alias-to-policy bindings
 - generated API key secrets that are revealed once, hashed before persistence, and tracked with disable / revoke / expiry / last-used metadata
 - admin control-plane scaffolding in `Pkcs11Wrapper.Admin.Web` via the **Crypto API Access** page when it is configured against the same shared store
-- dedicated test project covering base-path normalization, runtime descriptor metadata, readiness health behavior, shared-state round-tripping, lifecycle management, and schema migration behavior
+- dedicated test project covering base-path normalization, runtime descriptor metadata, readiness health behavior, shared-state round-tripping, lifecycle management, schema migration behavior, and customer-facing route/integration coverage
 
 ## Runtime model
 
@@ -99,14 +102,14 @@ The store prepares the state that cannot safely stay per-node local once API ins
   - raw PKCS#11 locator details stay in shared state and internal services, not in the customer-facing response surface
 - **Policies**
   - versioned JSON policy document payload
-  - pragmatic v1 model: allowed operation list (for example `sign`, `verify`, `encrypt`, `decrypt`)
+  - pragmatic v1 model: allowed operation list (for example `sign`, `verify`, `random`)
   - enable/disable state
 - **Bindings**
   - client → policy
   - alias → policy
   - authorization succeeds only when an enabled client and enabled alias share at least one enabled policy whose document allows the requested operation
 
-That gives the repo a concrete place to keep future request authentication, alias resolution, and policy enforcement inputs outside any single node.
+That gives the repo a concrete place to keep request authentication, alias resolution, and policy enforcement inputs outside any single node.
 
 ## Configuration
 
@@ -120,7 +123,8 @@ Current settings live under three sections:
   },
   "CryptoApiRuntime": {
     "DisableHttpsRedirection": false,
-    "ModulePath": "/usr/lib/libsofthsm2.so"
+    "ModulePath": "/usr/lib/libsofthsm2.so",
+    "UserPin": "98765432"
   },
   "CryptoApiSharedPersistence": {
     "Provider": "Sqlite",
@@ -132,8 +136,9 @@ Current settings live under three sections:
 
 Notes:
 
-- `CryptoApiHost:ApiBasePath` defines where future machine-facing routes will live.
+- `CryptoApiHost:ApiBasePath` defines where machine-facing routes live.
 - `CryptoApiRuntime:ModulePath` is required for readiness because the host is not actually ready to serve crypto traffic until it can load a PKCS#11 module.
+- `CryptoApiRuntime:UserPin` is optional but practically required for many sign / HMAC / private-object flows. Treat it as deployment secret material, not as checked-in config.
 - `CryptoApiRuntime:DisableHttpsRedirection=true` is useful for local/container smoke flows behind a trusted reverse proxy or local HTTP test loop.
 - `CryptoApiSharedPersistence:Provider` currently supports only `Sqlite`.
 - `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
@@ -145,6 +150,7 @@ Notes:
 ```bash
 cd src/Pkcs11Wrapper.CryptoApi
 export CryptoApiRuntime__ModulePath=/usr/lib/libsofthsm2.so
+export CryptoApiRuntime__UserPin=98765432
 export CryptoApiRuntime__DisableHttpsRedirection=true
 export CryptoApiSharedPersistence__ConnectionString='Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db'
 dotnet run
@@ -161,19 +167,23 @@ Useful endpoints:
 - `/api/v1/shared-state`
 - `/api/v1/auth/self` using `X-Api-Key-Id` + `X-Api-Key-Secret`
 - `POST /api/v1/operations/authorize` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "operation": "sign" }`
+- `POST /api/v1/operations/sign` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "algorithm": "RS256", "payloadBase64": "aGVsbG8=" }`
+- `POST /api/v1/operations/verify` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "algorithm": "RS256", "payloadBase64": "aGVsbG8=", "signatureBase64": "..." }`
+- `POST /api/v1/operations/random` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "length": 32 }`
 
 `/api/v1/shared-state` returns provider/schema/count metadata when the shared store is configured and available.
 `/api/v1/auth/self` validates the hashed shared secret, enforces disabled / revoked / expired state, updates last-used metadata, and returns the authenticated client context that future crypto operations can reuse.
-`POST /api/v1/operations/authorize` is the first customer-facing alias/policy slice: callers target a key alias instead of raw PKCS#11 locator details, the host resolves that alias to the internal route metadata, and the response confirms the authorization result without exposing the underlying PKCS#11 path.
+`POST /api/v1/operations/authorize` remains the low-level alias/policy check.
+`POST /api/v1/operations/sign`, `verify`, and `random` reuse that same authentication + authorization model and keep the public contract stable and customer-facing: callers provide alias names, high-level algorithms such as `RS256` / `PS256` / `ES256` / `HS256`, and base64 payloads instead of raw PKCS#11 device/slot/handle details.
 
 ## Intentionally out of scope for this issue
 
 This scaffold still does **not** yet add:
 
-- concrete sign/verify/encrypt/decrypt request contracts
+- broader crypto contracts such as encrypt/decrypt/wrap/unwrap or key metadata lookup
 - OAuth/OIDC or broader external authn/authz protocol handling beyond the first shared API-key slice
 - tenant routing / portal concepts / edge orchestration
 - durable job/workflow processing state
 - a customer self-service portal or duplicated operator UI inside the API host
 
-Those can land incrementally once the machine-facing contract is defined.
+Those can land incrementally once the machine-facing contract expands.

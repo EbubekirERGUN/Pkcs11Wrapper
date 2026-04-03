@@ -5,6 +5,7 @@ using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Endpoints;
 using Pkcs11Wrapper.CryptoApi.Health;
+using Pkcs11Wrapper.CryptoApi.Operations;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.CryptoApi.SharedState;
 
@@ -29,6 +30,7 @@ builder.Services.AddOptions<CryptoApiRuntimeOptions>()
     .PostConfigure(static options =>
     {
         options.ModulePath = options.ModulePath?.Trim();
+        options.UserPin = options.UserPin?.Trim();
     });
 
 builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
@@ -51,6 +53,7 @@ builder.Services.AddSingleton<CryptoApiClientManagementService>();
 builder.Services.AddSingleton<CryptoApiClientAuthenticationService>();
 builder.Services.AddSingleton<CryptoApiKeyAccessManagementService>();
 builder.Services.AddSingleton<CryptoApiKeyOperationAuthorizationService>();
+builder.Services.AddSingleton<ICryptoApiCustomerOperationService, CryptoApiPkcs11CustomerOperationService>();
 builder.Services.AddSingleton<ICryptoApiSharedStateStore, SqliteCryptoApiSharedStateStore>();
 builder.Services.AddHealthChecks()
     .AddCheck<CryptoApiModuleReadinessHealthCheck>("pkcs11-module", tags: ["ready"])

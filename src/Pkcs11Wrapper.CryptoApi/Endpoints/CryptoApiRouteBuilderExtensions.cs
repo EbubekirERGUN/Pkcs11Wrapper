@@ -1,6 +1,8 @@
 using Pkcs11Wrapper.CryptoApi.Access;
+using Pkcs11Wrapper.Native;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
+using Pkcs11Wrapper.CryptoApi.Operations;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.CryptoApi.SharedState;
 
@@ -22,7 +24,7 @@ public static class CryptoApiRouteBuilderExtensions
                 descriptor.InstanceId,
                 descriptor.ApiBasePath,
                 descriptor.DeploymentModel,
-                "Machine-facing host for future sign/verify/encrypt/decrypt workflows. No local operator UI or per-node auth/policy files.",
+                "Machine-facing host for customer-facing sign/verify/random workflows backed by shared API-key auth, alias routing, and policy checks. No local operator UI or per-node auth/policy files.",
                 descriptor.CurrentSurface,
                 descriptor.SharedPersistenceConfigured,
                 descriptor.SharedPersistenceProvider,
@@ -31,8 +33,9 @@ public static class CryptoApiRouteBuilderExtensions
                 [
                     $"{CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName}: public API key identifier",
                     $"{CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName}: one-time revealed API key secret",
-                    $"POST {descriptor.ApiBasePath}/operations/authorize for alias + operation policy checks",
-                    "Concrete sign/verify/encrypt/decrypt request contracts that reuse the shared alias/policy model"
+                    $"POST {descriptor.ApiBasePath}/operations/sign with {{ keyAlias, algorithm, payloadBase64 }}",
+                    $"POST {descriptor.ApiBasePath}/operations/verify with {{ keyAlias, algorithm, payloadBase64, signatureBase64 }}",
+                    $"POST {descriptor.ApiBasePath}/operations/random with {{ keyAlias, length }}"
                 ]));
         });
 
@@ -45,9 +48,10 @@ public static class CryptoApiRouteBuilderExtensions
             return TypedResults.Ok(new CryptoApiOperationSurfaceDocument(
                 descriptor.ServiceName,
                 descriptor.ApiBasePath,
-                "The first request-scoped alias-routing and policy-enforcement slice is live via POST /operations/authorize. Concrete crypto request/response contracts will be added under this route space without turning the host into a stateful admin portal or relying on per-node local auth/policy files.",
-                ["sign", "verify", "encrypt", "decrypt", "unwrap/wrap", "key metadata lookup"],
-                ["POST /operations/authorize"]));
+                "Customer-facing v1 sign/verify/random routes are live and reuse the shared API-key, alias-routing, and policy-enforcement model.",
+                ["sign", "verify", "random"],
+                ["key metadata lookup", "encrypt", "decrypt", "wrap", "unwrap"],
+                ["POST /operations/authorize", "POST /operations/sign", "POST /operations/verify", "POST /operations/random"]));
         });
 
         group.MapGet("/shared-state", static async Task<IResult> (ICryptoApiSharedStateStore sharedStateStore, CancellationToken cancellationToken) =>
@@ -63,29 +67,14 @@ public static class CryptoApiRouteBuilderExtensions
 
         group.MapGet("/auth/self", static async Task<IResult> (HttpContext httpContext, CryptoApiClientAuthenticationService authenticationService, CancellationToken cancellationToken) =>
         {
-            string? keyIdentifier = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName].ToString();
-            string? secret = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName].ToString();
-            CryptoApiClientAuthenticationResult result = await authenticationService.AuthenticateAsync(keyIdentifier, secret, cancellationToken);
-            if (!result.Succeeded || result.Client is null)
+            AuthenticationAttempt authentication = await AuthenticateAsync(httpContext, authenticationService, cancellationToken);
+            if (authentication.Error is not null)
             {
-                return Results.Problem(
-                    title: "API key authentication failed.",
-                    detail: result.FailureReason,
-                    statusCode: StatusCodes.Status401Unauthorized);
+                return authentication.Error;
             }
 
-            return Results.Ok(new CryptoApiAuthenticatedClientDocument(
-                result.Client.ClientId,
-                result.Client.ClientName,
-                result.Client.DisplayName,
-                result.Client.ApplicationType,
-                result.Client.AuthenticationMode,
-                result.Client.ClientKeyId,
-                result.Client.KeyIdentifier,
-                result.Client.CredentialType,
-                result.Client.AuthenticatedAtUtc,
-                result.Client.ExpiresAtUtc,
-                result.Client.BoundPolicyIds));
+            CryptoApiAuthenticatedClient client = authentication.Client!;
+            return Results.Ok(ToAuthenticatedClientDocument(client));
         });
 
         group.MapPost("/operations/authorize", static async Task<IResult> (
@@ -95,56 +84,22 @@ public static class CryptoApiRouteBuilderExtensions
             CryptoApiKeyOperationAuthorizationService authorizationService,
             CancellationToken cancellationToken) =>
         {
-            string? keyIdentifier = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName].ToString();
-            string? secret = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName].ToString();
-            CryptoApiClientAuthenticationResult authentication = await authenticationService.AuthenticateAsync(keyIdentifier, secret, cancellationToken);
-            if (!authentication.Succeeded || authentication.Client is null)
+            AuthorizationAttempt authorization = await AuthenticateAndAuthorizeAsync(
+                httpContext,
+                request.KeyAlias,
+                request.Operation,
+                authenticationService,
+                authorizationService,
+                cancellationToken);
+
+            if (authorization.Error is not null)
             {
-                return Results.Problem(
-                    title: "API key authentication failed.",
-                    detail: authentication.FailureReason,
-                    statusCode: StatusCodes.Status401Unauthorized);
+                return authorization.Error;
             }
 
-            CryptoApiKeyOperationAuthorizationResult authorization;
-            try
-            {
-                authorization = await authorizationService.AuthorizeAsync(
-                    authentication.Client,
-                    request.KeyAlias,
-                    request.Operation,
-                    cancellationToken);
-            }
-            catch (ArgumentException ex)
-            {
-                return Results.Problem(
-                    title: "Invalid authorization request.",
-                    detail: ex.Message,
-                    statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            if (!authorization.Succeeded || authorization.Authorization is null)
-            {
-                return Results.Problem(
-                    title: "Key alias authorization failed.",
-                    detail: authorization.FailureReason,
-                    statusCode: StatusCodes.Status403Forbidden);
-            }
-
-            CryptoApiAuthorizedKeyOperation allowedOperation = authorization.Authorization;
+            CryptoApiAuthorizedKeyOperation allowedOperation = authorization.Authorization!;
             return Results.Ok(new CryptoApiAuthorizedKeyOperationDocument(
-                Client: new CryptoApiAuthenticatedClientDocument(
-                    allowedOperation.Client.ClientId,
-                    allowedOperation.Client.ClientName,
-                    allowedOperation.Client.DisplayName,
-                    allowedOperation.Client.ApplicationType,
-                    allowedOperation.Client.AuthenticationMode,
-                    allowedOperation.Client.ClientKeyId,
-                    allowedOperation.Client.KeyIdentifier,
-                    allowedOperation.Client.CredentialType,
-                    allowedOperation.Client.AuthenticatedAtUtc,
-                    allowedOperation.Client.ExpiresAtUtc,
-                    allowedOperation.Client.BoundPolicyIds),
+                Client: ToAuthenticatedClientDocument(allowedOperation.Client),
                 Authorization: new CryptoApiAuthorizedKeyOperationSummary(
                     Operation: allowedOperation.Operation,
                     AliasId: allowedOperation.AliasId,
@@ -155,8 +110,214 @@ public static class CryptoApiRouteBuilderExtensions
                     .ToArray()));
         });
 
+        group.MapPost("/operations/sign", static async Task<IResult> (
+            HttpContext httpContext,
+            CryptoApiSignRequest request,
+            CryptoApiClientAuthenticationService authenticationService,
+            CryptoApiKeyOperationAuthorizationService authorizationService,
+            ICryptoApiCustomerOperationService operationService,
+            CancellationToken cancellationToken) =>
+        {
+            AuthorizationAttempt authorization = await AuthenticateAndAuthorizeAsync(
+                httpContext,
+                request.KeyAlias,
+                "sign",
+                authenticationService,
+                authorizationService,
+                cancellationToken);
+
+            if (authorization.Error is not null)
+            {
+                return authorization.Error;
+            }
+
+            try
+            {
+                CryptoApiSignOperationResult result = operationService.Sign(authorization.Authorization!, request.Algorithm, request.PayloadBase64);
+                return Results.Ok(new
+                {
+                    authorization.Authorization!.AliasName,
+                    result.Algorithm,
+                    SignatureBase64 = Convert.ToBase64String(result.Signature),
+                    SignatureLength = result.Signature.Length,
+                    SignedAtUtc = result.CompletedAtUtc
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateOperationProblem("Sign request failed.", ex);
+            }
+        });
+
+        group.MapPost("/operations/verify", static async Task<IResult> (
+            HttpContext httpContext,
+            CryptoApiVerifyRequest request,
+            CryptoApiClientAuthenticationService authenticationService,
+            CryptoApiKeyOperationAuthorizationService authorizationService,
+            ICryptoApiCustomerOperationService operationService,
+            CancellationToken cancellationToken) =>
+        {
+            AuthorizationAttempt authorization = await AuthenticateAndAuthorizeAsync(
+                httpContext,
+                request.KeyAlias,
+                "verify",
+                authenticationService,
+                authorizationService,
+                cancellationToken);
+
+            if (authorization.Error is not null)
+            {
+                return authorization.Error;
+            }
+
+            try
+            {
+                CryptoApiVerifyOperationResult result = operationService.Verify(authorization.Authorization!, request.Algorithm, request.PayloadBase64, request.SignatureBase64);
+                return Results.Ok(new
+                {
+                    authorization.Authorization!.AliasName,
+                    result.Algorithm,
+                    result.Verified,
+                    VerifiedAtUtc = result.CompletedAtUtc
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateOperationProblem("Verify request failed.", ex);
+            }
+        });
+
+        group.MapPost("/operations/random", static async Task<IResult> (
+            HttpContext httpContext,
+            CryptoApiRandomRequest request,
+            CryptoApiClientAuthenticationService authenticationService,
+            CryptoApiKeyOperationAuthorizationService authorizationService,
+            ICryptoApiCustomerOperationService operationService,
+            CancellationToken cancellationToken) =>
+        {
+            AuthorizationAttempt authorization = await AuthenticateAndAuthorizeAsync(
+                httpContext,
+                request.KeyAlias,
+                "random",
+                authenticationService,
+                authorizationService,
+                cancellationToken);
+
+            if (authorization.Error is not null)
+            {
+                return authorization.Error;
+            }
+
+            try
+            {
+                CryptoApiRandomOperationResult result = operationService.GenerateRandom(authorization.Authorization!, request.Length);
+                return Results.Ok(new
+                {
+                    authorization.Authorization!.AliasName,
+                    request.Length,
+                    RandomBase64 = Convert.ToBase64String(result.RandomBytes),
+                    GeneratedAtUtc = result.CompletedAtUtc
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateOperationProblem("Random request failed.", ex);
+            }
+        });
+
         return endpoints;
     }
+
+    private static async Task<AuthenticationAttempt> AuthenticateAsync(
+        HttpContext httpContext,
+        CryptoApiClientAuthenticationService authenticationService,
+        CancellationToken cancellationToken)
+    {
+        string? keyIdentifier = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName].ToString();
+        string? secret = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName].ToString();
+        CryptoApiClientAuthenticationResult result = await authenticationService.AuthenticateAsync(keyIdentifier, secret, cancellationToken);
+        if (!result.Succeeded || result.Client is null)
+        {
+            return new AuthenticationAttempt(
+                null,
+                Results.Problem(
+                    title: "API key authentication failed.",
+                    detail: result.FailureReason,
+                    statusCode: StatusCodes.Status401Unauthorized));
+        }
+
+        return new AuthenticationAttempt(result.Client, null);
+    }
+
+    private static async Task<AuthorizationAttempt> AuthenticateAndAuthorizeAsync(
+        HttpContext httpContext,
+        string? keyAlias,
+        string? operation,
+        CryptoApiClientAuthenticationService authenticationService,
+        CryptoApiKeyOperationAuthorizationService authorizationService,
+        CancellationToken cancellationToken)
+    {
+        AuthenticationAttempt authentication = await AuthenticateAsync(httpContext, authenticationService, cancellationToken);
+        if (authentication.Error is not null)
+        {
+            return new AuthorizationAttempt(null, authentication.Error);
+        }
+
+        try
+        {
+            CryptoApiKeyOperationAuthorizationResult authorization = await authorizationService.AuthorizeAsync(
+                authentication.Client!,
+                keyAlias,
+                operation,
+                cancellationToken);
+
+            if (!authorization.Succeeded || authorization.Authorization is null)
+            {
+                return new AuthorizationAttempt(
+                    null,
+                    Results.Problem(
+                        title: "Key alias authorization failed.",
+                        detail: authorization.FailureReason,
+                        statusCode: StatusCodes.Status403Forbidden));
+            }
+
+            return new AuthorizationAttempt(authorization.Authorization, null);
+        }
+        catch (ArgumentException ex)
+        {
+            return new AuthorizationAttempt(
+                null,
+                Results.Problem(
+                    title: "Invalid authorization request.",
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status400BadRequest));
+        }
+    }
+
+    private static IResult CreateOperationProblem(string title, Exception exception)
+        => exception switch
+        {
+            ArgumentException ex => Results.Problem(title: title, detail: ex.Message, statusCode: StatusCodes.Status400BadRequest),
+            CryptoApiOperationConfigurationException ex => Results.Problem(title: title, detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable),
+            CryptoApiOperationExecutionException ex => Results.Problem(title: title, detail: ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity),
+            Pkcs11Exception ex => Results.Problem(title: title, detail: ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity),
+            InvalidOperationException ex => Results.Problem(title: title, detail: ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity),
+            _ => Results.Problem(title: title, detail: "The Crypto API host could not complete the request.", statusCode: StatusCodes.Status500InternalServerError)
+        };
+
+    private static CryptoApiAuthenticatedClientDocument ToAuthenticatedClientDocument(CryptoApiAuthenticatedClient client)
+        => new(
+            client.ClientId,
+            client.ClientName,
+            client.DisplayName,
+            client.ApplicationType,
+            client.AuthenticationMode,
+            client.ClientKeyId,
+            client.KeyIdentifier,
+            client.CredentialType,
+            client.AuthenticatedAtUtc,
+            client.ExpiresAtUtc,
+            client.BoundPolicyIds);
 
     private sealed record CryptoApiServiceDocument(
         string ServiceName,
@@ -179,6 +340,7 @@ public static class CryptoApiRouteBuilderExtensions
         string ServiceName,
         string ApiBasePath,
         string Status,
+        IReadOnlyList<string> CurrentOperations,
         IReadOnlyList<string> PlannedOperations,
         IReadOnlyList<string> CurrentEndpoints);
 
@@ -199,6 +361,21 @@ public static class CryptoApiRouteBuilderExtensions
         string KeyAlias,
         string Operation);
 
+    private sealed record CryptoApiSignRequest(
+        string KeyAlias,
+        string Algorithm,
+        string PayloadBase64);
+
+    private sealed record CryptoApiVerifyRequest(
+        string KeyAlias,
+        string Algorithm,
+        string PayloadBase64,
+        string SignatureBase64);
+
+    private sealed record CryptoApiRandomRequest(
+        string KeyAlias,
+        int Length);
+
     private sealed record CryptoApiAuthorizedKeyOperationDocument(
         CryptoApiAuthenticatedClientDocument Client,
         CryptoApiAuthorizedKeyOperationSummary Authorization,
@@ -214,4 +391,12 @@ public static class CryptoApiRouteBuilderExtensions
         Guid PolicyId,
         string PolicyName,
         int Revision);
+
+    private sealed record AuthenticationAttempt(
+        CryptoApiAuthenticatedClient? Client,
+        IResult? Error);
+
+    private sealed record AuthorizationAttempt(
+        CryptoApiAuthorizedKeyOperation? Authorization,
+        IResult? Error);
 }
