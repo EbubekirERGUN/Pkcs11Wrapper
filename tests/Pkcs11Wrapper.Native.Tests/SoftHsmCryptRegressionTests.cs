@@ -27,6 +27,7 @@ public sealed class SoftHsmCryptRegressionTests
     private const nuint CkrKeyUnwrappable = 0x00000067u;
     private const nuint CkrKeyFunctionNotPermitted = 0x00000068u;
     private const nuint CkrObjectHandleInvalid = 0x00000082u;
+    private const nuint CkrTokenNotRecognized = 0x000000e1u;
 
     [Fact]
     public void InterfaceDiscoveryGracefullyReportsAbsentOnSoftHsm()
@@ -1743,6 +1744,24 @@ public sealed class SoftHsmCryptRegressionTests
 
         using Pkcs11Session replacementSession = activeContext.Module.OpenSession(activeContext.SlotId);
         Assert.Equal(activeContext.SlotId, replacementSession.GetInfo().SlotId);
+    }
+
+    [Fact]
+    public void UninitializedSoftHsmSlotCanAdvertiseTokenPresenceButRejectSessionOpen()
+    {
+        if (!TryCreateProvisioningContext(out ProvisioningContext? context))
+        {
+            return;
+        }
+
+        using ProvisioningContext activeContext = context!;
+        Pkcs11SlotInfo slotInfo = activeContext.Module.GetSlotInfo(activeContext.SlotId);
+        Assert.True(slotInfo.Flags.HasFlag(Pkcs11SlotFlags.TokenPresent));
+        Assert.True(activeContext.Module.TryGetTokenInfo(activeContext.SlotId, out Pkcs11TokenInfo tokenInfo));
+        Assert.False(tokenInfo.Flags.HasFlag(Pkcs11TokenFlags.TokenInitialized));
+
+        Pkcs11Exception exception = Assert.Throws<Pkcs11Exception>(() => activeContext.Module.OpenSession(activeContext.SlotId));
+        Assert.Equal(CkrTokenNotRecognized, exception.Result.Value);
     }
 
     [Fact]

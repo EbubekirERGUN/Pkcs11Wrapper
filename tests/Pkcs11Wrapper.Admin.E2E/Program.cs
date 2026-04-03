@@ -154,7 +154,31 @@ internal static class AdminRuntimeE2E
         await WaitForVisibleAsync(page, "[data-testid='slots-device']");
         await WaitForTextAsync(page.Locator("[data-testid='slots-device']"), config.DeviceName, 15000);
         await WaitForVisibleAsync(page, "[data-testid='slots-load']");
-        logStep("Slots: page loaded with seeded device context");
+        await page.SelectOptionAsync("[data-testid='slots-device']", new[] { new SelectOptionValue { Label = config.DeviceName } });
+        await page.ClickAsync("[data-testid='slots-load']");
+        await WaitForTextAsync(page.Locator("[data-testid='slots-status']"), "Loaded ", 15000);
+        await WaitForCountAtLeastAsync(page.Locator("[data-testid='slots-table'] tbody tr"), 1, 15000);
+
+        ILocator setupRequiredRows = page.Locator("[data-testid='slots-table'] tbody tr").Filter(new LocatorFilterOptions
+        {
+            Has = page.Locator("span:has-text('Setup required')")
+        });
+
+        await WaitForCountAtLeastAsync(setupRequiredRows, 1, 15000);
+        ILocator setupRequiredRow = setupRequiredRows.First;
+        await WaitForTextAsync(setupRequiredRow, "not initialized", 15000);
+
+        if (!await setupRequiredRow.Locator("button:has-text('Open RO')").IsDisabledAsync())
+        {
+            throw new InvalidOperationException("Expected the Setup required slot to disable the Open RO action.");
+        }
+
+        if (!await setupRequiredRow.Locator("button:has-text('Open RW')").IsDisabledAsync())
+        {
+            throw new InvalidOperationException("Expected the Setup required slot to disable the Open RW action.");
+        }
+
+        logStep("Slots: loaded inventory and verified setup-required slots are not directly actionable");
     }
 
     private static async Task ExerciseKeysAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
