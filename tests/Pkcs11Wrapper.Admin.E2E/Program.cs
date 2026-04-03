@@ -25,6 +25,13 @@ internal static class AdminRuntimeE2E
         StringBuilder pageErrors = new();
         StringBuilder requestFailures = new();
 
+        void LogStep(string message)
+        {
+            string entry = $"{DateTimeOffset.UtcNow:O} | {message}";
+            eventLog.Add(entry);
+            Console.WriteLine(entry);
+        }
+
         try
         {
             using IPlaywright playwright = await Playwright.CreateAsync();
@@ -53,36 +60,32 @@ internal static class AdminRuntimeE2E
 
             try
             {
-                await LoginAsync(page, config, eventLog);
+                await LoginAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "01-login.png"));
 
-                await ExerciseDevicesAsync(page, config, eventLog);
+                await ExerciseDevicesAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "02-devices.png"));
 
-                await ExerciseSlotsAsync(page, config, eventLog);
+                await ExerciseSlotsAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "03-slots.png"));
 
-                await ExerciseKeysAsync(page, config, eventLog);
+                await ExerciseKeysAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "04-keys.png"));
 
-                await ExerciseLabAsync(page, config, eventLog);
+                await ExerciseLabAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "05-lab.png"));
 
-                await ExerciseTelemetryAsync(page, config, eventLog);
+                await ExerciseTelemetryAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "06-telemetry.png"));
 
-                await context.Tracing.StopAsync(new TracingStopOptions
-                {
-                    Path = Path.Combine(config.ArtifactRoot, "playwright-trace.zip")
-                });
+                await TryStopTracingAsync(context, config.ArtifactRoot, LogStep);
             }
-            catch
+            catch (Exception ex)
             {
-                await TryCaptureFailureArtifactsAsync(page, config.ArtifactRoot);
-                await context.Tracing.StopAsync(new TracingStopOptions
-                {
-                    Path = Path.Combine(config.ArtifactRoot, "playwright-trace.zip")
-                });
+                LogStep($"Failure: {ex.GetType().Name}: {ex.Message}");
+                await WriteFailureDiagnosticsAsync(config.ArtifactRoot, eventLog, consoleOutput, pageErrors, requestFailures, ex, page);
+                await TryCaptureFailureArtifactsAsync(page, config.ArtifactRoot, LogStep);
+                await TryStopTracingAsync(context, config.ArtifactRoot, LogStep);
                 throw;
             }
             finally
@@ -110,9 +113,9 @@ internal static class AdminRuntimeE2E
         }
     }
 
-    private static async Task LoginAsync(IPage page, TestConfig config, List<string> eventLog)
+    private static async Task LoginAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
-        eventLog.Add("Login: navigating to login page");
+        logStep("Login: navigating to login page");
         await page.GotoAsync($"{config.BaseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
         await WaitForVisibleAsync(page, "[data-testid='login-username']");
         await WaitForInteractiveSettleAsync();
@@ -123,12 +126,12 @@ internal static class AdminRuntimeE2E
             page.ClickAsync("[data-testid='login-submit']"));
         await WaitForVisibleAsync(page, "[data-testid='nav-devices']");
         await WaitForInteractiveSettleAsync();
-        eventLog.Add("Login: authenticated successfully");
+        logStep("Login: authenticated successfully");
     }
 
-    private static async Task ExerciseDevicesAsync(IPage page, TestConfig config, List<string> eventLog)
+    private static async Task ExerciseDevicesAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
-        eventLog.Add("Devices: creating CI device profile");
+        logStep("Devices: creating CI device profile");
         await NavigateToAsync(page, config.BaseUrl, "/devices");
         string uiDeviceName = $"{config.DeviceName} UI";
         await page.FillAsync("[data-testid='device-name']", uiDeviceName);
@@ -141,22 +144,22 @@ internal static class AdminRuntimeE2E
         ILocator rows = page.Locator("[data-testid='devices-table'] tbody tr");
         await WaitForCountAtLeastAsync(rows, 2, 15000);
         await WaitForTextAsync(page.Locator("[data-testid='devices-table']"), uiDeviceName, 15000);
-        eventLog.Add("Devices: save + inventory view passed");
+        logStep("Devices: save + inventory view passed");
     }
 
-    private static async Task ExerciseSlotsAsync(IPage page, TestConfig config, List<string> eventLog)
+    private static async Task ExerciseSlotsAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
-        eventLog.Add("Slots: verifying slot inventory surface");
+        logStep("Slots: verifying slot inventory surface");
         await NavigateToAsync(page, config.BaseUrl, "/slots");
         await WaitForVisibleAsync(page, "[data-testid='slots-device']");
         await WaitForTextAsync(page.Locator("[data-testid='slots-device']"), config.DeviceName, 15000);
         await WaitForVisibleAsync(page, "[data-testid='slots-load']");
-        eventLog.Add("Slots: page loaded with seeded device context");
+        logStep("Slots: page loaded with seeded device context");
     }
 
-    private static async Task ExerciseKeysAsync(IPage page, TestConfig config, List<string> eventLog)
+    private static async Task ExerciseKeysAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
-        eventLog.Add("Keys: loading object inventory and opening detail");
+        logStep("Keys: loading object inventory and opening detail");
         await NavigateToAsync(page, config.BaseUrl, "/keys");
         await WaitForTextAsync(page.Locator("[data-testid='keys-device']"), config.DeviceName, 15000);
         await page.SelectOptionAsync("[data-testid='keys-device']", new[] { new SelectOptionValue { Label = config.DeviceName } });
@@ -171,12 +174,12 @@ internal static class AdminRuntimeE2E
         await rows.First.Locator("button:has-text('Details')").ClickAsync();
         await WaitForVisibleAsync(page, "[data-testid='keys-detail-panel']");
         await WaitForTextAsync(page.Locator("[data-testid='keys-detail-panel']"), "Object detail", 15000);
-        eventLog.Add("Keys: loaded filtered objects and opened detail panel");
+        logStep("Keys: loaded filtered objects and opened detail panel");
     }
 
-    private static async Task ExerciseLabAsync(IPage page, TestConfig config, List<string> eventLog)
+    private static async Task ExerciseLabAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
-        eventLog.Add("Lab: running bounded FindObjects operation");
+        logStep("Lab: running bounded FindObjects operation");
         await NavigateToAsync(page, config.BaseUrl, "/lab");
         await WaitForTextAsync(page.Locator("[data-testid='lab-device']"), config.DeviceName, 15000);
         await page.SelectOptionAsync("[data-testid='lab-device']", new[] { new SelectOptionValue { Label = config.DeviceName } });
@@ -189,35 +192,65 @@ internal static class AdminRuntimeE2E
         await page.ClickAsync("[data-testid='lab-run']");
         await WaitForTextAsync(page.Locator("[data-testid='lab-result-panel']"), "Success", 20000);
         await WaitForTextAsync(page.Locator("[data-testid='lab-result-panel']"), "Operation: FindObjects", 20000);
-        eventLog.Add("Lab: FindObjects executed successfully");
+        logStep("Lab: FindObjects executed successfully");
     }
 
-    private static async Task ExerciseTelemetryAsync(IPage page, TestConfig config, List<string> eventLog)
+    private static async Task ExerciseTelemetryAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
-        eventLog.Add("Telemetry: refreshing, filtering, and checking operator summaries");
+        logStep("Telemetry: refreshing, filtering, and checking operator summaries");
         await NavigateToAsync(page, config.BaseUrl, "/telemetry");
         await page.ClickAsync("[data-testid='telemetry-refresh']");
         await WaitForCountAtLeastAsync(page.Locator("[data-testid='telemetry-table'] tbody tr"), 1, 20000);
         await WaitForVisibleAsync(page, "[data-testid='telemetry-trend']");
         await WaitForCountAtLeastAsync(page.Locator("[data-testid='telemetry-top-operations'] tbody tr"), 1, 20000);
         await page.SelectOptionAsync("[data-testid='telemetry-device-filter']", new[] { new SelectOptionValue { Label = config.DeviceName } });
-        await page.FillAsync("[data-testid='telemetry-search']", "FindObjects");
+        await page.FillAsync("[data-testid='telemetry-search']", "C_FindObjects");
         await page.FillAsync("[data-testid='telemetry-min-duration']", "0");
         await page.PressAsync("[data-testid='telemetry-min-duration']", "Tab");
         await WaitForTextAsync(page.Locator("[data-testid='telemetry-table']"), config.DeviceName, 20000);
-        await WaitForTextAsync(page.Locator("[data-testid='telemetry-table']"), "FindObjects", 20000);
-        await WaitForTextAsync(page.Locator("[data-testid='telemetry-top-operations']"), "FindObjects", 20000);
-        eventLog.Add("Telemetry: verified filtered PKCS#11 event stream plus operator summary widgets");
+        await WaitForTextAsync(page.Locator("[data-testid='telemetry-table']"), "C_FindObjects", 20000);
+        await WaitForAnyTextAsync(page.Locator("[data-testid='telemetry-top-operations']"), 20000, "VisitObjects", "FindObjects");
+        logStep("Telemetry: verified filtered PKCS#11 event stream plus operator summary widgets");
     }
 
     private static async Task NavigateToAsync(IPage page, string baseUrl, string expectedPath)
     {
-        await page.GotoAsync($"{baseUrl}{expectedPath}", new PageGotoOptions
+        if (TryGetNavSelector(expectedPath, out string? navSelector))
         {
-            WaitUntil = WaitUntilState.DOMContentLoaded,
-            Timeout = 15000
-        });
+            Uri current = new(page.Url);
+            if (!string.Equals(current.AbsolutePath, expectedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                await WaitForVisibleAsync(page, navSelector!);
+                await Task.WhenAll(
+                    page.WaitForURLAsync($"{baseUrl}{expectedPath}", new PageWaitForURLOptions { Timeout = 15000 }),
+                    page.ClickAsync(navSelector!));
+            }
+        }
+        else
+        {
+            await page.GotoAsync($"{baseUrl}{expectedPath}", new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 15000
+            });
+        }
+
         await WaitForInteractiveSettleAsync();
+    }
+
+    private static bool TryGetNavSelector(string expectedPath, out string? navSelector)
+    {
+        navSelector = expectedPath switch
+        {
+            "/devices" => "[data-testid='nav-devices']",
+            "/slots" => "[data-testid='nav-slots']",
+            "/keys" => "[data-testid='nav-keys']",
+            "/lab" => "[data-testid='nav-lab']",
+            "/telemetry" => "[data-testid='nav-telemetry']",
+            _ => null
+        };
+
+        return navSelector is not null;
     }
 
     private static Task WaitForInteractiveSettleAsync()
@@ -275,6 +308,34 @@ internal static class AdminRuntimeE2E
         throw new TimeoutException($"Timed out waiting for text '{expected}'. Last text was: {last}");
     }
 
+    private static async Task WaitForAnyTextAsync(ILocator locator, int timeoutMs, params string[] expectedValues)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            try
+            {
+                if (await locator.IsVisibleAsync())
+                {
+                    string text = (await locator.TextContentAsync()) ?? string.Empty;
+                    if (expectedValues.Any(expected => text.Contains(expected, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return;
+                    }
+                }
+            }
+            catch
+            {
+                // ignore transient re-render issues while polling
+            }
+
+            await Task.Delay(200);
+        }
+
+        string last = (await locator.TextContentAsync()) ?? string.Empty;
+        throw new TimeoutException($"Timed out waiting for any of [{string.Join(", ", expectedValues)}]. Last text was: {last}");
+    }
+
     private static async Task WaitForCountAtLeastAsync(ILocator locator, int minimum, int timeoutMs)
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
@@ -296,11 +357,12 @@ internal static class AdminRuntimeE2E
         await WaitForCountAtLeastAsync(page.Locator(selector), minimum, timeoutMs);
     }
 
-    private static async Task TryCaptureFailureArtifactsAsync(IPage page, string artifactRoot)
+    private static async Task TryCaptureFailureArtifactsAsync(IPage page, string artifactRoot, Action<string> logStep)
     {
         try
         {
-            await SaveScreenshotAsync(page, Path.Combine(artifactRoot, "failure.png"));
+            logStep("Failure capture: attempting viewport screenshot");
+            await SaveScreenshotAsync(page, Path.Combine(artifactRoot, "failure.png"), fullPage: false, timeoutMs: 3000);
         }
         catch (Exception ex)
         {
@@ -309,7 +371,8 @@ internal static class AdminRuntimeE2E
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(artifactRoot, "failure-page.html"), await page.ContentAsync());
+            logStep("Failure capture: writing DOM snapshot");
+            await File.WriteAllTextAsync(Path.Combine(artifactRoot, "failure-page.html"), await page.ContentAsync().WaitAsync(TimeSpan.FromSeconds(3)));
         }
         catch (Exception ex)
         {
@@ -317,14 +380,56 @@ internal static class AdminRuntimeE2E
         }
     }
 
-    private static async Task SaveScreenshotAsync(IPage page, string path)
+    private static async Task WriteFailureDiagnosticsAsync(
+        string artifactRoot,
+        List<string> eventLog,
+        StringBuilder consoleOutput,
+        StringBuilder pageErrors,
+        StringBuilder requestFailures,
+        Exception exception,
+        IPage page)
+    {
+        await File.WriteAllTextAsync(Path.Combine(artifactRoot, "scenario.log"), string.Join(Environment.NewLine, eventLog));
+        await File.WriteAllTextAsync(Path.Combine(artifactRoot, "browser-console.log"), consoleOutput.ToString());
+        await File.WriteAllTextAsync(Path.Combine(artifactRoot, "browser-page-errors.log"), pageErrors.ToString());
+        await File.WriteAllTextAsync(Path.Combine(artifactRoot, "browser-request-failures.log"), requestFailures.ToString());
+        await File.WriteAllTextAsync(Path.Combine(artifactRoot, "exception.txt"), exception.ToString());
+
+        try
+        {
+            string pageState = $"URL: {page.Url}{Environment.NewLine}Title: {await page.TitleAsync().WaitAsync(TimeSpan.FromSeconds(3))}{Environment.NewLine}";
+            await File.WriteAllTextAsync(Path.Combine(artifactRoot, "failure-page-state.txt"), pageState);
+        }
+        catch (Exception ex)
+        {
+            await File.WriteAllTextAsync(Path.Combine(artifactRoot, "failure-page-state-error.txt"), ex.ToString());
+        }
+    }
+
+    private static async Task TryStopTracingAsync(IBrowserContext context, string artifactRoot, Action<string> logStep)
+    {
+        try
+        {
+            logStep("Tracing: stopping and exporting trace");
+            await context.Tracing.StopAsync(new TracingStopOptions
+            {
+                Path = Path.Combine(artifactRoot, "playwright-trace.zip")
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (Exception ex)
+        {
+            await File.WriteAllTextAsync(Path.Combine(artifactRoot, "trace-stop-error.txt"), ex.ToString());
+        }
+    }
+
+    private static async Task SaveScreenshotAsync(IPage page, string path, bool fullPage = true, float timeoutMs = 10000)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await page.ScreenshotAsync(new PageScreenshotOptions
         {
             Path = path,
-            FullPage = true,
-            Timeout = 10000
+            FullPage = fullPage,
+            Timeout = timeoutMs
         });
     }
 }

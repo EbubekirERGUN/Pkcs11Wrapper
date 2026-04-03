@@ -8,7 +8,7 @@ namespace Pkcs11Wrapper.Admin.Tests;
 public sealed class Pkcs11TelemetryServiceTests
 {
     [Fact]
-    public void ListenerMapsOperationEventsIntoTelemetryEntries()
+    public async Task ListenerMapsOperationEventsIntoTelemetryEntries()
     {
         RecordingStore store = new();
         Pkcs11TelemetryService service = new(store, new StaticActorContext(new AdminActorInfo("alice", "cookie", true, ["admin"], "127.0.0.1", "trace-42", "tests")), new AdminPkcs11TelemetryOptions());
@@ -35,7 +35,7 @@ public sealed class Pkcs11TelemetryServiceTests
 
         listener.OnOperationCompleted(in operationEvent);
 
-        AdminPkcs11TelemetryEntry entry = Assert.Single(store.Entries);
+        AdminPkcs11TelemetryEntry entry = await store.WaitForSingleEntryAsync();
         Assert.Equal(device.Id, entry.DeviceId);
         Assert.Equal("Primary", entry.DeviceName);
         Assert.Equal("SignData", entry.OperationName);
@@ -83,13 +83,23 @@ public sealed class Pkcs11TelemetryServiceTests
     private sealed class RecordingStore : IPkcs11TelemetryStore
     {
         private readonly List<AdminPkcs11TelemetryEntry> _entries = [];
+        private readonly TaskCompletionSource<AdminPkcs11TelemetryEntry> _appendTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public IReadOnlyList<AdminPkcs11TelemetryEntry> Entries => _entries;
 
         public Task AppendAsync(AdminPkcs11TelemetryEntry entry, CancellationToken cancellationToken = default)
         {
             _entries.Add(entry);
+            _appendTcs.TrySetResult(entry);
             return Task.CompletedTask;
+        }
+
+        public async Task<AdminPkcs11TelemetryEntry> WaitForSingleEntryAsync()
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(2));
+            AdminPkcs11TelemetryEntry entry = await _appendTcs.Task.WaitAsync(timeout.Token);
+            Assert.Single(_entries);
+            return entry;
         }
 
         public Task<IReadOnlyList<AdminPkcs11TelemetryEntry>> ReadRecentAsync(int take, CancellationToken cancellationToken = default)
