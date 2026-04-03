@@ -83,16 +83,17 @@
         <div class="col-xl-3 col-md-6">
             <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="metric-label">Token present</div>
-                    <div class="display-6 metric-meta">@_slots.Count(slot => slot.TokenPresent)</div>
+                    <div class="metric-label">Session ready</div>
+                    <div class="display-6 metric-meta">@_slots.Count(slot => slot.CanOpenSessions)</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="metric-label">No token</div>
-                    <div class="display-6 metric-meta">@_slots.Count(slot => !slot.TokenPresent)</div>
+                    <div class="metric-label">Setup required</div>
+                    <div class="display-6 metric-meta">@_slots.Count(slot => slot.RequiresInitialization)</div>
+                    <div class="small metric-note">Token visible, not yet session-usable</div>
                 </div>
             </div>
         </div>
@@ -163,9 +164,21 @@
                             <td>
                                 @if (slot.TokenPresent)
                                 {
-                                    <div class="fw-semibold">@slot.TokenLabel</div>
-                                    <div class="small text-muted">@slot.TokenModel · @slot.TokenSerialNumber</div>
-                                    <span class="badge text-bg-success mt-1">Token present</span>
+                                    <div class="fw-semibold">@GetTokenDisplayLabel(slot)</div>
+                                    @if (HasTokenMetadata(slot))
+                                    {
+                                        <div class="small text-muted">@FormatTokenMetadata(slot)</div>
+                                    }
+
+                                    @if (slot.CanOpenSessions)
+                                    {
+                                        <span class="badge text-bg-success mt-1">Session ready</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge text-bg-warning text-dark mt-1">Setup required</span>
+                                        <div class="small text-muted mt-1">@slot.SessionOpenUnavailableReason</div>
+                                    }
                                 }
                                 else
                                 {
@@ -178,10 +191,10 @@
                             </td>
                             <td><span class="table-pill">@slot.MechanismCount mechanism(s)</span></td>
                             <td class="text-end">
-                                <div class="btn-group btn-group-sm">
-                                    <button class="btn btn-outline-primary" @onclick="() => OpenSessionAsync(slot, false)" disabled="@(!_isOperator)">Open RO</button>
-                                    <button class="btn btn-outline-warning" @onclick="() => OpenSessionAsync(slot, true)" disabled="@(!_isOperator)">Open RW</button>
-                                    <button class="btn btn-outline-danger" @onclick="() => CloseAllAsync(slot)" disabled="@(!_isOperator)">Close All</button>
+                                <div class="btn-group btn-group-sm" title="@GetSlotActionDisabledReason(slot)">
+                                    <button class="btn btn-outline-primary" @onclick="() => OpenSessionAsync(slot, false)" disabled="@(!_isOperator || !slot.CanOpenSessions)">Open RO</button>
+                                    <button class="btn btn-outline-warning" @onclick="() => OpenSessionAsync(slot, true)" disabled="@(!_isOperator || !slot.CanOpenSessions)">Open RW</button>
+                                    <button class="btn btn-outline-danger" @onclick="() => CloseAllAsync(slot)" disabled="@(!_isOperator || !slot.CanOpenSessions)">Close All</button>
                                 </div>
                             </td>
                         </tr>
@@ -309,6 +322,13 @@
 
     private async Task OpenSessionAsync(HsmSlotSummary slot, bool readWrite)
     {
+        if (!slot.CanOpenSessions)
+        {
+            _statusMessage = slot.SessionOpenUnavailableReason;
+            _statusIsError = true;
+            return;
+        }
+
         try
         {
             AdminSessionSnapshot snapshot = await Admin.OpenSessionAsync(slot.DeviceId, slot.SlotId, readWrite, _userPin);
@@ -325,6 +345,13 @@
 
     private async Task CloseAllAsync(HsmSlotSummary slot)
     {
+        if (!slot.CanOpenSessions)
+        {
+            _statusMessage = slot.SessionOpenUnavailableReason;
+            _statusIsError = true;
+            return;
+        }
+
         try
         {
             await Admin.CloseAllSessionsAsync(slot.DeviceId, slot.SlotId);
@@ -393,6 +420,22 @@
             "mechanisms" => slots.OrderByDescending(slot => slot.MechanismCount).ThenBy(slot => slot.SlotId),
             _ => slots.OrderBy(slot => slot.SlotId)
         };
+
+    private static string GetTokenDisplayLabel(HsmSlotSummary slot)
+        => !string.IsNullOrWhiteSpace(slot.TokenLabel)
+            ? slot.TokenLabel
+            : slot.RequiresInitialization
+                ? "Uninitialized token"
+                : "Unnamed token";
+
+    private static bool HasTokenMetadata(HsmSlotSummary slot)
+        => !string.IsNullOrWhiteSpace(slot.TokenModel) || !string.IsNullOrWhiteSpace(slot.TokenSerialNumber);
+
+    private static string FormatTokenMetadata(HsmSlotSummary slot)
+        => string.Join(" · ", new[] { slot.TokenModel, slot.TokenSerialNumber }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    private static string? GetSlotActionDisabledReason(HsmSlotSummary slot)
+        => slot.CanOpenSessions ? null : slot.SessionOpenUnavailableReason;
 
     private static bool Contains(string? value, string term)
         => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;

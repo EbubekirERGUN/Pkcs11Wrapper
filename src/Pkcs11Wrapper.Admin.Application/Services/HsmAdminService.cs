@@ -415,6 +415,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             Pkcs11SlotId slotId = slots[i];
             Pkcs11SlotInfo slotInfo = module.GetSlotInfo(slotId);
             bool hasToken = module.TryGetTokenInfo(slotId, out Pkcs11TokenInfo tokenInfo);
+            bool tokenInitialized = hasToken && tokenInfo.Flags.HasFlag(Pkcs11TokenFlags.TokenInitialized);
             int mechanismCount = 0;
             try
             {
@@ -432,6 +433,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 slotInfo.ManufacturerId,
                 slotInfo.Flags.ToString(),
                 hasToken,
+                tokenInitialized,
                 hasToken ? tokenInfo.Label : null,
                 hasToken ? tokenInfo.Model : null,
                 hasToken ? tokenInfo.SerialNumber : null,
@@ -1650,6 +1652,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     private static SessionOpenResult OpenCompatibleSession(Pkcs11Module module, Pkcs11SlotId slotId, bool readWriteRequested, List<string>? notes = null)
     {
+        EnsureSlotSupportsSessionOpen(module, slotId);
+
         try
         {
             return new(module.OpenSession(slotId, readWriteRequested), readWriteRequested, readWriteRequested, EscalatedToReadWrite: false);
@@ -1658,6 +1662,21 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         {
             notes?.Add("The module rejected a read-only C_OpenSession request with CKR_FUNCTION_FAILED, so the admin layer retried with a read-write session for compatibility.");
             return new(module.OpenSession(slotId, readWrite: true), readWriteRequested, OpenedReadWrite: true, EscalatedToReadWrite: true);
+        }
+    }
+
+    private static void EnsureSlotSupportsSessionOpen(Pkcs11Module module, Pkcs11SlotId slotId)
+    {
+        Pkcs11SlotInfo slotInfo = module.GetSlotInfo(slotId);
+        if (!slotInfo.Flags.HasFlag(Pkcs11SlotFlags.TokenPresent))
+        {
+            throw new InvalidOperationException($"Slot {slotId.Value} has no token present, so session-based actions are unavailable.");
+        }
+
+        if (module.TryGetTokenInfo(slotId, out Pkcs11TokenInfo tokenInfo) &&
+            !tokenInfo.Flags.HasFlag(Pkcs11TokenFlags.TokenInitialized))
+        {
+            throw new InvalidOperationException($"Slot {slotId.Value} reports a token, but it is not initialized yet. Initialize the token before opening sessions or running session-based operations.");
         }
     }
 
