@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
@@ -6,6 +7,7 @@ using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Endpoints;
 using Pkcs11Wrapper.CryptoApi.Health;
 using Pkcs11Wrapper.CryptoApi.Operations;
+using Pkcs11Wrapper.CryptoApi.RateLimiting;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.CryptoApi.SharedState;
 
@@ -36,6 +38,16 @@ builder.Services.AddOptions<CryptoApiRuntimeOptions>()
 builder.Services.AddOptions<CryptoApiSecurityOptions>()
     .Bind(builder.Configuration.GetSection(CryptoApiSecurityOptions.SectionName));
 
+builder.Services.AddOptions<CryptoApiRateLimitingOptions>()
+    .Bind(builder.Configuration.GetSection(CryptoApiRateLimitingOptions.SectionName))
+    .Validate(
+        static options => CryptoApiRateLimitingOptions.IsValid(options.Authentication),
+        "Crypto API authentication rate limiting must define positive permit/window/segment values and a non-negative queue limit.")
+    .Validate(
+        static options => CryptoApiRateLimitingOptions.IsValid(options.Operations),
+        "Crypto API operation rate limiting must define positive permit/window/segment values and a non-negative queue limit.")
+    .ValidateOnStart();
+
 builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
     .Bind(builder.Configuration.GetSection(CryptoApiSharedPersistenceOptions.SectionName))
     .PostConfigure(static options =>
@@ -58,6 +70,10 @@ builder.Services.AddSingleton<CryptoApiKeyAccessManagementService>();
 builder.Services.AddSingleton<CryptoApiKeyOperationAuthorizationService>();
 builder.Services.AddSingleton<ICryptoApiCustomerOperationService, CryptoApiPkcs11CustomerOperationService>();
 builder.Services.AddSingleton<ICryptoApiSharedStateStore, SqliteCryptoApiSharedStateStore>();
+
+builder.Services.AddSingleton<IConfigureOptions<RateLimiterOptions>, ConfigureCryptoApiRateLimiterOptions>();
+builder.Services.AddRateLimiter(_ => { });
+
 builder.Services.AddHealthChecks()
     .AddCheck<CryptoApiModuleReadinessHealthCheck>("pkcs11-module", tags: ["ready"])
     .AddCheck<CryptoApiSharedStateHealthCheck>("shared-persistence", tags: ["ready"]);
@@ -66,6 +82,7 @@ WebApplication app = builder.Build();
 CryptoApiHostOptions hostOptions = app.Services.GetRequiredService<IOptions<CryptoApiHostOptions>>().Value;
 CryptoApiRuntimeOptions runtimeOptions = app.Services.GetRequiredService<IOptions<CryptoApiRuntimeOptions>>().Value;
 CryptoApiSecurityOptions securityOptions = app.Services.GetRequiredService<IOptions<CryptoApiSecurityOptions>>().Value;
+CryptoApiRateLimitingOptions rateLimitingOptions = app.Services.GetRequiredService<IOptions<CryptoApiRateLimitingOptions>>().Value;
 CryptoApiSharedPersistenceOptions sharedPersistenceOptions = app.Services.GetRequiredService<IOptions<CryptoApiSharedPersistenceOptions>>().Value;
 
 if (!app.Environment.IsDevelopment())
@@ -78,6 +95,8 @@ if (!runtimeOptions.DisableHttpsRedirection)
 {
     app.UseHttpsRedirection();
 }
+
+app.UseRateLimiter();
 
 if (!string.IsNullOrWhiteSpace(sharedPersistenceOptions.ConnectionString) && sharedPersistenceOptions.AutoInitialize)
 {
@@ -114,7 +133,7 @@ app.MapHealthChecks(CryptoApiHostDefaults.HealthReadyPath, new HealthCheckOption
     Predicate = static registration => registration.Tags.Contains("ready", StringComparer.Ordinal),
     ResponseWriter = CryptoApiHealthResponseWriter.WriteAsync
 });
-app.MapCryptoApiRoutes(hostOptions, securityOptions);
+app.MapCryptoApiRoutes(hostOptions, securityOptions, rateLimitingOptions);
 
 app.Run();
 
