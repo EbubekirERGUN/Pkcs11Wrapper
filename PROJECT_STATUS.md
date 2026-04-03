@@ -65,6 +65,11 @@
   - device / slot / operation / mechanism / status / time-window filtreleri
   - wrapper redaction policy ile uyumlu safe field rendering; raw exception messages intentionally persist edilmiyor
   - `Pkcs11TelemetryView` helper + telemetry store/service testleri ile filtre/saklama davranışı doğrulandı
+- Crypto API host scaffold teslim edildi:
+  - çözüme `Pkcs11Wrapper.CryptoApi` ve `Pkcs11Wrapper.CryptoApi.Tests` projeleri eklendi
+  - stateless ASP.NET Core host, DI/config binding, service/runtime doküman endpoint'leri ve `/health/live` + `/health/ready` yüzeyi eklendi
+  - readiness kontrolü, yapılandırılan PKCS#11 modülünün gerçekten yüklenebildiğini `Pkcs11Module.Load(...)` ile doğruluyor
+  - `docs/crypto-api-host.md` ile admin dashboard vs crypto API boundary/running-model farkı açıklandı
 - Çözüm doğrulaması temiz:
   - `dotnet build Pkcs11Wrapper.sln -c Release`
   - `dotnet test Pkcs11Wrapper.sln -c Release`
@@ -76,6 +81,7 @@
 
 ## Sıradaki işler
 - Admin panel UX/product polish'in sonraki dilimleri (dashboard quick-action refinements, gerekiyorsa telemetry trend/top-operation widget'ları, Lab için favorites import/export veya pin-to-navigation ergonomisi, daha derin operator playbook yüzeyleri).
+- Crypto API host üzerinde ilk somut machine-facing sign/verify/encrypt/decrypt contract dilimlerini tanımlamak.
 - PKCS#11 v3 interface yüzeyini gerçekten export eden vendor/modül ile ek runtime regression.
 - Benchmark suite'i performans hassas değişikliklerden sonra ve release öncesinde tekrar çalıştırıp en güncel baseline'ı tazelemek.
 - GitHub vitrin materyallerini zenginleştirmek (ekran görüntüsü, demo media, release notes).

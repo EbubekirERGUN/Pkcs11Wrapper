@@ -4,8 +4,10 @@
 
 - `src/Pkcs11Wrapper` - managed API surface used by consumers
 - `src/Pkcs11Wrapper.Native` - low-level PKCS#11 function table and native interop layer
+- `src/Pkcs11Wrapper.CryptoApi` - stateless ASP.NET Core machine-facing host scaffold for future crypto request/response flows
 - `src/Pkcs11Wrapper.ThalesLuna.Native` - conservative Thales Luna `CA_GetFunctionList` bootstrap/interp layer for Luna-only extensions
 - `src/Pkcs11Wrapper.ThalesLuna` - managed Luna extension entry point and capability/family facades
+- `tests/Pkcs11Wrapper.CryptoApi.Tests` - xUnit coverage for crypto-host config normalization and readiness/runtime descriptor behavior
 - `tests/Pkcs11Wrapper.Native.Tests` - xUnit regression suite covering layout, API shape, and SoftHSM-backed behavior
 - `tests/Pkcs11Wrapper.ThalesLuna.Tests` - xUnit suite covering the Luna extension skeleton API, minimal interop layout, and shim-backed bootstrap behavior
 - `samples/Pkcs11Wrapper.Smoke` - executable smoke sample used by runtime and NativeAOT validation paths
@@ -76,6 +78,7 @@ The wrapper surface implemented through the current phase set includes:
 - optional PKCS#11 v3 interface discovery and message-based API surface
 - optional `C_LoginUser` / `C_SessionCancel` through the discovered v3 interface
 - opt-in structured operation telemetry with duration, result/exception, slot/session/mechanism context, redacted field summaries for sensitive PKCS#11 inputs, and admin-side retention/export/correlation controls in the admin panel
+- a separate stateless Crypto API host scaffold with DI/config, service documents, and health/readiness endpoints
 - administrative operations for session invalidation and token/PIN provisioning
 - NativeAOT smoke validation through the sample app on Linux and Windows
 
@@ -116,6 +119,7 @@ Notable current assumptions:
 - CI behavior: `docs/ci.md`
 - Telemetry redaction policy: `docs/telemetry-redaction.md`
 - Admin telemetry operations: `docs/admin-telemetry-operations.md`
+- Crypto API host scaffold: `docs/crypto-api-host.md`
 - Smoke sample usage: `docs/smoke.md`
 - Compatibility matrix: `docs/compatibility-matrix.md`
 - Thales Luna integration guide: `docs/luna-integration.md`
