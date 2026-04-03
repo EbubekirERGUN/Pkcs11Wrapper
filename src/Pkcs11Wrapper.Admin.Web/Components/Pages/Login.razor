@@ -22,7 +22,7 @@
         </div>
     </div>
 
-    <form method="post" action="/account/login" class="auth-panel auth-form-panel">
+    <form method="post" action="/account/login" class="auth-panel auth-form-panel" data-login-ready="@_interactiveReady">
         <AntiforgeryToken />
         <input type="hidden" name="returnUrl" value="@_returnUrl" />
 
@@ -36,16 +36,25 @@
             <div class="alert alert-danger">@_errorMessage</div>
         }
 
-        <div class="mb-3">
-            <label class="form-label">Username</label>
-            <input class="form-control" name="username" autocomplete="username" data-testid="login-username" />
-        </div>
-        <div class="mb-3">
-            <label class="form-label">Password</label>
-            <input class="form-control" type="password" name="password" autocomplete="current-password" data-testid="login-password" />
-        </div>
+        @if (!_interactiveReady)
+        {
+            <div class="alert alert-info" data-testid="login-ready-hint" aria-live="polite">
+                Preparing the secure sign-in form… controls unlock as soon as the interactive session is ready.
+            </div>
+        }
 
-        <button class="btn btn-primary w-100" type="submit" data-testid="login-submit">Sign in</button>
+        <fieldset disabled="@(!_interactiveReady)">
+            <div class="mb-3">
+                <label class="form-label">Username</label>
+                <input class="form-control" name="username" autocomplete="username" data-testid="login-username" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Password</label>
+                <input class="form-control" type="password" name="password" autocomplete="current-password" data-testid="login-password" />
+            </div>
+
+            <button class="btn btn-primary w-100" type="submit" data-testid="login-submit">Sign in</button>
+        </fieldset>
 
         <div class="form-text mt-3">
             On first run, bootstrap credentials are written to <code>&lt;admin storage root&gt;/bootstrap-admin.txt</code>.
@@ -54,6 +63,7 @@
 </div>
 
 @code {
+    private bool _interactiveReady;
     private bool _showError;
     private string _errorMessage = "Login failed. Check username/password and try again.";
     private string _returnUrl = "/";
@@ -69,5 +79,16 @@
             ? "Too many failed login attempts. Wait for the lockout window to expire before trying again."
             : "Login failed. Check username/password and try again.";
         _returnUrl = string.IsNullOrWhiteSpace(query.GetValueOrDefault("returnUrl")) ? "/" : query["returnUrl"]!;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _interactiveReady = true;
+        StateHasChanged();
     }
 }

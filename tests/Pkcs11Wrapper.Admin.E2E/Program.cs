@@ -60,6 +60,7 @@ internal static class AdminRuntimeE2E
 
             try
             {
+                await ValidateImmediateLoginHydrationSafetyAsync(browser, config, eventLog, LogStep);
                 await LoginAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "01-login.png"));
 
@@ -116,12 +117,44 @@ internal static class AdminRuntimeE2E
         }
     }
 
+    private static async Task ValidateImmediateLoginHydrationSafetyAsync(IBrowser browser, TestConfig config, List<string> eventLog, Action<string> logStep)
+    {
+        logStep("Login: validating fast-submit path across hydration handoff");
+
+        List<string> outcomes = [];
+        for (int attempt = 1; attempt <= 5; attempt++)
+        {
+            IBrowserContext context = await browser.NewContextAsync(new BrowserNewContextOptions
+            {
+                IgnoreHTTPSErrors = true,
+                ViewportSize = new ViewportSize { Width = 1600, Height = 1000 }
+            });
+
+            try
+            {
+                IPage page = await context.NewPageAsync();
+                string outcome = await AttemptImmediateLoginAsync(page, config, config.UserName, config.Password);
+                outcomes.Add($"attempt {attempt}: {outcome}");
+
+                if (!string.Equals(outcome, "success", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException($"Fast login attempt {attempt} failed after DOMContentLoaded ({outcome}).");
+                }
+            }
+            finally
+            {
+                await context.CloseAsync();
+            }
+        }
+
+        logStep($"Login: fast-submit hydration sweep passed ({string.Join(", ", outcomes)})");
+    }
+
     private static async Task LoginAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
         logStep("Login: navigating to login page");
         await page.GotoAsync($"{config.BaseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
-        await WaitForVisibleAsync(page, "[data-testid='login-username']");
-        await WaitForInteractiveSettleAsync();
+        await WaitForLoginFormReadyAsync(page);
         await TypeAndBlurAsync(page, "[data-testid='login-username']", config.UserName);
         await TypeAndBlurAsync(page, "[data-testid='login-password']", config.Password);
         await Task.WhenAll(
@@ -158,7 +191,7 @@ internal static class AdminRuntimeE2E
         {
             IPage freshPage = await freshContext.NewPageAsync();
             await freshPage.GotoAsync($"{config.BaseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
-            await WaitForVisibleAsync(freshPage, "[data-testid='login-username']");
+            await WaitForLoginFormReadyAsync(freshPage);
             await TypeAndBlurAsync(freshPage, "[data-testid='login-username']", localUserName);
             await TypeAndBlurAsync(freshPage, "[data-testid='login-password']", localPassword);
             await Task.WhenAll(
@@ -323,6 +356,30 @@ internal static class AdminRuntimeE2E
         return navSelector is not null;
     }
 
+    private static async Task<string> AttemptImmediateLoginAsync(IPage page, TestConfig config, string userName, string password)
+    {
+        await page.GotoAsync($"{config.BaseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
+        await WaitForLoginFormReadyAsync(page);
+        await TypeAndBlurAsync(page, "[data-testid='login-username']", userName);
+        await TypeAndBlurAsync(page, "[data-testid='login-password']", password);
+        await page.ClickAsync("[data-testid='login-submit']");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await Task.Delay(500);
+
+        Uri result = new(page.Url);
+        return Regex.IsMatch(page.Url, $"^{Regex.Escape(config.BaseUrl.TrimEnd('/'))}/?$", RegexOptions.IgnoreCase)
+            ? "success"
+            : result.PathAndQuery;
+    }
+
+    private static async Task WaitForLoginFormReadyAsync(IPage page, int timeoutMs = 15000)
+    {
+        await WaitForVisibleAsync(page, "[data-testid='login-username']", timeoutMs);
+        await WaitForEnabledAsync(page, "[data-testid='login-username']", timeoutMs);
+        await WaitForEnabledAsync(page, "[data-testid='login-password']", timeoutMs);
+        await WaitForEnabledAsync(page, "[data-testid='login-submit']", timeoutMs);
+    }
+
     private static async Task TypeAndBlurAsync(IPage page, string selector, string value)
     {
         ILocator locator = page.Locator(selector);
@@ -356,6 +413,30 @@ internal static class AdminRuntimeE2E
             State = WaitForSelectorState.Visible,
             Timeout = timeoutMs
         });
+    }
+
+    private static async Task WaitForEnabledAsync(IPage page, string selector, int timeoutMs = 15000)
+    {
+        ILocator locator = page.Locator(selector);
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            try
+            {
+                if (await locator.IsVisibleAsync() && await locator.IsEnabledAsync())
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // ignore transient re-render issues while polling
+            }
+
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException($"Timed out waiting for enabled selector '{selector}'.");
     }
 
     private static async Task WaitForTextAsync(ILocator locator, string expected, int timeoutMs)

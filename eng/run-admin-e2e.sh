@@ -194,6 +194,7 @@ export AdminRuntime__DisableHttpsRedirection="true"
 export AdminStorage__DataRoot="$admin_data_root"
 export LocalAdminBootstrap__UserName="$admin_user"
 export LocalAdminBootstrap__Password="$admin_password"
+export LocalAdminLoginThrottle__MaxFailures="100"
 
 (
   cd "$repo_root"
