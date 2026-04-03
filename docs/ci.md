@@ -113,7 +113,7 @@ Admin runtime E2E coverage from `admin-runtime-e2e` guarantees that:
 
 - the Blazor admin host still boots in CI against an isolated temporary storage root instead of repo-local mutable `App_Data`
 - a deterministic bootstrap admin credential can be injected for automation without changing the default local first-run behavior
-- critical authenticated admin flows still work end-to-end: login, device profile creation + connection test, slot inventory load, keys/object browse + detail open, PKCS#11 Lab execution, and telemetry viewing/filtering
+- critical authenticated admin flows still work end-to-end: login, device profile creation + connection test, slot inventory load, keys/object browse + detail open, Crypto API Access client/key/policy/alias management, PKCS#11 Lab execution, and telemetry viewing/filtering
 - browser traces, screenshots, and runtime logs are captured as downloadable artifacts to make failures diagnosable instead of opaque
 
 Native AOT coverage from `eng/run-smoke-aot.sh` guarantees that:
