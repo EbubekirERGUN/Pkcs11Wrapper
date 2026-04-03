@@ -154,6 +154,88 @@ public sealed class JsonStoresTests
     }
 
     [Fact]
+    public async Task JsonAuditStoreWritesBomlessUtf8Jsonl()
+    {
+        string root = CreateTempDirectory();
+        try
+        {
+            AdminStorageOptions options = new() { DataRoot = root };
+            JsonLineAuditLogStore store = new(options);
+            await store.AppendAsync(CreateAudit("fresh-stack", "first-entry", DateTimeOffset.UtcNow));
+
+            byte[] bytes = await File.ReadAllBytesAsync(Path.Combine(root, options.AuditLogFileName));
+
+            Assert.False(StartsWithUtf8Bom(bytes));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JsonAuditStoreHandlesLegacyBomPrefixedFirstEntryAcrossRestart()
+    {
+        string root = CreateTempDirectory();
+        try
+        {
+            AdminStorageOptions options = new() { DataRoot = root };
+            JsonLineAuditLogStore initialStore = new(options);
+            await initialStore.AppendAsync(CreateAudit("cihaz-İstanbul", "İlk giriş 🔐", DateTimeOffset.UtcNow.AddMinutes(-1)));
+
+            string path = Path.Combine(root, options.AuditLogFileName);
+            PrependUtf8Bom(path);
+
+            JsonLineAuditLogStore restartedStore = new(options);
+            IReadOnlyList<AdminAuditLogEntry> beforeAppend = await restartedStore.ReadRecentAsync(1);
+            await restartedStore.AppendAsync(CreateAudit("cihaz-Ankara", "İkinci giriş", DateTimeOffset.UtcNow));
+            IReadOnlyList<AdminAuditLogEntry> afterAppend = await restartedStore.ReadRecentAsync(2);
+            AuditIntegrityStatus integrity = await restartedStore.VerifyIntegrityAsync();
+
+            Assert.Single(beforeAppend);
+            Assert.Equal("cihaz-İstanbul", beforeAppend[0].Target);
+            Assert.Equal("İlk giriş 🔐", beforeAppend[0].Details);
+            Assert.Equal(1, beforeAppend[0].Sequence);
+
+            Assert.Equal(2, afterAppend.Count);
+            Assert.Equal("cihaz-Ankara", afterAppend[0].Target);
+            Assert.Equal(2, afterAppend[0].Sequence);
+            Assert.Equal("cihaz-İstanbul", afterAppend[1].Target);
+            Assert.Equal(1, afterAppend[1].Sequence);
+
+            Assert.True(integrity.IsValid);
+            Assert.Equal(2, integrity.CheckedEntries);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JsonAuditStoreReadRecentPreservesUtf8Content()
+    {
+        string root = CreateTempDirectory();
+        try
+        {
+            AdminStorageOptions options = new() { DataRoot = root };
+            JsonLineAuditLogStore store = new(options);
+            await store.AppendAsync(CreateAudit("profil-şifre", "Operatör parolayı güncelledi 🔐", DateTimeOffset.UtcNow));
+
+            JsonLineAuditLogStore restartedStore = new(options);
+            IReadOnlyList<AdminAuditLogEntry> logs = await restartedStore.ReadRecentAsync(1);
+
+            Assert.Single(logs);
+            Assert.Equal("profil-şifre", logs[0].Target);
+            Assert.Equal("Operatör parolayı güncelledi 🔐", logs[0].Details);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task JsonPkcs11TelemetryStoreReturnsNewestWindow()
     {
         string root = CreateTempDirectory();
@@ -213,6 +295,28 @@ public sealed class JsonStoresTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    private static void PrependUtf8Bom(string path)
+    {
+        byte[] payload = File.ReadAllBytes(path);
+        if (StartsWithUtf8Bom(payload))
+        {
+            return;
+        }
+
+        byte[] withBom = new byte[payload.Length + 3];
+        withBom[0] = 0xEF;
+        withBom[1] = 0xBB;
+        withBom[2] = 0xBF;
+        Buffer.BlockCopy(payload, 0, withBom, 3, payload.Length);
+        File.WriteAllBytes(path, withBom);
+    }
+
+    private static bool StartsWithUtf8Bom(byte[] bytes)
+        => bytes.Length >= 3
+            && bytes[0] == 0xEF
+            && bytes[1] == 0xBB
+            && bytes[2] == 0xBF;
 
     private static HsmDeviceProfile CreateProfile(string name)
         => new(Guid.NewGuid(), name, "/tmp/libpkcs11.so", null, null, true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);

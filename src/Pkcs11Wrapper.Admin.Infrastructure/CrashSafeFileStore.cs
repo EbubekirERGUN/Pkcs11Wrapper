@@ -6,6 +6,8 @@ namespace Pkcs11Wrapper.Admin.Infrastructure;
 
 public static class CrashSafeFileStore
 {
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
     public static async Task<T?> ReadJsonAsync<T>(string path, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path))
@@ -64,7 +66,7 @@ public static class CrashSafeFileStore
         try
         {
             await using (FileStream stream = CreateWriteThroughStream(tempPath))
-            await using (StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true))
+            await using (StreamWriter writer = new(stream, Utf8NoBom, leaveOpen: true))
             {
                 await writer.WriteAsync(content.AsMemory(), cancellationToken);
                 await writer.FlushAsync(cancellationToken);
