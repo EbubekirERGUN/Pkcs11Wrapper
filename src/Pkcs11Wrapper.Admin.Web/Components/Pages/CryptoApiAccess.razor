@@ -1,7 +1,11 @@
 @page "/crypto-api-access"
+@using System.Globalization
+@using Pkcs11Wrapper.Admin.Web.Security
+@using Pkcs11Wrapper.CryptoApi.Access
 @using Pkcs11Wrapper.CryptoApi.Clients
 @attribute [Authorize(Policy = AdminRoles.Admin)]
-@inject CryptoApiClientManagementService Access
+@inject CryptoApiClientManagementService ClientAccess
+@inject CryptoApiKeyAccessManagementService KeyAccess
 
 <PageTitle>Crypto API Access</PageTitle>
 
@@ -9,11 +13,11 @@
     <div class="page-hero-copy">
         <div class="page-eyebrow">Control plane</div>
         <h1>Crypto API Access</h1>
-        <p class="page-lead">Create customer-facing Crypto API applications, mint one-time-reveal API keys, and keep the first lifecycle controls pragmatic: enable/disable, expiry readiness, and revoke without storing plaintext secrets.</p>
+        <p class="page-lead">Create customer-facing Crypto API applications, mint one-time-reveal API keys, define usable alias routes and policies, then bind them from the admin dashboard so stateless API instances can authorize and execute customer-facing operations without out-of-band shared-state edits.</p>
         <div class="page-hero-tags">
             <span class="page-tag">API clients</span>
-            <span class="page-tag">One-time secret reveal</span>
-            <span class="page-tag">Hashed at rest</span>
+            <span class="page-tag">Key aliases</span>
+            <span class="page-tag">Policies + bindings</span>
             <span class="page-tag">Admin-only</span>
         </div>
     </div>
@@ -21,12 +25,12 @@
         <div class="hero-panel">
             <div class="hero-panel-title">Persistence</div>
             <div class="hero-panel-value">Shared</div>
-            <div class="hero-panel-copy">This screen manages the shared Crypto API client/key store consumed by stateless API instances, not a tenant portal.</div>
+            <div class="hero-panel-copy">This screen manages the shared Crypto API control plane consumed by stateless API instances, not a tenant portal.</div>
         </div>
         <div class="hero-panel">
-            <div class="hero-panel-title">Secret model</div>
-            <div class="hero-panel-value">Reveal once</div>
-            <div class="hero-panel-copy">Generated secrets are displayed only at creation time. After that, operators can manage identifiers and lifecycle metadata, not recover plaintext.</div>
+            <div class="hero-panel-title">Operator model</div>
+            <div class="hero-panel-value">End-to-end</div>
+            <div class="hero-panel-copy">Applications, aliases, policies, and bindings now live on one admin workflow so operators can finish a usable route without hand-editing SQLite or local files.</div>
         </div>
     </div>
 </section>
@@ -48,11 +52,11 @@
     </div>
 }
 
-@if (_snapshot is null)
+@if (_clientSnapshot is null || _accessSnapshot is null)
 {
     <div class="empty-state">Loading...</div>
 }
-else if (!_snapshot.SharedPersistenceConfigured)
+else if (!SharedPersistenceConfigured)
 {
     <div class="alert alert-warning">
         <div class="fw-semibold">Crypto API shared persistence is not configured for the admin app.</div>
@@ -61,21 +65,18 @@ else if (!_snapshot.SharedPersistenceConfigured)
 }
 else
 {
+    <div class="small text-muted mb-3 text-break">
+        Shared store target: <code>@(_clientSnapshot.ConnectionTarget ?? _accessSnapshot.ConnectionTarget ?? "configured")</code>
+        <span class="ms-2">Schema v@Math.Max(_clientSnapshot.SchemaVersion, _accessSnapshot.SchemaVersion)</span>
+    </div>
+
     <div class="row g-3 mb-4">
         <div class="col-xl-3 col-md-6">
             <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
                     <div class="metric-label">Applications</div>
-                    <div class="display-6 metric-meta">@_snapshot.Clients.Count</div>
-                    <div class="small metric-note">Shared store schema v@_snapshot.SchemaVersion</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm h-100 metric-card">
-                <div class="card-body">
-                    <div class="metric-label">Active applications</div>
-                    <div class="display-6 metric-meta">@_snapshot.Clients.Count(client => client.IsEnabled)</div>
+                    <div class="display-6 metric-meta">@_clientSnapshot.Clients.Count</div>
+                    <div class="small metric-note">@_clientSnapshot.Clients.Count(client => client.IsEnabled) enabled</div>
                 </div>
             </div>
         </div>
@@ -83,22 +84,33 @@ else
             <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
                     <div class="metric-label">API keys</div>
-                    <div class="display-6 metric-meta">@_snapshot.Clients.Sum(client => client.Keys.Count)</div>
+                    <div class="display-6 metric-meta">@_clientSnapshot.Clients.Sum(client => client.Keys.Count)</div>
+                    <div class="small metric-note">Hashed at rest + one-time reveal</div>
                 </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="card shadow-sm h-100 metric-card">
                 <div class="card-body">
-                    <div class="metric-label">Connection target</div>
-                    <div class="metric-meta small text-break">@(_snapshot.ConnectionTarget ?? "configured")</div>
+                    <div class="metric-label">Key aliases</div>
+                    <div class="display-6 metric-meta">@_accessSnapshot.KeyAliases.Count</div>
+                    <div class="small metric-note">@_accessSnapshot.KeyAliases.Count(alias => alias.IsEnabled) enabled</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100 metric-card">
+                <div class="card-body">
+                    <div class="metric-label">Policies</div>
+                    <div class="display-6 metric-meta">@_accessSnapshot.Policies.Count</div>
+                    <div class="small metric-note">@_accessSnapshot.Policies.Count(policy => policy.IsEnabled) enabled</div>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="row g-4">
-        <div class="col-xl-4">
+        <div class="col-xxl-4">
             <div class="card shadow-sm feature-card workflow-card mb-4">
                 <div class="card-header">Create API client</div>
                 <div class="card-body row g-3">
@@ -127,7 +139,7 @@ else
 
             @if (_selectedClient is not null)
             {
-                <div class="card shadow-sm feature-card workflow-card accent-card-secondary">
+                <div class="card shadow-sm feature-card workflow-card accent-card-secondary mb-4" data-testid="crypto-api-client-panel">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Manage client: @_selectedClient.DisplayName</span>
                         <span class="badge @(_selectedClient.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(_selectedClient.IsEnabled ? "Enabled" : "Disabled")</span>
@@ -158,34 +170,232 @@ else
                         <div class="col-12 d-flex gap-2 flex-wrap">
                             <button class="btn btn-warning" @onclick="CreateKeyAsync" data-testid="crypto-api-key-submit">Generate API key</button>
                         </div>
+                        <div class="col-12"><hr class="my-1" /></div>
+                        <div class="col-12">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label mb-0">Client policy bindings</label>
+                                <span class="small text-muted">Grant this application access to allowed operations.</span>
+                            </div>
+                            @if (_accessSnapshot.Policies.Count == 0)
+                            {
+                                <div class="form-text">Create a policy first, then bind it to this client.</div>
+                            }
+                            else
+                            {
+                                <div class="d-grid gap-2">
+                                    @foreach (CryptoApiManagedPolicy policy in _accessSnapshot.Policies)
+                                    {
+                                        <label class="border rounded p-2 small">
+                                            <input class="form-check-input me-2"
+                                                   type="checkbox"
+                                                   checked="@IsClientPolicySelected(policy.PolicyId)"
+                                                   @onchange="args => SetClientPolicySelection(policy.PolicyId, args.Value)" />
+                                            <span class="fw-semibold">@policy.PolicyName</span>
+                                            <span class="text-muted ms-2">@string.Join(", ", policy.AllowedOperations)</span>
+                                            @if (!policy.IsEnabled)
+                                            {
+                                                <span class="badge text-bg-secondary ms-2">Disabled</span>
+                                            }
+                                        </label>
+                                    }
+                                </div>
+                                <div class="form-text mt-2">Authorization succeeds only when the client and alias share at least one enabled policy.</div>
+                                <button class="btn btn-outline-primary mt-3" @onclick="SaveClientPoliciesAsync" data-testid="crypto-api-client-policies-save">Save client policy bindings</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <div class="card shadow-sm feature-card workflow-card mb-4">
+                <div class="card-header">Create key alias</div>
+                <div class="card-body row g-3">
+                    <div class="col-12">
+                        <label class="form-label">Alias name</label>
+                        <input class="form-control" @bind="_createAliasName" @bind:event="oninput" placeholder="payments-signer" data-testid="crypto-api-alias-name" />
+                        <div class="form-text">Customer-facing alias used by the Crypto API request payload.</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Device route (optional)</label>
+                        <input class="form-control" @bind="_createAliasDeviceRoute" @bind:event="oninput" placeholder="hsm-eu-primary" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Slot id</label>
+                        <input class="form-control" @bind="_createAliasSlotId" @bind:event="oninput" placeholder="0" data-testid="crypto-api-alias-slot-id" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Object id hex (optional)</label>
+                        <input class="form-control" @bind="_createAliasObjectIdHex" @bind:event="oninput" placeholder="A1B2C3D4" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Object label</label>
+                        <input class="form-control" @bind="_createAliasObjectLabel" @bind:event="oninput" placeholder="Payments signing key" data-testid="crypto-api-alias-object-label" />
+                        <div class="form-text">Current runtime execution requires a slot id plus an object label and/or object id hex.</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-control" rows="3" @bind="_createAliasNotes"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-primary" @onclick="CreateAliasAsync" data-testid="crypto-api-alias-submit">Create alias</button>
+                    </div>
+                </div>
+            </div>
+
+            @if (_selectedAlias is not null)
+            {
+                <div class="card shadow-sm feature-card workflow-card accent-card-secondary mb-4" data-testid="crypto-api-alias-panel">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Manage alias: @_selectedAlias.AliasName</span>
+                        <span class="badge @(_selectedAlias.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(_selectedAlias.IsEnabled ? "Enabled" : "Disabled")</span>
+                    </div>
+                    <div class="card-body row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Alias name</label>
+                            <input class="form-control" @bind="_selectedAliasName" @bind:event="oninput" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Device route (optional)</label>
+                            <input class="form-control" @bind="_selectedAliasDeviceRoute" @bind:event="oninput" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Slot id</label>
+                            <input class="form-control" @bind="_selectedAliasSlotId" @bind:event="oninput" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Object id hex (optional)</label>
+                            <input class="form-control" @bind="_selectedAliasObjectIdHex" @bind:event="oninput" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Object label</label>
+                            <input class="form-control" @bind="_selectedAliasObjectLabel" @bind:event="oninput" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notes</label>
+                            <textarea class="form-control" rows="3" @bind="_selectedAliasNotes"></textarea>
+                        </div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-outline-primary" @onclick="UpdateAliasAsync">Save alias</button>
+                            <button class="btn btn-outline-secondary" @onclick="ToggleAliasAsync">@(_selectedAlias.IsEnabled ? "Disable alias" : "Enable alias")</button>
+                        </div>
+                        <div class="col-12"><hr class="my-1" /></div>
+                        <div class="col-12">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label mb-0">Alias policy bindings</label>
+                                <span class="small text-muted">Bind the alias to the same policies granted to a client.</span>
+                            </div>
+                            @if (_accessSnapshot.Policies.Count == 0)
+                            {
+                                <div class="form-text">Create a policy first, then bind it to this alias.</div>
+                            }
+                            else
+                            {
+                                <div class="d-grid gap-2">
+                                    @foreach (CryptoApiManagedPolicy policy in _accessSnapshot.Policies)
+                                    {
+                                        <label class="border rounded p-2 small">
+                                            <input class="form-check-input me-2"
+                                                   type="checkbox"
+                                                   checked="@IsAliasPolicySelected(policy.PolicyId)"
+                                                   @onchange="args => SetAliasPolicySelection(policy.PolicyId, args.Value)" />
+                                            <span class="fw-semibold">@policy.PolicyName</span>
+                                            <span class="text-muted ms-2">@string.Join(", ", policy.AllowedOperations)</span>
+                                            @if (!policy.IsEnabled)
+                                            {
+                                                <span class="badge text-bg-secondary ms-2">Disabled</span>
+                                            }
+                                        </label>
+                                    }
+                                </div>
+                                <button class="btn btn-outline-primary mt-3" @onclick="SaveAliasPoliciesAsync" data-testid="crypto-api-alias-policies-save">Save alias policy bindings</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <div class="card shadow-sm feature-card workflow-card mb-4">
+                <div class="card-header">Create policy</div>
+                <div class="card-body row g-3">
+                    <div class="col-12">
+                        <label class="form-label">Policy name</label>
+                        <input class="form-control" @bind="_createPolicyName" @bind:event="oninput" placeholder="payments-signing" data-testid="crypto-api-policy-name" />
+                        <div class="form-text">Stable machine-facing identifier for shared authorization rules.</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" rows="3" @bind="_createPolicyDescription"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Allowed operations</label>
+                        <textarea class="form-control" rows="3" @bind="_createPolicyOperations" placeholder="sign, verify, random" data-testid="crypto-api-policy-operations"></textarea>
+                        <div class="form-text">Use comma, semicolon, or newline separators. <code>*</code> is allowed.</div>
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-primary" @onclick="CreatePolicyAsync" data-testid="crypto-api-policy-submit">Create policy</button>
+                    </div>
+                </div>
+            </div>
+
+            @if (_selectedPolicy is not null)
+            {
+                <div class="card shadow-sm feature-card workflow-card accent-card-secondary" data-testid="crypto-api-policy-panel">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Manage policy: @_selectedPolicy.PolicyName</span>
+                        <span class="badge @(_selectedPolicy.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(_selectedPolicy.IsEnabled ? "Enabled" : "Disabled")</span>
+                    </div>
+                    <div class="card-body row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Policy name</label>
+                            <input class="form-control" @bind="_selectedPolicyName" @bind:event="oninput" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Description</label>
+                            <textarea class="form-control" rows="3" @bind="_selectedPolicyDescription"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Allowed operations</label>
+                            <textarea class="form-control" rows="3" @bind="_selectedPolicyOperations"></textarea>
+                            <div class="form-text">Current bindings are preserved when the policy definition changes.</div>
+                        </div>
+                        <div class="col-12 small text-muted">
+                            <div><strong>Revision:</strong> @_selectedPolicy.Revision</div>
+                            <div><strong>Bound clients:</strong> @_selectedPolicy.BoundClientIds.Count</div>
+                            <div><strong>Bound aliases:</strong> @_selectedPolicy.BoundAliasIds.Count</div>
+                        </div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-outline-primary" @onclick="UpdatePolicyAsync">Save policy</button>
+                            <button class="btn btn-outline-secondary" @onclick="TogglePolicyAsync">@(_selectedPolicy.IsEnabled ? "Disable policy" : "Enable policy")</button>
+                        </div>
                     </div>
                 </div>
             }
         </div>
 
-        <div class="col-xl-8">
+        <div class="col-xxl-8">
             <div class="card shadow-sm feature-card mb-4">
                 <div class="card-header">Crypto API applications</div>
                 <div class="card-body p-0">
-                    @if (_snapshot.Clients.Count == 0)
+                    @if (_clientSnapshot.Clients.Count == 0)
                     {
                         <div class="p-3"><div class="empty-state">No Crypto API applications have been created yet.</div></div>
                     }
                     else
                     {
-                        <div class="table-responsive table-shell">
+                        <div class="table-responsive table-shell" data-testid="crypto-api-clients-table">
                             <table class="table table-hover align-middle mb-0">
                                 <thead>
                                     <tr>
                                         <th>Application</th>
                                         <th>Type</th>
+                                        <th>Policies</th>
                                         <th>Keys</th>
                                         <th>Status</th>
                                         <th></th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach (CryptoApiManagedClient client in _snapshot.Clients)
+                                    @foreach (CryptoApiManagedClient client in _clientSnapshot.Clients)
                                     {
                                         <tr class="@(ReferenceEquals(client, _selectedClient) ? "table-active" : null)">
                                             <td>
@@ -193,6 +403,7 @@ else
                                                 <div class="small text-muted">@client.ClientName</div>
                                             </td>
                                             <td class="small">@client.ApplicationType</td>
+                                            <td class="small text-muted">@(FormatBoundPolicySummary(client.BoundPolicyIds))</td>
                                             <td class="small">@client.Keys.Count</td>
                                             <td>
                                                 <span class="badge @(client.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(client.IsEnabled ? "Enabled" : "Disabled")</span>
@@ -211,7 +422,7 @@ else
 
             @if (_selectedClient is not null)
             {
-                <div class="card shadow-sm feature-card">
+                <div class="card shadow-sm feature-card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>API keys for @_selectedClient.DisplayName</span>
                         <span class="small text-muted">Public id + lifecycle metadata only</span>
@@ -260,8 +471,8 @@ else
                                                         <div class="small text-muted mt-1">@key.RevokedReason</div>
                                                     }
                                                 </td>
-                                                <td class="small text-muted">@(key.LastUsedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Never")</td>
-                                                <td class="small text-muted">@(key.ExpiresAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "No expiry")</td>
+                                                <td class="small text-muted">@FormatTimestamp(key.LastUsedAtUtc)</td>
+                                                <td class="small text-muted">@FormatTimestamp(key.ExpiresAtUtc, "No expiry")</td>
                                                 <td class="text-end">
                                                     <div class="btn-group btn-group-sm" role="group">
                                                         <button class="btn btn-outline-primary" @onclick="() => ToggleKeyAsync(key)">@(key.IsEnabled ? "Disable" : "Enable")</button>
@@ -277,13 +488,129 @@ else
                     </div>
                 </div>
             }
+
+            <div class="card shadow-sm feature-card mb-4">
+                <div class="card-header">Key aliases</div>
+                <div class="card-body p-0">
+                    @if (_accessSnapshot.KeyAliases.Count == 0)
+                    {
+                        <div class="p-3"><div class="empty-state">No key aliases have been created yet.</div></div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive table-shell" data-testid="crypto-api-aliases-table">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Alias</th>
+                                        <th>Route</th>
+                                        <th>Policies</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (CryptoApiManagedKeyAlias alias in _accessSnapshot.KeyAliases)
+                                    {
+                                        <tr class="@(ReferenceEquals(alias, _selectedAlias) ? "table-active" : null)">
+                                            <td>
+                                                <div class="fw-semibold">@alias.AliasName</div>
+                                                @if (!string.IsNullOrWhiteSpace(alias.Notes))
+                                                {
+                                                    <div class="small text-muted">@alias.Notes</div>
+                                                }
+                                            </td>
+                                            <td class="small text-muted">
+                                                <div>slot=@(alias.SlotId?.ToString(CultureInfo.InvariantCulture) ?? "missing")</div>
+                                                @if (!string.IsNullOrWhiteSpace(alias.DeviceRoute))
+                                                {
+                                                    <div>device=@alias.DeviceRoute</div>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(alias.ObjectLabel))
+                                                {
+                                                    <div>label=@alias.ObjectLabel</div>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(alias.ObjectIdHex))
+                                                {
+                                                    <div>id=@alias.ObjectIdHex</div>
+                                                }
+                                            </td>
+                                            <td class="small text-muted">@(FormatBoundPolicySummary(alias.BoundPolicyIds))</td>
+                                            <td>
+                                                <span class="badge @(alias.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(alias.IsEnabled ? "Enabled" : "Disabled")</span>
+                                            </td>
+                                            <td class="text-end">
+                                                <button class="btn btn-sm btn-outline-primary" @onclick="() => SelectAlias(alias)">Manage</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="card shadow-sm feature-card">
+                <div class="card-header">Policies</div>
+                <div class="card-body p-0">
+                    @if (_accessSnapshot.Policies.Count == 0)
+                    {
+                        <div class="p-3"><div class="empty-state">No policies have been created yet.</div></div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive table-shell" data-testid="crypto-api-policies-table">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Policy</th>
+                                        <th>Operations</th>
+                                        <th>Bound clients</th>
+                                        <th>Bound aliases</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (CryptoApiManagedPolicy policy in _accessSnapshot.Policies)
+                                    {
+                                        <tr class="@(ReferenceEquals(policy, _selectedPolicy) ? "table-active" : null)">
+                                            <td>
+                                                <div class="fw-semibold">@policy.PolicyName</div>
+                                                <div class="small text-muted">Revision @policy.Revision</div>
+                                                @if (!string.IsNullOrWhiteSpace(policy.Description))
+                                                {
+                                                    <div class="small text-muted">@policy.Description</div>
+                                                }
+                                            </td>
+                                            <td class="small text-muted">@string.Join(", ", policy.AllowedOperations)</td>
+                                            <td class="small text-muted">@(FormatBoundClientSummary(policy.BoundClientIds))</td>
+                                            <td class="small text-muted">@(FormatBoundAliasSummary(policy.BoundAliasIds))</td>
+                                            <td>
+                                                <span class="badge @(policy.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(policy.IsEnabled ? "Enabled" : "Disabled")</span>
+                                            </td>
+                                            <td class="text-end">
+                                                <button class="btn btn-sm btn-outline-primary" @onclick="() => SelectPolicy(policy)">Manage</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
         </div>
     </div>
 }
 
 @code {
-    private CryptoApiClientManagementSnapshot? _snapshot;
+    private CryptoApiClientManagementSnapshot? _clientSnapshot;
+    private CryptoApiKeyAccessSnapshot? _accessSnapshot;
     private CryptoApiManagedClient? _selectedClient;
+    private CryptoApiManagedKeyAlias? _selectedAlias;
+    private CryptoApiManagedPolicy? _selectedPolicy;
     private CryptoApiCreatedClientKey? _revealedKey;
     private string? _statusMessage;
     private bool _statusIsError;
@@ -296,36 +623,170 @@ else
     private string _newKeyName = string.Empty;
     private int? _newKeyExpiresInDays;
 
+    private string _createAliasName = string.Empty;
+    private string _createAliasDeviceRoute = string.Empty;
+    private string _createAliasSlotId = string.Empty;
+    private string _createAliasObjectLabel = string.Empty;
+    private string _createAliasObjectIdHex = string.Empty;
+    private string _createAliasNotes = string.Empty;
+
+    private string _selectedAliasName = string.Empty;
+    private string _selectedAliasDeviceRoute = string.Empty;
+    private string _selectedAliasSlotId = string.Empty;
+    private string _selectedAliasObjectLabel = string.Empty;
+    private string _selectedAliasObjectIdHex = string.Empty;
+    private string _selectedAliasNotes = string.Empty;
+
+    private string _createPolicyName = string.Empty;
+    private string _createPolicyDescription = string.Empty;
+    private string _createPolicyOperations = "sign";
+
+    private string _selectedPolicyName = string.Empty;
+    private string _selectedPolicyDescription = string.Empty;
+    private string _selectedPolicyOperations = string.Empty;
+
+    private HashSet<Guid> _selectedClientPolicyIds = [];
+    private HashSet<Guid> _selectedAliasPolicyIds = [];
+
+    private bool SharedPersistenceConfigured
+        => _clientSnapshot?.SharedPersistenceConfigured == true && _accessSnapshot?.SharedPersistenceConfigured == true;
+
     protected override Task OnInitializedAsync() => ReloadAsync();
 
-    private async Task ReloadAsync(Guid? selectedClientId = null)
+    private async Task ReloadAsync(Guid? selectedClientId = null, Guid? selectedAliasId = null, Guid? selectedPolicyId = null)
     {
-        _snapshot = await Access.GetSnapshotAsync();
-        if (_snapshot.Clients.Count == 0)
+        Task<CryptoApiClientManagementSnapshot> clientTask = ClientAccess.GetSnapshotAsync();
+        Task<CryptoApiKeyAccessSnapshot> accessTask = KeyAccess.GetSnapshotAsync();
+        await Task.WhenAll(clientTask, accessTask);
+
+        _clientSnapshot = await clientTask;
+        _accessSnapshot = await accessTask;
+
+        if (_clientSnapshot.Clients.Count == 0)
         {
             _selectedClient = null;
-            return;
+            _selectedClientPolicyIds = [];
+        }
+        else
+        {
+            _selectedClient = ResolveSelection(
+                _clientSnapshot.Clients,
+                selectedClientId,
+                _selectedClient?.ClientId,
+                client => client.ClientId);
+            _selectedClientPolicyIds = _selectedClient.BoundPolicyIds.ToHashSet();
         }
 
-        _selectedClient = selectedClientId is null
-            ? _selectedClient is null
-                ? _snapshot.Clients[0]
-                : _snapshot.Clients.FirstOrDefault(client => client.ClientId == _selectedClient.ClientId) ?? _snapshot.Clients[0]
-            : _snapshot.Clients.FirstOrDefault(client => client.ClientId == selectedClientId.Value) ?? _snapshot.Clients[0];
+        if (_accessSnapshot.KeyAliases.Count == 0)
+        {
+            _selectedAlias = null;
+            _selectedAliasPolicyIds = [];
+            ResetAliasEditor();
+        }
+        else
+        {
+            _selectedAlias = ResolveSelection(
+                _accessSnapshot.KeyAliases,
+                selectedAliasId,
+                _selectedAlias?.AliasId,
+                alias => alias.AliasId);
+            _selectedAliasPolicyIds = _selectedAlias.BoundPolicyIds.ToHashSet();
+            LoadAliasEditor(_selectedAlias);
+        }
+
+        if (_accessSnapshot.Policies.Count == 0)
+        {
+            _selectedPolicy = null;
+            ResetPolicyEditor();
+        }
+        else
+        {
+            _selectedPolicy = ResolveSelection(
+                _accessSnapshot.Policies,
+                selectedPolicyId,
+                _selectedPolicy?.PolicyId,
+                policy => policy.PolicyId);
+            LoadPolicyEditor(_selectedPolicy);
+        }
+    }
+
+    private static T ResolveSelection<T>(IReadOnlyList<T> items, Guid? explicitId, Guid? currentId, Func<T, Guid> getId)
+    {
+        Guid? targetId = explicitId ?? currentId;
+        if (targetId is Guid id)
+        {
+            T? match = items.FirstOrDefault(item => getId(item) == id);
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        return items[0];
     }
 
     private void SelectClient(CryptoApiManagedClient client)
     {
         _selectedClient = client;
+        _selectedClientPolicyIds = client.BoundPolicyIds.ToHashSet();
         _revealedKey = null;
         _statusMessage = null;
+    }
+
+    private void SelectAlias(CryptoApiManagedKeyAlias alias)
+    {
+        _selectedAlias = alias;
+        _selectedAliasPolicyIds = alias.BoundPolicyIds.ToHashSet();
+        LoadAliasEditor(alias);
+        _statusMessage = null;
+    }
+
+    private void SelectPolicy(CryptoApiManagedPolicy policy)
+    {
+        _selectedPolicy = policy;
+        LoadPolicyEditor(policy);
+        _statusMessage = null;
+    }
+
+    private void LoadAliasEditor(CryptoApiManagedKeyAlias alias)
+    {
+        _selectedAliasName = alias.AliasName;
+        _selectedAliasDeviceRoute = alias.DeviceRoute ?? string.Empty;
+        _selectedAliasSlotId = alias.SlotId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        _selectedAliasObjectLabel = alias.ObjectLabel ?? string.Empty;
+        _selectedAliasObjectIdHex = alias.ObjectIdHex ?? string.Empty;
+        _selectedAliasNotes = alias.Notes ?? string.Empty;
+    }
+
+    private void ResetAliasEditor()
+    {
+        _selectedAliasName = string.Empty;
+        _selectedAliasDeviceRoute = string.Empty;
+        _selectedAliasSlotId = string.Empty;
+        _selectedAliasObjectLabel = string.Empty;
+        _selectedAliasObjectIdHex = string.Empty;
+        _selectedAliasNotes = string.Empty;
+    }
+
+    private void LoadPolicyEditor(CryptoApiManagedPolicy policy)
+    {
+        _selectedPolicyName = policy.PolicyName;
+        _selectedPolicyDescription = policy.Description ?? string.Empty;
+        _selectedPolicyOperations = string.Join(Environment.NewLine, policy.AllowedOperations);
+    }
+
+    private void ResetPolicyEditor()
+    {
+        _selectedPolicyName = string.Empty;
+        _selectedPolicyDescription = string.Empty;
+        _selectedPolicyOperations = string.Empty;
     }
 
     private async Task CreateClientAsync()
     {
         try
         {
-            CryptoApiManagedClient created = await Access.CreateClientAsync(new CreateCryptoApiClientRequest(
+            CryptoApiManagedClient created = await ClientAccess.CreateClientAsync(new CreateCryptoApiClientRequest(
                 ClientName: _createClientName,
                 DisplayName: _createDisplayName,
                 ApplicationType: _createApplicationType,
@@ -336,14 +797,12 @@ else
             _createApplicationType = "service";
             _createNotes = string.Empty;
             _revealedKey = null;
-            await ReloadAsync(created.ClientId);
-            _statusMessage = "Crypto API client created.";
-            _statusIsError = false;
+            await ReloadAsync(selectedClientId: created.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus("Crypto API client created.");
         }
         catch (Exception ex)
         {
-            _statusMessage = ex.Message;
-            _statusIsError = true;
+            SetErrorStatus(ex);
         }
     }
 
@@ -357,15 +816,13 @@ else
         try
         {
             bool enable = !_selectedClient.IsEnabled;
-            await Access.SetClientEnabledAsync(_selectedClient.ClientId, enable);
-            await ReloadAsync(_selectedClient.ClientId);
-            _statusMessage = enable ? "Crypto API client enabled." : "Crypto API client disabled.";
-            _statusIsError = false;
+            await ClientAccess.SetClientEnabledAsync(_selectedClient.ClientId, enable);
+            await ReloadAsync(selectedClientId: _selectedClient.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus(enable ? "Crypto API client enabled." : "Crypto API client disabled.");
         }
         catch (Exception ex)
         {
-            _statusMessage = ex.Message;
-            _statusIsError = true;
+            SetErrorStatus(ex);
         }
     }
 
@@ -383,21 +840,19 @@ else
                 ? DateTimeOffset.UtcNow.AddDays(expiryDays)
                 : null;
 
-            _revealedKey = await Access.CreateClientKeyAsync(new CreateCryptoApiClientKeyRequest(
+            _revealedKey = await ClientAccess.CreateClientKeyAsync(new CreateCryptoApiClientKeyRequest(
                 ClientId: _selectedClient.ClientId,
                 KeyName: _newKeyName,
                 ExpiresAtUtc: expiresAtUtc));
 
             _newKeyName = string.Empty;
             _newKeyExpiresInDays = null;
-            await ReloadAsync(_selectedClient.ClientId);
-            _statusMessage = "Crypto API key generated. Copy the revealed secret now.";
-            _statusIsError = false;
+            await ReloadAsync(selectedClientId: _selectedClient.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus("Crypto API key generated. Copy the revealed secret now.");
         }
         catch (Exception ex)
         {
-            _statusMessage = ex.Message;
-            _statusIsError = true;
+            SetErrorStatus(ex);
         }
     }
 
@@ -406,15 +861,13 @@ else
         try
         {
             bool enable = !key.IsEnabled;
-            await Access.SetClientKeyEnabledAsync(key.ClientKeyId, enable);
-            await ReloadAsync(_selectedClient?.ClientId);
-            _statusMessage = enable ? "Crypto API key enabled." : "Crypto API key disabled.";
-            _statusIsError = false;
+            await ClientAccess.SetClientKeyEnabledAsync(key.ClientKeyId, enable);
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus(enable ? "Crypto API key enabled." : "Crypto API key disabled.");
         }
         catch (Exception ex)
         {
-            _statusMessage = ex.Message;
-            _statusIsError = true;
+            SetErrorStatus(ex);
         }
     }
 
@@ -422,15 +875,296 @@ else
     {
         try
         {
-            await Access.RevokeClientKeyAsync(key.ClientKeyId);
-            await ReloadAsync(_selectedClient?.ClientId);
-            _statusMessage = "Crypto API key revoked.";
-            _statusIsError = false;
+            await ClientAccess.RevokeClientKeyAsync(key.ClientKeyId);
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus("Crypto API key revoked.");
         }
         catch (Exception ex)
         {
-            _statusMessage = ex.Message;
-            _statusIsError = true;
+            SetErrorStatus(ex);
         }
+    }
+
+    private async Task SaveClientPoliciesAsync()
+    {
+        if (_selectedClient is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await KeyAccess.ReplaceClientPoliciesAsync(_selectedClient.ClientId, _selectedClientPolicyIds.OrderBy(id => id).ToArray());
+            await ReloadAsync(selectedClientId: _selectedClient.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus("Client policy bindings saved.");
+        }
+        catch (Exception ex)
+        {
+            SetErrorStatus(ex);
+        }
+    }
+
+    private async Task CreateAliasAsync()
+    {
+        try
+        {
+            CryptoApiManagedKeyAlias created = await KeyAccess.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
+                AliasName: _createAliasName,
+                DeviceRoute: EmptyToNull(_createAliasDeviceRoute),
+                SlotId: ParseOptionalSlotId(_createAliasSlotId),
+                ObjectLabel: EmptyToNull(_createAliasObjectLabel),
+                ObjectIdHex: EmptyToNull(_createAliasObjectIdHex),
+                Notes: EmptyToNull(_createAliasNotes)));
+
+            _createAliasName = string.Empty;
+            _createAliasDeviceRoute = string.Empty;
+            _createAliasSlotId = string.Empty;
+            _createAliasObjectLabel = string.Empty;
+            _createAliasObjectIdHex = string.Empty;
+            _createAliasNotes = string.Empty;
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: created.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus("Crypto API key alias created.");
+        }
+        catch (Exception ex)
+        {
+            SetErrorStatus(ex);
+        }
+    }
+
+    private async Task UpdateAliasAsync()
+    {
+        if (_selectedAlias is null)
+        {
+            return;
+        }
+
+        try
+        {
+            CryptoApiManagedKeyAlias updated = await KeyAccess.UpdateKeyAliasAsync(new UpdateCryptoApiKeyAliasRequest(
+                AliasId: _selectedAlias.AliasId,
+                AliasName: _selectedAliasName,
+                DeviceRoute: EmptyToNull(_selectedAliasDeviceRoute),
+                SlotId: ParseOptionalSlotId(_selectedAliasSlotId),
+                ObjectLabel: EmptyToNull(_selectedAliasObjectLabel),
+                ObjectIdHex: EmptyToNull(_selectedAliasObjectIdHex),
+                Notes: EmptyToNull(_selectedAliasNotes)));
+
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: updated.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus("Crypto API key alias updated.");
+        }
+        catch (Exception ex)
+        {
+            SetErrorStatus(ex);
+        }
+    }
+
+    private async Task ToggleAliasAsync()
+    {
+        if (_selectedAlias is null)
+        {
+            return;
+        }
+
+        try
+        {
+            bool enable = !_selectedAlias.IsEnabled;
+            await KeyAccess.SetKeyAliasEnabledAsync(_selectedAlias.AliasId, enable);
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: _selectedAlias.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus(enable ? "Crypto API key alias enabled." : "Crypto API key alias disabled.");
+        }
+        catch (Exception ex)
+        {
+            SetErrorStatus(ex);
+        }
+    }
+
+    private async Task SaveAliasPoliciesAsync()
+    {
+        if (_selectedAlias is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await KeyAccess.ReplaceKeyAliasPoliciesAsync(_selectedAlias.AliasId, _selectedAliasPolicyIds.OrderBy(id => id).ToArray());
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: _selectedAlias.AliasId, selectedPolicyId: _selectedPolicy?.PolicyId);
+            SetSuccessStatus("Alias policy bindings saved.");
+        }
+        catch (Exception ex)
+        {
+            SetErrorStatus(ex);
+        }
+    }
+
+    private async Task CreatePolicyAsync()
+    {
+        try
+        {
+            CryptoApiManagedPolicy created = await KeyAccess.CreatePolicyAsync(new CreateCryptoApiPolicyRequest(
+                PolicyName: _createPolicyName,
+                Description: EmptyToNull(_createPolicyDescription),
+                AllowedOperations: ParseOperations(_createPolicyOperations)));
+
+            _createPolicyName = string.Empty;
+            _createPolicyDescription = string.Empty;
+            _createPolicyOperations = "sign";
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: created.PolicyId);
+            SetSuccessStatus("Crypto API policy created.");
+        }
+        catch (Exception ex)
+        {
+            SetErrorStatus(ex);
+        }
+    }
+
+    private async Task UpdatePolicyAsync()
+    {
+        if (_selectedPolicy is null)
+        {
+            return;
+        }
+
+        try
+        {
+            CryptoApiManagedPolicy updated = await KeyAccess.UpdatePolicyAsync(new UpdateCryptoApiPolicyRequest(
+                PolicyId: _selectedPolicy.PolicyId,
+                PolicyName: _selectedPolicyName,
+                Description: EmptyToNull(_selectedPolicyDescription),
+                AllowedOperations: ParseOperations(_selectedPolicyOperations)));
+
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: updated.PolicyId);
+            SetSuccessStatus("Crypto API policy updated.");
+        }
+        catch (Exception ex)
+        {
+            SetErrorStatus(ex);
+        }
+    }
+
+    private async Task TogglePolicyAsync()
+    {
+        if (_selectedPolicy is null)
+        {
+            return;
+        }
+
+        try
+        {
+            bool enable = !_selectedPolicy.IsEnabled;
+            await KeyAccess.SetPolicyEnabledAsync(_selectedPolicy.PolicyId, enable);
+            await ReloadAsync(selectedClientId: _selectedClient?.ClientId, selectedAliasId: _selectedAlias?.AliasId, selectedPolicyId: _selectedPolicy.PolicyId);
+            SetSuccessStatus(enable ? "Crypto API policy enabled." : "Crypto API policy disabled.");
+        }
+        catch (Exception ex)
+        {
+            SetErrorStatus(ex);
+        }
+    }
+
+    private bool IsClientPolicySelected(Guid policyId) => _selectedClientPolicyIds.Contains(policyId);
+
+    private bool IsAliasPolicySelected(Guid policyId) => _selectedAliasPolicyIds.Contains(policyId);
+
+    private void SetClientPolicySelection(Guid policyId, object? value)
+        => SetPolicySelection(_selectedClientPolicyIds, policyId, value);
+
+    private void SetAliasPolicySelection(Guid policyId, object? value)
+        => SetPolicySelection(_selectedAliasPolicyIds, policyId, value);
+
+    private static void SetPolicySelection(HashSet<Guid> selectedPolicyIds, Guid policyId, object? value)
+    {
+        bool isSelected = value as bool? == true;
+        if (isSelected)
+        {
+            selectedPolicyIds.Add(policyId);
+        }
+        else
+        {
+            selectedPolicyIds.Remove(policyId);
+        }
+    }
+
+    private string FormatBoundPolicySummary(IReadOnlyCollection<Guid> policyIds)
+    {
+        if (policyIds.Count == 0)
+        {
+            return "None";
+        }
+
+        IReadOnlyDictionary<Guid, string> policyNames = (_accessSnapshot?.Policies ?? [])
+            .ToDictionary(policy => policy.PolicyId, policy => policy.PolicyName);
+
+        return string.Join(", ", policyIds
+            .Select(policyId => policyNames.TryGetValue(policyId, out string? name) ? name : policyId.ToString())
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private string FormatBoundClientSummary(IReadOnlyCollection<Guid> clientIds)
+    {
+        if (clientIds.Count == 0)
+        {
+            return "None";
+        }
+
+        IReadOnlyDictionary<Guid, string> clientNames = (_clientSnapshot?.Clients ?? [])
+            .ToDictionary(client => client.ClientId, client => client.ClientName);
+
+        return string.Join(", ", clientIds
+            .Select(clientId => clientNames.TryGetValue(clientId, out string? name) ? name : clientId.ToString())
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private string FormatBoundAliasSummary(IReadOnlyCollection<Guid> aliasIds)
+    {
+        if (aliasIds.Count == 0)
+        {
+            return "None";
+        }
+
+        IReadOnlyDictionary<Guid, string> aliasNames = (_accessSnapshot?.KeyAliases ?? [])
+            .ToDictionary(alias => alias.AliasId, alias => alias.AliasName);
+
+        return string.Join(", ", aliasIds
+            .Select(aliasId => aliasNames.TryGetValue(aliasId, out string? name) ? name : aliasId.ToString())
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string FormatTimestamp(DateTimeOffset? value, string empty = "Never")
+        => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? empty;
+
+    private static string? EmptyToNull(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static ulong? ParseOptionalSlotId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!ulong.TryParse(value.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out ulong slotId))
+        {
+            throw new ArgumentException("Slot id must be an unsigned integer.");
+        }
+
+        return slotId;
+    }
+
+    private static IReadOnlyCollection<string> ParseOperations(string? value)
+        => (value ?? string.Empty)
+            .Split([',', ';', '\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToArray();
+
+    private void SetSuccessStatus(string message)
+    {
+        _statusMessage = message;
+        _statusIsError = false;
+    }
+
+    private void SetErrorStatus(Exception ex)
+    {
+        _statusMessage = ex.Message;
+        _statusIsError = true;
     }
 }

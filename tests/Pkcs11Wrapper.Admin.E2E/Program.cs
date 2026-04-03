@@ -73,14 +73,17 @@ internal static class AdminRuntimeE2E
                 await ExerciseSlotsAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "04-slots.png"));
 
-                await ExerciseKeysAsync(page, config, eventLog, LogStep);
+                string slotId = await ExerciseKeysAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "05-keys.png"));
 
+                await ExerciseCryptoApiAccessAsync(page, config, slotId, eventLog, LogStep);
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "06-crypto-api-access.png"));
+
                 await ExerciseLabAsync(page, config, eventLog, LogStep);
-                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "06-lab.png"));
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "07-lab.png"));
 
                 await ExerciseTelemetryAsync(page, config, eventLog, LogStep);
-                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "07-telemetry.png"));
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "08-telemetry.png"));
 
                 await TryStopTracingAsync(context, config.ArtifactRoot, LogStep);
             }
@@ -259,14 +262,14 @@ internal static class AdminRuntimeE2E
         logStep("Slots: loaded inventory and verified setup-required slots are not directly actionable");
     }
 
-    private static async Task ExerciseKeysAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
+    private static async Task<string> ExerciseKeysAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
         logStep("Keys: loading object inventory and opening detail");
         await NavigateToAsync(page, config.BaseUrl, "/keys");
         await WaitForTextAsync(page.Locator("[data-testid='keys-device']"), config.DeviceName, 15000);
         await page.SelectOptionAsync("[data-testid='keys-device']", new[] { new SelectOptionValue { Label = config.DeviceName } });
         await WaitForOptionCountAtLeastAsync(page, "[data-testid='keys-slot'] option", 2, 15000);
-        await SelectFirstNonEmptyOptionAsync(page, "[data-testid='keys-slot']");
+        string slotId = await SelectFirstNonEmptyOptionAsync(page, "[data-testid='keys-slot']");
         await page.FillAsync("[data-testid='keys-label-filter']", config.FindLabel);
         await page.FillAsync("[data-testid='keys-user-pin']", config.UserPin);
         await page.ClickAsync("[data-testid='keys-load']");
@@ -276,7 +279,63 @@ internal static class AdminRuntimeE2E
         await rows.First.Locator("button:has-text('Details')").ClickAsync();
         await WaitForVisibleAsync(page, "[data-testid='keys-detail-panel']");
         await WaitForTextAsync(page.Locator("[data-testid='keys-detail-panel']"), "Object detail", 15000);
-        logStep("Keys: loaded filtered objects and opened detail panel");
+        logStep($"Keys: loaded filtered objects, opened detail panel, and captured slot {slotId} for Crypto API alias routing");
+        return slotId;
+    }
+
+
+    private static async Task ExerciseCryptoApiAccessAsync(IPage page, TestConfig config, string slotId, List<string> eventLog, Action<string> logStep)
+    {
+        logStep("Crypto API Access: creating client/key/policy/alias bindings through the admin control plane");
+        await NavigateToAsync(page, config.BaseUrl, "/crypto-api-access");
+        await WaitForVisibleAsync(page, "[data-testid='crypto-api-client-name']");
+
+        string suffix = DateTimeOffset.UtcNow.ToString("HHmmssfff");
+        string clientName = $"ci-gateway-{suffix}";
+        string displayName = $"CI Gateway {suffix}";
+        string policyName = $"ci-policy-{suffix}";
+        string aliasName = $"ci-signer-{suffix}";
+
+        await page.FillAsync("[data-testid='crypto-api-client-name']", clientName);
+        await page.FillAsync("input[placeholder='Payments Gateway']", displayName);
+        await page.FillAsync("input[placeholder='gateway']", "gateway");
+        await page.ClickAsync("[data-testid='crypto-api-client-submit']");
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-access-status']"), "Crypto API client created.", 15000);
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-clients-table']"), clientName, 15000);
+
+        await page.ClickAsync($"[data-testid='crypto-api-clients-table'] tbody tr:has-text('{clientName}') button:has-text('Manage')");
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-client-panel']"), clientName, 15000);
+        await page.FillAsync("[data-testid='crypto-api-key-name']", "primary");
+        await page.ClickAsync("[data-testid='crypto-api-key-submit']");
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-access-status']"), "Crypto API key generated.", 15000);
+        await WaitForVisibleAsync(page, "[data-testid='crypto-api-access-secret']");
+
+        await page.FillAsync("[data-testid='crypto-api-policy-name']", policyName);
+        await page.FillAsync("[data-testid='crypto-api-policy-operations']", "sign, verify, random");
+        await page.ClickAsync("[data-testid='crypto-api-policy-submit']");
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-access-status']"), "Crypto API policy created.", 15000);
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-policies-table']"), policyName, 15000);
+
+        await page.CheckAsync($"[data-testid='crypto-api-client-panel'] label:has-text('{policyName}') input[type='checkbox']");
+        await page.ClickAsync("[data-testid='crypto-api-client-policies-save']");
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-access-status']"), "Client policy bindings saved.", 15000);
+
+        await page.FillAsync("[data-testid='crypto-api-alias-name']", aliasName);
+        await page.FillAsync("[data-testid='crypto-api-alias-slot-id']", slotId);
+        await page.FillAsync("[data-testid='crypto-api-alias-object-label']", config.FindLabel);
+        await page.ClickAsync("[data-testid='crypto-api-alias-submit']");
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-access-status']"), "Crypto API key alias created.", 15000);
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-aliases-table']"), aliasName, 15000);
+
+        await page.ClickAsync($"[data-testid='crypto-api-aliases-table'] tbody tr:has-text('{aliasName}') button:has-text('Manage')");
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-alias-panel']"), aliasName, 15000);
+        await page.CheckAsync($"[data-testid='crypto-api-alias-panel'] label:has-text('{policyName}') input[type='checkbox']");
+        await page.ClickAsync("[data-testid='crypto-api-alias-policies-save']");
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-access-status']"), "Alias policy bindings saved.", 15000);
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-policies-table']"), clientName, 15000);
+        await WaitForTextAsync(page.Locator("[data-testid='crypto-api-policies-table']"), aliasName, 15000);
+
+        logStep($"Crypto API Access: created {clientName}, generated a one-time secret, created policy {policyName}, routed alias {aliasName} to slot {slotId}, and saved both binding directions through the supported admin surface");
     }
 
     private static async Task ExerciseLabAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
@@ -347,6 +406,7 @@ internal static class AdminRuntimeE2E
             "/devices" => "[data-testid='nav-devices']",
             "/slots" => "[data-testid='nav-slots']",
             "/keys" => "[data-testid='nav-keys']",
+            "/crypto-api-access" => "[data-testid='nav-crypto-api-access']",
             "/lab" => "[data-testid='nav-lab']",
             "/telemetry" => "[data-testid='nav-telemetry']",
             "/users" => "[data-testid='nav-users']",
@@ -391,7 +451,14 @@ internal static class AdminRuntimeE2E
     private static Task WaitForInteractiveSettleAsync()
         => Task.Delay(1000);
 
-    private static async Task SelectFirstNonEmptyOptionAsync(IPage page, string selectSelector)
+    private static async Task<string> SelectFirstNonEmptyOptionAsync(IPage page, string selectSelector)
+    {
+        string value = await GetFirstNonEmptyOptionValueAsync(page, selectSelector);
+        await page.SelectOptionAsync(selectSelector, new[] { new SelectOptionValue { Value = value } });
+        return value;
+    }
+
+    private static async Task<string> GetFirstNonEmptyOptionValueAsync(IPage page, string selectSelector)
     {
         string value = await page.Locator($"{selectSelector} option").EvaluateAllAsync<string>(@"options => {
             const usable = options.find(option => option.value && option.value.trim().length > 0);
@@ -403,7 +470,7 @@ internal static class AdminRuntimeE2E
             throw new InvalidOperationException($"No selectable option was available for '{selectSelector}'.");
         }
 
-        await page.SelectOptionAsync(selectSelector, new[] { new SelectOptionValue { Value = value } });
+        return value;
     }
 
     private static async Task WaitForVisibleAsync(IPage page, string selector, int timeoutMs = 15000)

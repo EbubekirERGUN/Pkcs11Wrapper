@@ -85,7 +85,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - `/health/live` + `/health/ready` endpoints, with readiness validating the configured PKCS#11 module and shared persistence when configured
 - `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, `POST /api/v1/operations/authorize`, `/api/v1/shared-state`, and `/api/v1/auth/self` route space for the emerging machine-facing contract
 - pragmatic shared SQLite-backed persistence for multi-instance API clients/keys, key aliases, policies, and policy bindings
-- first practical access-control slices: generated API-key secrets are shown once, stored only as hashes, and paired with alias routing + policy enforcement without exposing raw PKCS#11 locator details to callers
+- practical access-control slice: generated API-key secrets are shown once, stored only as hashes, and can now be paired end-to-end with alias routing, policy definitions, and binding management from the admin dashboard without exposing raw PKCS#11 locator details to callers
 - admin-panel/shared-store control-plane model for Crypto API applications, aliases, policies, and bindings without turning the machine-facing host into a tenant portal
 - intended deployment model: **one admin dashboard + many stateless crypto API instances**
 

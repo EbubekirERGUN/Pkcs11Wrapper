@@ -111,6 +111,108 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
         }
     }
 
+    [Fact]
+    public async Task CreateKeyAliasRequiresSlotIdForOperationalRoute()
+    {
+        string databasePath = CreateDatabasePath();
+        try
+        {
+            var services = CreateServices(databasePath);
+
+            ArgumentException ex = await Assert.ThrowsAsync<ArgumentException>(() => services.AccessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
+                AliasName: "missing-slot",
+                DeviceRoute: null,
+                SlotId: null,
+                ObjectLabel: "Payments signing key",
+                ObjectIdHex: null,
+                Notes: null)));
+
+            Assert.Contains("slot id", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateAliasAndPolicyPreserveBindingsAndRefreshSnapshot()
+    {
+        string databasePath = CreateDatabasePath();
+        try
+        {
+            var services = CreateServices(databasePath);
+            CryptoApiManagedClient client = await services.ClientManagement.CreateClientAsync(new CreateCryptoApiClientRequest(
+                ClientName: "payments-gateway",
+                DisplayName: "Payments Gateway",
+                ApplicationType: "gateway",
+                Notes: null));
+            CryptoApiManagedPolicy policy = await services.AccessManagement.CreatePolicyAsync(new CreateCryptoApiPolicyRequest(
+                PolicyName: "payments-sign",
+                Description: "Allow signing through the payments alias.",
+                AllowedOperations: ["sign"]));
+            CryptoApiManagedKeyAlias alias = await services.AccessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
+                AliasName: "payments-signer",
+                DeviceRoute: "hsm-eu-primary",
+                SlotId: 7,
+                ObjectLabel: "Payments signing key",
+                ObjectIdHex: "a1b2c3d4",
+                Notes: null));
+
+            await services.AccessManagement.ReplaceClientPoliciesAsync(client.ClientId, [policy.PolicyId]);
+            await services.AccessManagement.ReplaceKeyAliasPoliciesAsync(alias.AliasId, [policy.PolicyId]);
+
+            CryptoApiManagedKeyAlias updatedAlias = await services.AccessManagement.UpdateKeyAliasAsync(new UpdateCryptoApiKeyAliasRequest(
+                AliasId: alias.AliasId,
+                AliasName: "payments-signer-v2",
+                DeviceRoute: "hsm-eu-secondary",
+                SlotId: 11,
+                ObjectLabel: "Payments signing key v2",
+                ObjectIdHex: "ab:cd:ef:01",
+                Notes: "Updated route"));
+
+            CryptoApiManagedPolicy updatedPolicy = await services.AccessManagement.UpdatePolicyAsync(new UpdateCryptoApiPolicyRequest(
+                PolicyId: policy.PolicyId,
+                PolicyName: "payments-authorized-ops",
+                Description: "Allow sign and verify.",
+                AllowedOperations: ["verify", "sign"]));
+
+            CryptoApiKeyAccessSnapshot snapshot = await services.AccessManagement.GetSnapshotAsync();
+            CryptoApiManagedKeyAlias aliasFromSnapshot = Assert.Single(snapshot.KeyAliases, candidate => candidate.AliasId == alias.AliasId);
+            CryptoApiManagedPolicy policyFromSnapshot = Assert.Single(snapshot.Policies, candidate => candidate.PolicyId == policy.PolicyId);
+
+            Assert.Equal("payments-signer-v2", updatedAlias.AliasName);
+            Assert.Equal((ulong)11, updatedAlias.SlotId);
+            Assert.Equal("ABCDEF01", updatedAlias.ObjectIdHex);
+            Assert.Contains(policy.PolicyId, updatedAlias.BoundPolicyIds);
+
+            Assert.Equal("payments-authorized-ops", updatedPolicy.PolicyName);
+            Assert.Equal(2, updatedPolicy.Revision);
+            Assert.Equal(["sign", "verify"], updatedPolicy.AllowedOperations);
+            Assert.Contains(client.ClientId, updatedPolicy.BoundClientIds);
+            Assert.Contains(alias.AliasId, updatedPolicy.BoundAliasIds);
+
+            Assert.Equal(updatedAlias.AliasName, aliasFromSnapshot.AliasName);
+            Assert.Equal(updatedAlias.DeviceRoute, aliasFromSnapshot.DeviceRoute);
+            Assert.Equal(updatedAlias.SlotId, aliasFromSnapshot.SlotId);
+            Assert.Equal(updatedAlias.ObjectLabel, aliasFromSnapshot.ObjectLabel);
+            Assert.Equal(updatedAlias.ObjectIdHex, aliasFromSnapshot.ObjectIdHex);
+            Assert.Equal(updatedAlias.Notes, aliasFromSnapshot.Notes);
+            Assert.Equal(updatedAlias.BoundPolicyIds, aliasFromSnapshot.BoundPolicyIds);
+
+            Assert.Equal(updatedPolicy.PolicyName, policyFromSnapshot.PolicyName);
+            Assert.Equal(updatedPolicy.Description, policyFromSnapshot.Description);
+            Assert.Equal(updatedPolicy.Revision, policyFromSnapshot.Revision);
+            Assert.Equal(updatedPolicy.AllowedOperations, policyFromSnapshot.AllowedOperations);
+            Assert.Equal(updatedPolicy.BoundClientIds, policyFromSnapshot.BoundClientIds);
+            Assert.Equal(updatedPolicy.BoundAliasIds, policyFromSnapshot.BoundAliasIds);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
     private static (ICryptoApiSharedStateStore Store, CryptoApiClientManagementService ClientManagement, CryptoApiClientAuthenticationService Authentication, CryptoApiKeyAccessManagementService AccessManagement, CryptoApiKeyOperationAuthorizationService Authorization) CreateServices(string databasePath)
     {
         CryptoApiSharedPersistenceOptions options = new()
