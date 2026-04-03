@@ -208,6 +208,8 @@ dotnet run
 
 For local source-tree development, first run seeds a bootstrap admin credential file under `App_Data/bootstrap-admin.txt`.
 
+When the admin host runs in the `Development` environment, it also exposes an OpenAPI document for the real admin HTTP endpoints only at `/openapi/v1.json`, plus Swagger UI at `/swagger`. Those routes are intentionally disabled outside `Development` so production deployments do not grow an extra discovery/testing surface by default.
+
 For CI/automation/container scenarios you can externalize the runtime storage root, bootstrap credential, first PKCS#11 module path, and runtime behavior:
 
 ```bash

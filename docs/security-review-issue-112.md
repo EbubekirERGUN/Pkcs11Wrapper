@@ -106,8 +106,8 @@ These are **not** fixed by this issue and should remain explicit in docs/roadmap
 5. **Security headers are intentionally conservative.**
    A strict CSP was not added in this pass because the current interactive admin UI would need CSP-specific tuning/testing rather than a guessy header that could break the product.
 
-6. **No active Swagger/OpenAPI generator was found in the current tree.**
-   If a Swagger/OpenAPI surface is added later, it should be treated as another public attack surface and gated appropriately rather than assumed safe by default.
+6. **Admin OpenAPI/Swagger is development-only.**
+   The admin host now exposes `/openapi/v1.json` and `/swagger` only in the ASP.NET Core `Development` environment, and the document is intentionally limited to the real minimal HTTP endpoints (auth form posts, export routes, and health probes). Production/container deployments keep that surface off by default so it does not silently become another public attack surface.
 
 ## Validation expectation for this issue
 

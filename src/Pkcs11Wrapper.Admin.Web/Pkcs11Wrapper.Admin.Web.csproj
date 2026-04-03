@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.3.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.1.7" />
+
     <ProjectReference Include="..\Pkcs11Wrapper.Admin.Application\Pkcs11Wrapper.Admin.Application.csproj" />
     <ProjectReference Include="..\Pkcs11Wrapper.Admin.Infrastructure\Pkcs11Wrapper.Admin.Infrastructure.csproj" />
     <ProjectReference Include="..\Pkcs11Wrapper.CryptoApi.Shared\Pkcs11Wrapper.CryptoApi.Shared.csproj" />

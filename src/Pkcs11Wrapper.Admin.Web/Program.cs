@@ -1,20 +1,20 @@
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
 using Pkcs11Wrapper.Admin.Application.Services;
 using Pkcs11Wrapper.Admin.Infrastructure;
-using Pkcs11Wrapper.Admin.Web.Lab;
 using Pkcs11Wrapper.Admin.Web.Components;
 using Pkcs11Wrapper.Admin.Web.Configuration;
 using Pkcs11Wrapper.Admin.Web.Health;
+using Pkcs11Wrapper.Admin.Web.Lab;
+using Pkcs11Wrapper.Admin.Web.OpenApi;
 using Pkcs11Wrapper.Admin.Web.Security;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.SharedState;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Options;
 
 if (await AdminContainerHealthProbe.TryExecuteAsync(args))
 {
@@ -25,6 +25,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseStaticWebAssets();
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddAdminOpenApi();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -122,6 +123,10 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
+else
+{
+    app.UseAdminOpenApi();
+}
 
 app.UseStatusCodePagesWithReExecute("/not-found");
 if (!runtimeOptions.DisableHttpsRedirection)
@@ -133,23 +138,57 @@ app.UseAdminSecurityResponseHeaders();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
-app.MapHealthChecks(AdminHostDefaults.HealthLivePath, new HealthCheckOptions
-{
-    Predicate = static _ => false,
-    ResponseWriter = AdminHealthResponseWriter.WriteAsync
-});
-app.MapHealthChecks(AdminHostDefaults.HealthReadyPath, new HealthCheckOptions
-{
-    Predicate = static registration => registration.Tags.Contains("ready", StringComparer.Ordinal),
-    ResponseWriter = AdminHealthResponseWriter.WriteAsync
-});
+app.MapGet(AdminHostDefaults.HealthLivePath, (Delegate)AdminHealthEndpoints.LiveAsync)
+    .AllowAnonymous()
+    .WithName("AdminHealthLive")
+    .WithTags("Health")
+    .WithSummary("Gets the admin host liveness status.")
+    .WithDescription("Returns a lightweight liveness payload for process availability checks.")
+    .Produces<AdminHealthResponse>(StatusCodes.Status200OK, contentType: "application/json")
+    .Produces<AdminHealthResponse>(StatusCodes.Status503ServiceUnavailable, contentType: "application/json");
+app.MapGet(AdminHostDefaults.HealthReadyPath, (Delegate)AdminHealthEndpoints.ReadyAsync)
+    .AllowAnonymous()
+    .WithName("AdminHealthReady")
+    .WithTags("Health")
+    .WithSummary("Gets the admin host readiness status.")
+    .WithDescription("Returns the storage-focused readiness payload used by container and orchestrator probes.")
+    .Produces<AdminHealthResponse>(StatusCodes.Status200OK, contentType: "application/json")
+    .Produces<AdminHealthResponse>(StatusCodes.Status503ServiceUnavailable, contentType: "application/json");
 app.MapStaticAssets();
-app.MapPost("/account/login", (Delegate)AccountEndpoints.LoginAsync);
-app.MapPost("/account/logout", (Delegate)AccountEndpoints.LogoutAsync);
+app.MapPost("/account/login", (Delegate)AccountEndpoints.LoginAsync)
+    .AllowAnonymous()
+    .WithName("AdminAccountLogin")
+    .WithTags("Authentication")
+    .WithSummary("Signs in a local admin user.")
+    .WithDescription("Accepts the admin login form as application/x-www-form-urlencoded, validates the antiforgery token, and issues the local admin cookie session before redirecting back to the requested page.")
+    .Accepts<AdminLoginRequest>("application/x-www-form-urlencoded")
+    .Produces(StatusCodes.Status302Found)
+    .ProducesProblem(StatusCodes.Status400BadRequest);
+app.MapPost("/account/logout", (Delegate)AccountEndpoints.LogoutAsync)
+    .AllowAnonymous()
+    .WithName("AdminAccountLogout")
+    .WithTags("Authentication")
+    .WithSummary("Signs out the current local admin session.")
+    .WithDescription("Accepts an antiforgery-protected form post, clears the local admin cookie session, writes a logout audit entry when a user was signed in, and redirects to /login.")
+    .Accepts<AdminLogoutRequest>("application/x-www-form-urlencoded")
+    .Produces(StatusCodes.Status302Found)
+    .ProducesProblem(StatusCodes.Status400BadRequest);
 app.MapGet("/configuration/export", (Delegate)ConfigurationEndpoints.ExportAsync)
-    .RequireAuthorization(AdminRoles.Admin);
+    .RequireAuthorization(AdminRoles.Admin)
+    .WithName("AdminConfigurationExport")
+    .WithTags("Configuration")
+    .WithSummary("Downloads the admin configuration export bundle.")
+    .WithDescription("Requires an authenticated admin cookie session and returns the current admin configuration export as a JSON attachment. The documented schema describes the JSON payload even though the response is served with download headers.")
+    .Produces<AdminConfigurationExportBundle>(StatusCodes.Status200OK, contentType: "application/json")
+    .Produces(StatusCodes.Status302Found);
 app.MapGet("/telemetry/export", (Delegate)TelemetryEndpoints.ExportAsync)
-    .RequireAuthorization(AdminRoles.Viewer);
+    .RequireAuthorization(AdminRoles.Viewer)
+    .WithName("AdminTelemetryExport")
+    .WithTags("Telemetry")
+    .WithSummary("Downloads a filtered PKCS#11 telemetry export bundle.")
+    .WithDescription("Requires an authenticated viewer/operator/admin cookie session, applies the supplied query filters, and returns the redacted PKCS#11 telemetry export bundle as a JSON attachment. The documented schema describes the JSON payload even though the response is served with download headers.")
+    .Produces<AdminPkcs11TelemetryExportBundle>(StatusCodes.Status200OK, contentType: "application/json")
+    .Produces(StatusCodes.Status302Found);
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
