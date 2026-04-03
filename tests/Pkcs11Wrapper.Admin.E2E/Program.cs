@@ -63,20 +63,23 @@ internal static class AdminRuntimeE2E
                 await LoginAsync(page, config, eventLog, LogStep);
                 await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "01-login.png"));
 
+                await ExerciseUsersAsync(browser, page, config, eventLog, LogStep);
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "02-users.png"));
+
                 await ExerciseDevicesAsync(page, config, eventLog, LogStep);
-                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "02-devices.png"));
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "03-devices.png"));
 
                 await ExerciseSlotsAsync(page, config, eventLog, LogStep);
-                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "03-slots.png"));
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "04-slots.png"));
 
                 await ExerciseKeysAsync(page, config, eventLog, LogStep);
-                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "04-keys.png"));
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "05-keys.png"));
 
                 await ExerciseLabAsync(page, config, eventLog, LogStep);
-                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "05-lab.png"));
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "06-lab.png"));
 
                 await ExerciseTelemetryAsync(page, config, eventLog, LogStep);
-                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "06-telemetry.png"));
+                await SaveScreenshotAsync(page, Path.Combine(config.ArtifactRoot, "07-telemetry.png"));
 
                 await TryStopTracingAsync(context, config.ArtifactRoot, LogStep);
             }
@@ -119,8 +122,8 @@ internal static class AdminRuntimeE2E
         await page.GotoAsync($"{config.BaseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
         await WaitForVisibleAsync(page, "[data-testid='login-username']");
         await WaitForInteractiveSettleAsync();
-        await page.FillAsync("[data-testid='login-username']", config.UserName);
-        await page.FillAsync("[data-testid='login-password']", config.Password);
+        await TypeAndBlurAsync(page, "[data-testid='login-username']", config.UserName);
+        await TypeAndBlurAsync(page, "[data-testid='login-password']", config.Password);
         await Task.WhenAll(
             page.WaitForURLAsync(new Regex($"^{Regex.Escape(config.BaseUrl.TrimEnd('/'))}/?$", RegexOptions.IgnoreCase), new PageWaitForURLOptions { Timeout = 15000 }),
             page.ClickAsync("[data-testid='login-submit']"));
@@ -129,11 +132,53 @@ internal static class AdminRuntimeE2E
         logStep("Login: authenticated successfully");
     }
 
+    private static async Task ExerciseUsersAsync(IBrowser browser, IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
+    {
+        logStep("Users: creating a local user and verifying immediate fresh-context login");
+        await NavigateToAsync(page, config.BaseUrl, "/users");
+
+        string localUserName = $"ci-user-{DateTimeOffset.UtcNow:HHmmssfff}";
+        string localPassword = "TempUser!Pass123";
+
+        await page.ClickAsync("[data-testid='users-create-username']");
+        await page.Locator("[data-testid='users-create-username']").PressSequentiallyAsync(localUserName);
+        await page.ClickAsync("[data-testid='users-create-password']");
+        await page.Locator("[data-testid='users-create-password']").PressSequentiallyAsync(localPassword);
+        await page.ClickAsync("[data-testid='users-create-submit']");
+        await WaitForTextAsync(page.Locator("[data-testid='users-status']"), "Local user created.", 15000);
+        await WaitForTextAsync(page.Locator("table"), localUserName, 15000);
+
+        IBrowserContext freshContext = await browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 1600, Height = 1000 }
+        });
+
+        try
+        {
+            IPage freshPage = await freshContext.NewPageAsync();
+            await freshPage.GotoAsync($"{config.BaseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
+            await WaitForVisibleAsync(freshPage, "[data-testid='login-username']");
+            await TypeAndBlurAsync(freshPage, "[data-testid='login-username']", localUserName);
+            await TypeAndBlurAsync(freshPage, "[data-testid='login-password']", localPassword);
+            await Task.WhenAll(
+                freshPage.WaitForURLAsync(new Regex($"^{Regex.Escape(config.BaseUrl.TrimEnd('/'))}/?$", RegexOptions.IgnoreCase), new PageWaitForURLOptions { Timeout = 15000 }),
+                freshPage.ClickAsync("[data-testid='login-submit']"));
+            await WaitForVisibleAsync(freshPage, "[data-testid='nav-devices']");
+        }
+        finally
+        {
+            await freshContext.CloseAsync();
+        }
+
+        logStep($"Users: created '{localUserName}' and confirmed immediate login in a fresh browser context");
+    }
+
     private static async Task ExerciseDevicesAsync(IPage page, TestConfig config, List<string> eventLog, Action<string> logStep)
     {
         logStep("Devices: creating CI device profile");
         await NavigateToAsync(page, config.BaseUrl, "/devices");
-        string uiDeviceName = $"{config.DeviceName} UI";
+        string uiDeviceName = $"{config.DeviceName} UI {DateTimeOffset.UtcNow:HHmmssfff}";
         await page.FillAsync("[data-testid='device-name']", uiDeviceName);
         await page.FillAsync("[data-testid='device-module-path']", config.ModulePath);
         await page.FillAsync("[data-testid='device-token-label']", config.TokenLabel);
@@ -271,10 +316,19 @@ internal static class AdminRuntimeE2E
             "/keys" => "[data-testid='nav-keys']",
             "/lab" => "[data-testid='nav-lab']",
             "/telemetry" => "[data-testid='nav-telemetry']",
+            "/users" => "[data-testid='nav-users']",
             _ => null
         };
 
         return navSelector is not null;
+    }
+
+    private static async Task TypeAndBlurAsync(IPage page, string selector, string value)
+    {
+        ILocator locator = page.Locator(selector);
+        await locator.ClickAsync();
+        await locator.PressSequentiallyAsync(value);
+        await locator.PressAsync("Tab");
     }
 
     private static Task WaitForInteractiveSettleAsync()

@@ -33,7 +33,7 @@
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="users-status">@_statusMessage</div>
 }
 
 @if (_snapshot is null)
@@ -103,11 +103,11 @@ else
                 <div class="card-body row g-3">
                     <div class="col-12">
                         <label class="form-label">Username</label>
-                        <input class="form-control" @bind="_createUserName" placeholder="operator1" />
+                        <input class="form-control" @bind="_createUserName" @bind:event="oninput" placeholder="operator1" data-testid="users-create-username" />
                     </div>
                     <div class="col-12">
                         <label class="form-label">Initial password</label>
-                        <input class="form-control" type="password" @bind="_createPassword" />
+                        <input class="form-control" type="password" @bind="_createPassword" @bind:event="oninput" data-testid="users-create-password" />
                         <div class="form-text">At least 12 characters.</div>
                     </div>
                     <div class="col-12">
@@ -119,7 +119,7 @@ else
                         </div>
                     </div>
                     <div class="col-12">
-                        <button class="btn btn-primary" @onclick="CreateUserAsync">Create user</button>
+                        <button class="btn btn-primary" @onclick="CreateUserAsync" data-testid="users-create-submit">Create user</button>
                     </div>
                 </div>
             </div>
@@ -157,7 +157,7 @@ else
 
                         <div class="col-12">
                             <label class="form-label">Rotate password</label>
-                            <input class="form-control" type="password" @bind="_rotatePassword" />
+                            <input class="form-control" type="password" @bind="_rotatePassword" @bind:event="oninput" data-testid="users-rotate-password" />
                             <div class="form-text">Set a new password for this local user.</div>
                         </div>
                         <div class="col-12 d-flex gap-2 flex-wrap">
