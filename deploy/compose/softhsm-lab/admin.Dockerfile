@@ -8,6 +8,7 @@ COPY ["docs/nuget/README.nuget.md", "docs/nuget/"]
 COPY ["src/Pkcs11Wrapper.Admin.Web/Pkcs11Wrapper.Admin.Web.csproj", "src/Pkcs11Wrapper.Admin.Web/"]
 COPY ["src/Pkcs11Wrapper.Admin.Application/Pkcs11Wrapper.Admin.Application.csproj", "src/Pkcs11Wrapper.Admin.Application/"]
 COPY ["src/Pkcs11Wrapper.Admin.Infrastructure/Pkcs11Wrapper.Admin.Infrastructure.csproj", "src/Pkcs11Wrapper.Admin.Infrastructure/"]
+COPY ["src/Pkcs11Wrapper.CryptoApi.Shared/Pkcs11Wrapper.CryptoApi.Shared.csproj", "src/Pkcs11Wrapper.CryptoApi.Shared/"]
 COPY ["src/Pkcs11Wrapper/Pkcs11Wrapper.csproj", "src/Pkcs11Wrapper/"]
 COPY ["src/Pkcs11Wrapper.Native/Pkcs11Wrapper.Native.csproj", "src/Pkcs11Wrapper.Native/"]
 RUN dotnet restore "src/Pkcs11Wrapper.Admin.Web/Pkcs11Wrapper.Admin.Web.csproj"
