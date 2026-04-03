@@ -5,123 +5,133 @@ namespace Pkcs11Wrapper.Admin.Tests;
 
 public sealed class DeviceVendorProfileCatalogTests
 {
-    private static readonly HsmDeviceVendorMetadata GoogleVendor = new(
-        "google",
-        "Google Cloud",
-        "cloud-kms-kmsp11",
-        "Cloud KMS / Cloud HSM via kmsp11");
+    private static readonly HsmDeviceVendorMetadata LunaVendor = new(
+        "thales",
+        "Thales",
+        "luna-standard",
+        "Luna / standard PKCS#11");
 
-    private static readonly HsmDeviceVendorMetadata AzureVendor = new(
-        "azure",
-        "Azure",
-        "cloud-hsm-standard",
-        "Cloud HSM / standard PKCS#11");
+    private static readonly HsmDeviceVendorMetadata EntrustVendor = new(
+        "entrust",
+        "Entrust",
+        "nshield-standard",
+        "nShield / standard PKCS#11");
 
-    private static readonly HsmDeviceVendorMetadata IbmVendor = new(
-        "ibm",
-        "IBM Cloud",
-        "hyper-protect-crypto-services-ep11",
-        "Hyper Protect Crypto Services / EP11 PKCS#11");
+    private static readonly HsmDeviceVendorMetadata UtimacoVendor = new(
+        "utimaco",
+        "Utimaco",
+        "standard",
+        "Standard PKCS#11");
 
-    private static readonly HsmDeviceVendorMetadata OracleVendor = new(
-        "oracle",
-        "Oracle",
-        "oci-dedicated-kms-standard",
-        "OCI Dedicated KMS / standard PKCS#11");
+    private static readonly HsmDeviceVendorMetadata CustomVendor = new(
+        "custom-vendor",
+        "Custom Vendor",
+        "custom-profile",
+        "Custom profile");
 
     [Fact]
-    public void GetSelectionId_ReturnsKnownGoogleProfileSelection()
+    public void GetSelectionId_ReturnsKnownLunaProfileSelection()
     {
-        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(GoogleVendor);
+        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(LunaVendor);
 
-        Assert.Equal("google-cloud-kms-kmsp11", selectionId);
+        Assert.Equal("thales-luna-standard", selectionId);
     }
 
     [Fact]
-    public void GetGuidance_ReturnsGoogleSpecificSummaryAndHints()
+    public void GetGuidance_ReturnsLunaSpecificSummaryAndHints()
     {
-        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(GoogleVendor);
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(LunaVendor);
 
         Assert.True(guidance.IsKnownProfile);
         Assert.False(guidance.IsVendorNeutral);
-        Assert.Equal("Google Cloud", guidance.Title);
-        Assert.Equal("Cloud KMS / Cloud HSM via kmsp11", guidance.ProfileName);
-        Assert.Contains("indirect PKCS#11", guidance.Summary);
+        Assert.Equal("Thales", guidance.Title);
+        Assert.Equal("Luna / standard PKCS#11", guidance.ProfileName);
+        Assert.Contains("Luna client/runtime", guidance.Summary, StringComparison.Ordinal);
         Assert.Equal(3, guidance.Hints.Count);
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("KMS_PKCS11_CONFIG", StringComparison.Ordinal));
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("PIN is ignored", StringComparison.Ordinal));
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Cloud KMS lifecycle/control-plane", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("cklog or ckshim", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("token/policy dependent", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Title.Contains("CA_*", StringComparison.Ordinal) || hint.Body.Contains("CA_*", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void GetSelectionId_ReturnsKnownAzureProfileSelection()
+    public void GetSelectionId_ReturnsKnownEntrustProfileSelection()
     {
-        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(AzureVendor);
+        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(EntrustVendor);
 
-        Assert.Equal("azure-cloud-hsm-standard", selectionId);
+        Assert.Equal("entrust-nshield-standard", selectionId);
     }
 
     [Fact]
-    public void GetGuidance_ReturnsAzureSpecificSummaryAndHints()
+    public void GetGuidance_ReturnsEntrustSpecificSummaryAndHints()
     {
-        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(AzureVendor);
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(EntrustVendor);
 
         Assert.True(guidance.IsKnownProfile);
         Assert.False(guidance.IsVendorNeutral);
-        Assert.Equal("Azure", guidance.Title);
-        Assert.Equal("Cloud HSM / standard PKCS#11", guidance.ProfileName);
-        Assert.Contains("direct PKCS#11", guidance.Summary);
+        Assert.Equal("Entrust", guidance.Title);
+        Assert.Equal("nShield / standard PKCS#11", guidance.ProfileName);
+        Assert.Contains("Entrust nShield", guidance.Summary, StringComparison.Ordinal);
         Assert.Equal(3, guidance.Hints.Count);
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("azcloudhsm_client", StringComparison.Ordinal));
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("username:password", StringComparison.Ordinal));
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Managed HSM", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Security World", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("module actually exposes", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Vendor-native provisioning", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void GetSelectionId_ReturnsKnownIbmProfileSelection()
+    public void GetSelectionId_ReturnsKnownUtimacoProfileSelection()
     {
-        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(IbmVendor);
+        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(UtimacoVendor);
 
-        Assert.Equal("ibm-cloud-hpcs-standard", selectionId);
+        Assert.Equal("utimaco-standard", selectionId);
     }
 
     [Fact]
-    public void GetGuidance_ReturnsIbmSpecificSummaryAndHints()
+    public void GetGuidance_ReturnsUtimacoSpecificSummaryAndHints()
     {
-        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(IbmVendor);
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(UtimacoVendor);
 
         Assert.True(guidance.IsKnownProfile);
         Assert.False(guidance.IsVendorNeutral);
-        Assert.Equal("IBM Cloud", guidance.Title);
-        Assert.Equal("Hyper Protect Crypto Services / EP11 PKCS#11", guidance.ProfileName);
-        Assert.Contains("direct PKCS#11", guidance.Summary);
+        Assert.Equal("Utimaco", guidance.Title);
+        Assert.Equal("Standard PKCS#11", guidance.ProfileName);
+        Assert.Contains("Utimaco PKCS#11 module", guidance.Summary, StringComparison.Ordinal);
         Assert.Equal(3, guidance.Hints.Count);
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("EP11CLIENT_CFG", StringComparison.Ordinal));
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("C_Login", StringComparison.Ordinal));
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("GREP11", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("same machine", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("PKCS#11 Lab", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("dedicated vendor tooling", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void GetSelectionId_ReturnsKnownOracleProfileSelection()
+    public void GetGuidance_ReturnsVendorNeutralGuidanceForNullVendor()
     {
-        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(OracleVendor);
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(null);
 
-        Assert.Equal("oracle-oci-dedicated-kms-standard", selectionId);
+        Assert.False(guidance.IsKnownProfile);
+        Assert.True(guidance.IsVendorNeutral);
+        Assert.Equal("Vendor-neutral profile", guidance.Title);
+        Assert.Null(guidance.ProfileName);
+        Assert.Equal(3, guidance.Hints.Count);
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("host/container", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void GetGuidance_ReturnsOracleSpecificSummaryAndHints()
+    public void GetSelectionId_ReturnsCustomSelectionForUnknownVendor()
     {
-        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(OracleVendor);
+        string selectionId = DeviceVendorProfileCatalog.GetSelectionId(CustomVendor);
 
-        Assert.True(guidance.IsKnownProfile);
+        Assert.Equal(DeviceVendorProfileCatalog.CustomSelectionId, selectionId);
+    }
+
+    [Fact]
+    public void GetGuidance_ReturnsCustomVendorGuidanceForUnknownVendor()
+    {
+        DeviceVendorGuidance guidance = DeviceVendorProfileCatalog.GetGuidance(CustomVendor);
+
+        Assert.False(guidance.IsKnownProfile);
         Assert.False(guidance.IsVendorNeutral);
-        Assert.Equal("Oracle", guidance.Title);
-        Assert.Equal("OCI Dedicated KMS / standard PKCS#11", guidance.ProfileName);
-        Assert.Contains("Dedicated KMS", guidance.Summary);
+        Assert.Equal("Custom Vendor", guidance.Title);
+        Assert.Equal("Custom profile", guidance.ProfileName);
         Assert.Equal(3, guidance.Hints.Count);
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("oci-hsm-pkcs11", StringComparison.Ordinal));
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("username:password", StringComparison.Ordinal));
-        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Windows CNG/KSP", StringComparison.Ordinal));
+        Assert.Contains(guidance.Hints, hint => hint.Body.Contains("Improve operator context", StringComparison.OrdinalIgnoreCase) || hint.Body.Contains("improve operator context", StringComparison.OrdinalIgnoreCase));
     }
 }
