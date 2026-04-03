@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
-    <ProjectReference Include="..\Pkcs11Wrapper.Admin.Application\Pkcs11Wrapper.Admin.Application.csproj" />
-    <ProjectReference Include="..\Pkcs11Wrapper.Admin.Infrastructure\Pkcs11Wrapper.Admin.Infrastructure.csproj" />
-    <ProjectReference Include="..\Pkcs11Wrapper.CryptoApi\Pkcs11Wrapper.CryptoApi.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Pkcs11Wrapper\Pkcs11Wrapper.csproj" />
   </ItemGroup>
 
@@ -16,7 +17,6 @@
     <IsAotCompatible>false</IsAotCompatible>
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
     <EnableAotAnalyzer>false</EnableAotAnalyzer>
-    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
 </Project>

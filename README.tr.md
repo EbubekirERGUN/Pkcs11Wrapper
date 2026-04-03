@@ -8,7 +8,7 @@
 [![Admin%20Panel](https://img.shields.io/badge/Admin%20Panel-Blazor%20Server-5C2D91)](#blazor-server-admin-panel)
 [![PKCS%2311%20v3](https://img.shields.io/badge/PKCS%2311-v3%20interface%20aware-orange)](#one-cikan-ozellikler)
 
-Modern bir **.NET 10 PKCS#11 wrapper**; Linux tarafında güçlü doğrulama, Windows desteği, PKCS#11 v3 interface/message farkındalığı ve HSM operasyonları için büyüyen bir **Blazor Server admin paneli** ile birlikte gelir.
+Modern bir **.NET 10 PKCS#11 wrapper**; Linux tarafında güçlü doğrulama, Windows desteği, PKCS#11 v3 interface/message farkındalığı ve HSM operasyonları için ayrı **admin paneli** ile **Crypto API** host'ları içerir.
 
 > İngilizce README: [README.md](README.md)
 
@@ -40,6 +40,7 @@ PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanım
 - Windows + Linux dağıtımları
 - vendor PKCS#11 uyumluluk çalışmaları
 - admin panel üzerinden operasyonel görünürlük
+- gelecekteki makineye dönük kripto servisleri için temiz bir başlangıç noktası
 
 ## Öne çıkan özellikler
 
@@ -73,6 +74,15 @@ PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanım
 - PKCS#11 Lab teşhis ekranı, kripto denemeleri, obje akışları ve scenario replay yardımcıları
 - protected PIN cache + append-only chained audit log integrity
 
+### Crypto API host iskeleti
+
+- `src/Pkcs11Wrapper.CryptoApi` altında ayrı ASP.NET Core host
+- admin dashboard'dan ayrı, stateless ve machine-facing sınır
+- servis kimliği, API base path ve PKCS#11 module path için temel DI/config binding
+- `/health/live` + `/health/ready` endpoint'leri; readiness, yapılandırılan PKCS#11 modülünün yüklenebildiğini doğrular
+- gelecekteki request/response tabanlı kripto akışları için `/api/v1`, `/api/v1/runtime` ve `/api/v1/operations` route alanı
+- hedef dağıtım modeli: **bir admin dashboard + çok sayıda stateless Crypto API instance'ı**
+
 ## Platform / doğrulama durumu
 
 | Alan | Durum | Not |
@@ -82,6 +92,7 @@ PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanım
 | PKCS#11 v3 interface discovery | ✅ | modül export etmiyorsa capability-gated davranış |
 | PKCS#11 v3 message API'leri | ✅ | managed/API desteği var; runtime modül desteğine bağlı |
 | Admin panel | ✅ | auth, local users, config transfer, audit integrity ve PKCS#11 Lab içeren işlevsel Blazor Server yönetim yüzeyi |
+| Crypto API host iskeleti | ✅ | DI/config, servis dokümanları ve health/readiness endpoint'leri içeren stateless ASP.NET Core host |
 | Vendor regression lane | ✅ | opsiyonel non-SoftHSM doğrulama yolu |
 
 ## Depo mimarisi
@@ -91,6 +102,7 @@ flowchart LR
     A[Pkcs11Wrapper.Admin.Web\nBlazor Server Admin Panel] --> B[Pkcs11Wrapper.Admin.Application]
     B --> C[Pkcs11Wrapper.Admin.Infrastructure]
     B --> D[Pkcs11Wrapper]
+    H[Pkcs11Wrapper.CryptoApi\nStateless ASP.NET Core Host] --> D
     D --> E[Pkcs11Wrapper.Native]
     E --> F[PKCS#11 Module / HSM / SoftHSM]
     C --> G[JSON + Protected Local Storage + Audit Chain]
@@ -122,6 +134,26 @@ dotnet run
 ```
 
 İlk çalıştırmada panel, `App_Data/bootstrap-admin.txt` altında yerel bootstrap admin credential dosyasını oluşturur.
+
+### 2b) Crypto API host iskeletini çalıştır
+
+```bash
+cd src/Pkcs11Wrapper.CryptoApi
+export CryptoApiRuntime__ModulePath=/usr/lib/libsofthsm2.so
+export CryptoApiRuntime__DisableHttpsRedirection=true
+dotnet run
+```
+
+Kullanışlı endpoint'ler:
+
+- `/`
+- `/health/live`
+- `/health/ready`
+- `/api/v1`
+- `/api/v1/runtime`
+- `/api/v1/operations`
+
+Sınır ve çalışma modeli için: [docs/crypto-api-host.md](docs/crypto-api-host.md)
 
 ### 3) Doğrulamayı çalıştır
 
@@ -201,6 +233,7 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/windows-local-setup.md](docs/windows-local-setup.md) - yerel Windows fixture/bootstrap akışı
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark kapsamı, tekrar çalıştırma akışı, periyodik takip modeli
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - güncel commitlenmiş Linux benchmark baseline'ı
+- [docs/crypto-api-host.md](docs/crypto-api-host.md) - stateless Crypto API host sınırı, çalışma modeli, konfigürasyon ve mevcut iskelet endpoint'leri
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - lokal admin-panel operasyon ve recovery rehberi
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor uyumluluk profili ve env sözleşmesi
 - [docs/luna-integration.md](docs/luna-integration.md) - wrapper, admin panel, smoke ve vendor regression için pratik Thales Luna client/module kurulum rehberi
@@ -219,6 +252,7 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - Tam PKCS#11 davranışı hedef token / HSM / vendor policy’ye bağlıdır.
 - Import/edit/copy override gibi bazı gelişmiş operasyonlar, wrapper desteklese bile token policy yüzünden reddedilebilir.
 - Mevcut admin auth/security modeli bilinçli olarak tek-host/lokal kullanım odaklıdır; external IdP/IAM, MFA ve merkezi secret governance henüz uygulamanın parçası değildir.
+- Yeni Crypto API host'u şu an bir scaffold sınırıdır: health/readiness ve route alanı gerçektir, ancak public kripto request contract'ları bilinçli olarak henüz finalize edilmemiştir.
 - En derin NativeAOT doğrulama hâlâ Linux tarafındadır.
 - PKCS#11 v3 runtime davranışı, hedef modülün ilgili v3 interface yüzeyini gerçekten export etmesine bağlıdır.
 
@@ -235,6 +269,7 @@ Wrapper, validation matrix, Windows/Linux desteği veya admin panel UX tarafınd
 Yakın dönem odak alanları:
 
 - admin panel için sonraki polish dilimleri (dashboard/widget genişletmeleri, tablo ergonomisi, daha yaygın filtering/sorting/paging)
+- yeni stateless host iskeleti üzerinde ilk somut machine-facing Crypto API contract'larını tanımlamak ve uygulamak
 - PKCS#11 v3-capable modüller için daha güçlü vendor-backed runtime doğrulama
 - periyodik benchmark tekrarları ve en güncel yayınlanan baseline'ın tazelenmesi
 - daha iyi GitHub vitrin materyalleri (ekran görüntüsü / demo media / release notes)

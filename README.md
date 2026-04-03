@@ -9,7 +9,7 @@
 [![Admin%20Panel](https://img.shields.io/badge/Admin%20Panel-Blazor%20Server-5C2D91)](#blazor-server-admin-panel)
 [![PKCS%2311%20v3](https://img.shields.io/badge/PKCS%2311-v3%20interface%20aware-orange)](#feature-highlights)
 
-Modern **.NET 10 PKCS#11 wrapper** with strong Linux validation, Windows support, PKCS#11 v3 interface/message awareness, and a growing **Blazor Server admin panel** for HSM operations.
+Modern **.NET 10 PKCS#11 wrapper** with strong Linux validation, Windows support, PKCS#11 v3 interface/message awareness, plus separate **admin-panel** and **Crypto API** hosts for HSM operations.
 
 > Turkish README: [README.tr.md](README.tr.md)
 
@@ -41,6 +41,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - Windows + Linux deployments
 - vendor PKCS#11 compatibility work
 - operational visibility through an admin panel
+- a clean starting point for future machine-facing crypto services
 
 ## Feature highlights
 
@@ -76,6 +77,18 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - PKCS#11 telemetry viewer with redacted device / slot / mechanism / status filtering, bounded retention/rotation, safe export, and audit correlation links
 - protected PIN cache + append-only chained audit log integrity
 
+### Crypto API host scaffold
+
+- dedicated ASP.NET Core host at `src/Pkcs11Wrapper.CryptoApi`
+- stateless, machine-facing boundary separate from the admin dashboard
+- DI/config binding for service identity, API base path, PKCS#11 runtime, and shared persistence
+- `/health/live` + `/health/ready` endpoints, with readiness validating the configured PKCS#11 module and shared persistence when configured
+- `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, `/api/v1/shared-state`, and `/api/v1/auth/self` route space for the emerging machine-facing contract
+- pragmatic shared SQLite-backed persistence for multi-instance API clients/keys, key aliases, policies, and policy bindings
+- first practical API-key lifecycle slice: generated secrets are shown once, stored only as hashes, and carry disable / revoke / expiry / last-used metadata
+- admin-panel control-plane page for managing Crypto API applications and shared API keys without turning the machine-facing host into a tenant portal
+- intended deployment model: **one admin dashboard + many stateless crypto API instances**
+
 ## Platform & validation status
 
 | Area | Status | Notes |
@@ -85,6 +98,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 | PKCS#11 v3 interface discovery | ✅ | capability-gated when not exported by the module |
 | PKCS#11 v3 message APIs | ✅ | managed/API support implemented; runtime depends on module support |
 | Admin panel | ✅ | functional Blazor Server management surface with auth, local users, config transfer, audit integrity, and PKCS#11 Lab |
+| Crypto API host scaffold | ✅ | stateless ASP.NET Core host with DI/config, service documents, health/readiness, shared SQLite-backed auth/policy persistence, and the first hashed API-key lifecycle slice |
 | Vendor regression lane | ✅ | optional non-SoftHSM validation path |
 
 ## Repository architecture
@@ -94,6 +108,7 @@ flowchart LR
     A[Pkcs11Wrapper.Admin.Web\nBlazor Server Admin Panel] --> B[Pkcs11Wrapper.Admin.Application]
     B --> C[Pkcs11Wrapper.Admin.Infrastructure]
     B --> D[Pkcs11Wrapper]
+    H[Pkcs11Wrapper.CryptoApi\nStateless ASP.NET Core Host] --> D
     D --> E[Pkcs11Wrapper.Native]
     E --> F[PKCS#11 Module / HSM / SoftHSM]
     C --> G[JSON + Protected Local Storage + Audit Chain]
@@ -199,7 +214,32 @@ export AdminBootstrapDevice__ModulePath=/usr/lib/softhsm/libsofthsm2.so
 export AdminRuntime__DisableHttpsRedirection=true
 ```
 
-### 2b) Build and run the container image
+### 2b) Run the Crypto API host scaffold
+
+```bash
+cd src/Pkcs11Wrapper.CryptoApi
+export CryptoApiRuntime__ModulePath=/usr/lib/libsofthsm2.so
+export CryptoApiRuntime__DisableHttpsRedirection=true
+export CryptoApiSharedPersistence__ConnectionString='Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db'
+dotnet run
+```
+
+Useful endpoints:
+
+- `/`
+- `/health/live`
+- `/health/ready`
+- `/api/v1`
+- `/api/v1/runtime`
+- `/api/v1/operations`
+- `/api/v1/shared-state`
+- `/api/v1/auth/self` using `X-Api-Key-Id` + `X-Api-Key-Secret`
+
+If the admin dashboard is pointed at the same `CryptoApiSharedPersistence:ConnectionString`, admins can manage Crypto API applications and API keys from the **Crypto API Access** page.
+
+For the intended boundary/runtime model, shared persistence scope, and scale-out notes, see [docs/crypto-api-host.md](docs/crypto-api-host.md).
+
+### 2c) Build and run the container image
 
 ```bash
 docker build -f src/Pkcs11Wrapper.Admin.Web/Dockerfile -t pkcs11wrapper-admin .
@@ -218,7 +258,7 @@ For the standalone container deployment path, start from:
 
 That guide covers the runtime contract, first-run bootstrap behavior, storage-root contents, PKCS#11 module mount patterns, non-root bind-mount permissions, upgrade/backup expectations, and the distinction between the standalone container image and the local SoftHSM compose lab.
 
-### 2c) Run the local SoftHSM compose lab stack
+### 2d) Run the local SoftHSM compose lab stack
 
 ```bash
 cd deploy/compose/softhsm-lab
@@ -323,6 +363,7 @@ Current capabilities include:
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark scope, rerun flow, periodic tracking model
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - latest committed Linux benchmark baseline
 - [docs/admin-container.md](docs/admin-container.md) - standalone admin-container deployment guide, volume layout, PKCS#11 mount patterns, and local/dev vs production-safe guidance
+- [docs/crypto-api-host.md](docs/crypto-api-host.md) - stateless Crypto API host boundary, shared persistence model, config, and current scaffold endpoints
 - `deploy/container/admin-panel.env.example` - starter env template for the standalone admin container path
 - [deploy/compose/softhsm-lab/README.md](deploy/compose/softhsm-lab/README.md) - local/dev/lab compose stack for the admin panel + SoftHSM backend
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - local admin-panel operations and recovery runbook
@@ -356,6 +397,7 @@ Current capabilities include:
 - Full PKCS#11 behavior still depends on the target token / HSM / vendor policy.
 - Some advanced operations (for example import/edit/copy overrides) may be rejected by token policy even when the wrapper supports the call surface.
 - The current admin auth/security model is intentionally local-host oriented; external IdP/IAM, MFA, and centralized secret governance are not part of the app yet.
+- The new Crypto API host is still a scaffold boundary: health/readiness, route-space, and shared auth/policy persistence are real, but concrete public crypto request contracts are intentionally not finalized yet.
 - Linux is still the primary benchmark/reference environment, even though Windows now also has fixture-backed NativeAOT smoke validation.
 - PKCS#11 v3 runtime behavior still depends on whether the target module actually exports the relevant v3 interface surface.
 - AWS CloudHSM support in the current repo is a documented/admin-readiness slice, not a claim of live cluster-backed CI validation yet.
@@ -375,6 +417,7 @@ If you want to improve the wrapper, validation matrix, Windows/Linux support, or
 Near-term focus areas:
 
 - next admin panel polish slices (dashboard/widget expansion, table ergonomics, wider filtering/sorting/paging coverage)
+- define and implement the first concrete machine-facing crypto API contracts on top of the new stateless host scaffold
 - stronger vendor-backed runtime validation for PKCS#11 v3-capable modules
 - recurring benchmark reruns with latest published baseline refreshes
 - more polished GitHub showcase assets (screenshots / demo media / release notes)
