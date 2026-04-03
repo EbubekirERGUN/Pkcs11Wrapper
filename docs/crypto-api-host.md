@@ -15,7 +15,7 @@ The repo now has two different application boundaries:
 - **`Pkcs11Wrapper.CryptoApi`**
   - machine-facing ASP.NET Core API host
   - no local operator UI
-  - no local durable application state
+  - no per-node auth/policy files
   - intended to scale out as **many stateless instances** behind a load balancer or gateway
 
 That separation keeps the product model simple for now:
@@ -26,7 +26,7 @@ The admin app remains the place for operations and governance. The crypto API ho
 
 ## Current scaffold contents
 
-The first slice is deliberately small but real:
+The current slice is still deliberately small, but now includes the first real shared-state foundation for future multi-instance deployments:
 
 - dedicated `src/Pkcs11Wrapper.CryptoApi` project in the solution
 - ASP.NET Core host with DI + configuration binding
@@ -34,26 +34,73 @@ The first slice is deliberately small but real:
 - versioned route group rooted at `/api/v1`
 - runtime descriptor endpoint at `/api/v1/runtime`
 - explicit future operation namespace at `/api/v1/operations`
+- shared-state descriptor endpoint at `/api/v1/shared-state`
 - liveness endpoint at `/health/live`
 - readiness endpoint at `/health/ready`
 - readiness check that attempts to load the configured PKCS#11 module via `Pkcs11Module.Load(...)`
-- dedicated test project for base-path normalization, runtime descriptor behavior, and readiness health behavior
+- shared SQLite-backed persistence for:
+  - API clients
+  - API client keys / key identifiers
+  - key aliases
+  - policy documents
+  - client-to-policy and alias-to-policy bindings
+- dedicated test project covering base-path normalization, runtime descriptor metadata, readiness health behavior, and cross-instance shared-state round-tripping
 
 ## Runtime model
 
-The host is designed around a **stateless request pipeline**:
+The host is still designed around a **stateless request pipeline**:
 
 - no host-local portal/session state
-- no local JSON database or app data root
-- no operator identity system in this first slice
-- each instance should be replaceable without data migration
+- no per-node JSON database or app data root for API auth/policy data
+- no operator identity system inside the API host in this slice
+- each API instance should remain replaceable without local state migration
 - environment/config drives module selection and network exposure
+- durable API auth/policy state is allowed only when it lives in a **shared persistence backend**
 
-This keeps the API host suitable for future multi-instance deployment while avoiding premature tenant, edge, or portal abstractions.
+That means the API host stays stateless from the instance point of view even though shared durable data now exists for the state that would otherwise break under scale-out.
+
+## Shared persistence approach
+
+The first persistence provider is intentionally pragmatic: **SQLite via a shared database file**.
+
+Why this first:
+
+- it is real and immediately usable
+- it keeps the initial auth/policy state model simple
+- it avoids inventing a full control-plane or migration system before the public crypto contract exists
+- it is enough for small-to-medium deployments where API instances share a mounted volume or otherwise coordinate through the same SQLite file
+
+This is **not** claiming SQLite is the final answer for every distributed deployment.
+For larger/server-grade topologies, the stored concepts can move to another relational backend later without changing the basic state model introduced here.
+
+### Shared-ready state
+
+The store prepares the state that cannot safely stay per-node local once API instances scale out:
+
+- **API clients**
+  - stable client identity
+  - auth mode metadata
+  - enable/disable state
+- **API client keys**
+  - stable key identifier (`kid`-style metadata)
+  - credential type
+  - hashed secret/public credential metadata placeholder
+  - rotation/expiry-ready timestamps
+- **Key aliases**
+  - stable alias name used by future API requests
+  - slot/object-resolution metadata (`slot_id`, label, object-id hex)
+- **Policies**
+  - versioned JSON policy document payload
+  - enable/disable state
+- **Bindings**
+  - client → policy
+  - alias → policy
+
+That gives the repo a concrete place to keep future request authentication, alias resolution, and policy enforcement inputs outside any single node.
 
 ## Configuration
 
-Current settings live under two sections:
+Current settings live under three sections:
 
 ```json
 {
@@ -64,6 +111,11 @@ Current settings live under two sections:
   "CryptoApiRuntime": {
     "DisableHttpsRedirection": false,
     "ModulePath": "/usr/lib/libsofthsm2.so"
+  },
+  "CryptoApiSharedPersistence": {
+    "Provider": "Sqlite",
+    "ConnectionString": "Data Source=/srv/pkcs11wrapper-cryptoapi/shared-state.db",
+    "AutoInitialize": true
   }
 }
 ```
@@ -73,6 +125,9 @@ Notes:
 - `CryptoApiHost:ApiBasePath` defines where future machine-facing routes will live.
 - `CryptoApiRuntime:ModulePath` is required for readiness because the host is not actually ready to serve crypto traffic until it can load a PKCS#11 module.
 - `CryptoApiRuntime:DisableHttpsRedirection=true` is useful for local/container smoke flows behind a trusted reverse proxy or local HTTP test loop.
+- `CryptoApiSharedPersistence:Provider` currently supports only `Sqlite`.
+- `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
+- `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
 
 ## Local run example
 
@@ -80,6 +135,7 @@ Notes:
 cd src/Pkcs11Wrapper.CryptoApi
 export CryptoApiRuntime__ModulePath=/usr/lib/libsofthsm2.so
 export CryptoApiRuntime__DisableHttpsRedirection=true
+export CryptoApiSharedPersistence__ConnectionString='Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db'
 dotnet run
 ```
 
@@ -91,15 +147,18 @@ Useful endpoints:
 - `/api/v1`
 - `/api/v1/runtime`
 - `/api/v1/operations`
+- `/api/v1/shared-state`
+
+`/api/v1/shared-state` returns provider/schema/count metadata when the shared store is configured and available.
 
 ## Intentionally out of scope for this issue
 
-This scaffold does **not** yet add:
+This scaffold still does **not** yet add:
 
 - concrete sign/verify/encrypt/decrypt request contracts
-- external authn/authz or API gateway policy
+- external authn/authz protocol handling beyond preparing the shared store that future auth can use
 - tenant routing / portal concepts / edge orchestration
-- durable job state or workflow storage
+- durable job/workflow processing state
 - admin-dashboard features duplicated into the API host
 
 Those can land incrementally once the machine-facing contract is defined.

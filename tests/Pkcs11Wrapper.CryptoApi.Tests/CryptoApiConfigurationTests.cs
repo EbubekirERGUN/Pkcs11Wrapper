@@ -20,7 +20,7 @@ public sealed class CryptoApiConfigurationTests
     }
 
     [Fact]
-    public void RuntimeDescriptorProviderReportsStatelessBoundaryAndConfiguredModuleFlag()
+    public void RuntimeDescriptorProviderReportsStatelessBoundaryAndSharedPersistenceMetadata()
     {
         CryptoApiRuntimeDescriptorProvider provider = new(
             Options.Create(new CryptoApiHostOptions
@@ -32,6 +32,11 @@ public sealed class CryptoApiConfigurationTests
             {
                 ModulePath = "/opt/pkcs11/lib/libvendorpkcs11.so"
             }),
+            Options.Create(new CryptoApiSharedPersistenceOptions
+            {
+                Provider = "Sqlite",
+                ConnectionString = "Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db"
+            }),
             TimeProvider.System);
 
         CryptoApiRuntimeDescriptor descriptor = provider.Describe();
@@ -40,7 +45,10 @@ public sealed class CryptoApiConfigurationTests
         Assert.Equal("/api/crypto", descriptor.ApiBasePath);
         Assert.Equal("stateless", descriptor.DeploymentModel);
         Assert.True(descriptor.ModuleConfigured);
-        Assert.Contains("GET /api/crypto/runtime", descriptor.CurrentSurface);
+        Assert.True(descriptor.SharedPersistenceConfigured);
+        Assert.Equal("Sqlite", descriptor.SharedPersistenceProvider);
+        Assert.Contains("API clients and client keys", descriptor.SharedReadyAreas);
+        Assert.Contains("GET /api/crypto/shared-state", descriptor.CurrentSurface);
         Assert.NotEqual(default, descriptor.StartedAtUtc);
         Assert.False(string.IsNullOrWhiteSpace(descriptor.InstanceId));
     }

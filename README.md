@@ -81,9 +81,10 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 
 - dedicated ASP.NET Core host at `src/Pkcs11Wrapper.CryptoApi`
 - stateless, machine-facing boundary separate from the admin dashboard
-- basic DI/config binding for service identity, API base path, and PKCS#11 module path
-- `/health/live` + `/health/ready` endpoints, with readiness validating that the configured PKCS#11 module can be loaded
-- `/api/v1`, `/api/v1/runtime`, and `/api/v1/operations` route space reserved for future request/response crypto workflows
+- DI/config binding for service identity, API base path, PKCS#11 runtime, and shared persistence
+- `/health/live` + `/health/ready` endpoints, with readiness validating the configured PKCS#11 module and shared persistence when configured
+- `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, and `/api/v1/shared-state` route space for the emerging machine-facing contract
+- pragmatic shared SQLite-backed persistence for multi-instance API clients/keys, key aliases, policies, and policy bindings
 - intended deployment model: **one admin dashboard + many stateless crypto API instances**
 
 ## Platform & validation status
@@ -95,7 +96,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 | PKCS#11 v3 interface discovery | ✅ | capability-gated when not exported by the module |
 | PKCS#11 v3 message APIs | ✅ | managed/API support implemented; runtime depends on module support |
 | Admin panel | ✅ | functional Blazor Server management surface with auth, local users, config transfer, audit integrity, and PKCS#11 Lab |
-| Crypto API host scaffold | ✅ | stateless ASP.NET Core host with DI/config, service documents, and health/readiness endpoints |
+| Crypto API host scaffold | ✅ | stateless ASP.NET Core host with DI/config, service documents, health/readiness, and shared SQLite-backed auth/policy persistence scaffold |
 | Vendor regression lane | ✅ | optional non-SoftHSM validation path |
 
 ## Repository architecture
@@ -217,6 +218,7 @@ export AdminRuntime__DisableHttpsRedirection=true
 cd src/Pkcs11Wrapper.CryptoApi
 export CryptoApiRuntime__ModulePath=/usr/lib/libsofthsm2.so
 export CryptoApiRuntime__DisableHttpsRedirection=true
+export CryptoApiSharedPersistence__ConnectionString='Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db'
 dotnet run
 ```
 
@@ -228,8 +230,9 @@ Useful endpoints:
 - `/api/v1`
 - `/api/v1/runtime`
 - `/api/v1/operations`
+- `/api/v1/shared-state`
 
-For the intended boundary/runtime model and scope notes, see [docs/crypto-api-host.md](docs/crypto-api-host.md).
+For the intended boundary/runtime model, shared persistence scope, and scale-out notes, see [docs/crypto-api-host.md](docs/crypto-api-host.md).
 
 ### 2c) Build and run the container image
 
@@ -355,7 +358,7 @@ Current capabilities include:
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark scope, rerun flow, periodic tracking model
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - latest committed Linux benchmark baseline
 - [docs/admin-container.md](docs/admin-container.md) - standalone admin-container deployment guide, volume layout, PKCS#11 mount patterns, and local/dev vs production-safe guidance
-- [docs/crypto-api-host.md](docs/crypto-api-host.md) - stateless Crypto API host boundary, runtime model, config, and current scaffold endpoints
+- [docs/crypto-api-host.md](docs/crypto-api-host.md) - stateless Crypto API host boundary, shared persistence model, config, and current scaffold endpoints
 - `deploy/container/admin-panel.env.example` - starter env template for the standalone admin container path
 - [deploy/compose/softhsm-lab/README.md](deploy/compose/softhsm-lab/README.md) - local/dev/lab compose stack for the admin panel + SoftHSM backend
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - local admin-panel operations and recovery runbook
@@ -389,7 +392,7 @@ Current capabilities include:
 - Full PKCS#11 behavior still depends on the target token / HSM / vendor policy.
 - Some advanced operations (for example import/edit/copy overrides) may be rejected by token policy even when the wrapper supports the call surface.
 - The current admin auth/security model is intentionally local-host oriented; external IdP/IAM, MFA, and centralized secret governance are not part of the app yet.
-- The new Crypto API host is still a scaffold boundary: health/readiness and route-space are real, but concrete public crypto request contracts are intentionally not finalized yet.
+- The new Crypto API host is still a scaffold boundary: health/readiness, route-space, and shared auth/policy persistence are real, but concrete public crypto request contracts are intentionally not finalized yet.
 - Linux is still the primary benchmark/reference environment, even though Windows now also has fixture-backed NativeAOT smoke validation.
 - PKCS#11 v3 runtime behavior still depends on whether the target module actually exports the relevant v3 interface surface.
 - AWS CloudHSM support in the current repo is a documented/admin-readiness slice, not a claim of live cluster-backed CI validation yet.

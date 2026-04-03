@@ -4,6 +4,7 @@ using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Endpoints;
 using Pkcs11Wrapper.CryptoApi.Health;
 using Pkcs11Wrapper.CryptoApi.Runtime;
+using Pkcs11Wrapper.CryptoApi.SharedState;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -28,14 +29,29 @@ builder.Services.AddOptions<CryptoApiRuntimeOptions>()
         options.ModulePath = options.ModulePath?.Trim();
     });
 
+builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
+    .Bind(builder.Configuration.GetSection(CryptoApiSharedPersistenceOptions.SectionName))
+    .PostConfigure(static options =>
+    {
+        options.Provider = CryptoApiSharedPersistenceDefaults.NormalizeProvider(options.Provider);
+        options.ConnectionString = options.ConnectionString?.Trim();
+    })
+    .Validate(
+        static options => string.Equals(options.Provider, CryptoApiSharedPersistenceDefaults.SqliteProvider, StringComparison.OrdinalIgnoreCase),
+        $"Crypto API shared persistence currently supports only '{CryptoApiSharedPersistenceDefaults.SqliteProvider}'.")
+    .ValidateOnStart();
+
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<CryptoApiRuntimeDescriptorProvider>();
+builder.Services.AddSingleton<ICryptoApiSharedStateStore, SqliteCryptoApiSharedStateStore>();
 builder.Services.AddHealthChecks()
-    .AddCheck<CryptoApiModuleReadinessHealthCheck>("pkcs11-module", tags: ["ready"]);
+    .AddCheck<CryptoApiModuleReadinessHealthCheck>("pkcs11-module", tags: ["ready"])
+    .AddCheck<CryptoApiSharedStateHealthCheck>("shared-persistence", tags: ["ready"]);
 
 WebApplication app = builder.Build();
 CryptoApiHostOptions hostOptions = app.Services.GetRequiredService<IOptions<CryptoApiHostOptions>>().Value;
 CryptoApiRuntimeOptions runtimeOptions = app.Services.GetRequiredService<IOptions<CryptoApiRuntimeOptions>>().Value;
+CryptoApiSharedPersistenceOptions sharedPersistenceOptions = app.Services.GetRequiredService<IOptions<CryptoApiSharedPersistenceOptions>>().Value;
 
 if (!app.Environment.IsDevelopment())
 {
@@ -48,6 +64,12 @@ if (!runtimeOptions.DisableHttpsRedirection)
     app.UseHttpsRedirection();
 }
 
+if (!string.IsNullOrWhiteSpace(sharedPersistenceOptions.ConnectionString) && sharedPersistenceOptions.AutoInitialize)
+{
+    ICryptoApiSharedStateStore sharedStateStore = app.Services.GetRequiredService<ICryptoApiSharedStateStore>();
+    await sharedStateStore.InitializeAsync();
+}
+
 app.MapGet("/", static (CryptoApiRuntimeDescriptorProvider descriptorProvider) =>
 {
     CryptoApiRuntimeDescriptor descriptor = descriptorProvider.Describe();
@@ -57,6 +79,9 @@ app.MapGet("/", static (CryptoApiRuntimeDescriptorProvider descriptorProvider) =
         descriptor.InstanceId,
         descriptor.DeploymentModel,
         descriptor.ApiBasePath,
+        descriptor.SharedPersistenceConfigured,
+        descriptor.SharedPersistenceProvider,
+        descriptor.SharedReadyAreas,
         Health = new
         {
             Live = CryptoApiHostDefaults.HealthLivePath,

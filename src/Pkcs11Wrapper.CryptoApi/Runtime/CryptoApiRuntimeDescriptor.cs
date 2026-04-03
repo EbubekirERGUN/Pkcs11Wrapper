@@ -7,4 +7,7 @@ public sealed record CryptoApiRuntimeDescriptor(
     string DeploymentModel,
     DateTimeOffset StartedAtUtc,
     bool ModuleConfigured,
+    bool SharedPersistenceConfigured,
+    string SharedPersistenceProvider,
+    IReadOnlyList<string> SharedReadyAreas,
     IReadOnlyList<string> CurrentSurface);
