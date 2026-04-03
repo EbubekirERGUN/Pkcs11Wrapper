@@ -234,6 +234,7 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark kapsamı, tekrar çalıştırma akışı, periyodik takip modeli
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - güncel commitlenmiş Linux benchmark baseline'ı
 - [docs/crypto-api-host.md](docs/crypto-api-host.md) - stateless Crypto API host sınırı, çalışma modeli, konfigürasyon ve mevcut iskelet endpoint'leri
+- [docs/security-review-issue-112.md](docs/security-review-issue-112.md) - issue #112 için ürün yüzeyi güvenlik incelemesi, yapılan sertleştirmeler ve açık kalan sınırlar
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - lokal admin-panel operasyon ve recovery rehberi
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor uyumluluk profili ve env sözleşmesi
 - [docs/luna-integration.md](docs/luna-integration.md) - wrapper, admin panel, smoke ve vendor regression için pratik Thales Luna client/module kurulum rehberi

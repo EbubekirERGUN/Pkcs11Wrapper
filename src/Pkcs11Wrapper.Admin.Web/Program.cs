@@ -30,7 +30,11 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     {
         options.LoginPath = "/login";
         options.AccessDeniedPath = "/forbidden";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
         options.SlidingExpiration = true;
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
     });
 
 builder.Services.AddAuthorizationBuilder()
@@ -125,6 +129,7 @@ if (!runtimeOptions.DisableHttpsRedirection)
     app.UseHttpsRedirection();
 }
 
+app.UseAdminSecurityResponseHeaders();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -149,3 +154,5 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+public partial class Program;

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Pkcs11Wrapper.Admin.Application.Models;
@@ -9,6 +10,12 @@ public static class AccountEndpoints
 {
     public static async Task<IResult> LoginAsync(HttpContext context, LocalAdminLoginService loginService)
     {
+        IResult? antiforgeryFailure = await ValidateAntiforgeryAsync(context);
+        if (antiforgeryFailure is not null)
+        {
+            return antiforgeryFailure;
+        }
+
         IFormCollection form = await context.Request.ReadFormAsync();
         string username = form["username"].ToString();
         string password = form["password"].ToString();
@@ -33,9 +40,33 @@ public static class AccountEndpoints
 
     public static async Task<IResult> LogoutAsync(HttpContext context, LocalAdminLoginService loginService)
     {
+        IResult? antiforgeryFailure = await ValidateAntiforgeryAsync(context);
+        if (antiforgeryFailure is not null)
+        {
+            return antiforgeryFailure;
+        }
+
         string? userName = context.User.Identity?.Name;
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         await loginService.WriteLogoutAsync(userName, context.RequestAborted);
         return Results.LocalRedirect("/login");
+    }
+
+    private static async Task<IResult?> ValidateAntiforgeryAsync(HttpContext context)
+    {
+        IAntiforgery antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
+
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context);
+            return null;
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return Results.Problem(
+                title: "Request verification failed.",
+                detail: "The admin request is missing a valid antiforgery token.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 }

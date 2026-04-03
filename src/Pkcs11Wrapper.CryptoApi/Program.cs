@@ -33,6 +33,9 @@ builder.Services.AddOptions<CryptoApiRuntimeOptions>()
         options.UserPin = options.UserPin?.Trim();
     });
 
+builder.Services.AddOptions<CryptoApiSecurityOptions>()
+    .Bind(builder.Configuration.GetSection(CryptoApiSecurityOptions.SectionName));
+
 builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
     .Bind(builder.Configuration.GetSection(CryptoApiSharedPersistenceOptions.SectionName))
     .PostConfigure(static options =>
@@ -62,6 +65,7 @@ builder.Services.AddHealthChecks()
 WebApplication app = builder.Build();
 CryptoApiHostOptions hostOptions = app.Services.GetRequiredService<IOptions<CryptoApiHostOptions>>().Value;
 CryptoApiRuntimeOptions runtimeOptions = app.Services.GetRequiredService<IOptions<CryptoApiRuntimeOptions>>().Value;
+CryptoApiSecurityOptions securityOptions = app.Services.GetRequiredService<IOptions<CryptoApiSecurityOptions>>().Value;
 CryptoApiSharedPersistenceOptions sharedPersistenceOptions = app.Services.GetRequiredService<IOptions<CryptoApiSharedPersistenceOptions>>().Value;
 
 if (!app.Environment.IsDevelopment())
@@ -110,7 +114,7 @@ app.MapHealthChecks(CryptoApiHostDefaults.HealthReadyPath, new HealthCheckOption
     Predicate = static registration => registration.Tags.Contains("ready", StringComparer.Ordinal),
     ResponseWriter = CryptoApiHealthResponseWriter.WriteAsync
 });
-app.MapCryptoApiRoutes(hostOptions);
+app.MapCryptoApiRoutes(hostOptions, securityOptions);
 
 app.Run();
 

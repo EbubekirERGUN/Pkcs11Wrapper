@@ -176,10 +176,33 @@ Useful endpoints:
 - `POST /api/v1/operations/verify` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "algorithm": "RS256", "payloadBase64": "aGVsbG8=", "signatureBase64": "..." }`
 - `POST /api/v1/operations/random` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "length": 32 }`
 
-`/api/v1/shared-state` returns provider/schema/count metadata when the shared store is configured and available.
+`/api/v1/shared-state` returns a reduced public summary by default. Detailed connection-target and count metadata stay hidden unless you explicitly enable `CryptoApiSecurity:ExposeSharedStateDetails`.
 `/api/v1/auth/self` validates the hashed shared secret, enforces disabled / revoked / expired state, updates last-used metadata, and returns the authenticated client context that future crypto operations can reuse.
 `POST /api/v1/operations/authorize` remains the low-level alias/policy check.
 `POST /api/v1/operations/sign`, `verify`, and `random` reuse that same authentication + authorization model and keep the public contract stable and customer-facing: callers provide alias names, high-level algorithms such as `RS256` / `PS256` / `ES256` / `HS256`, and base64 payloads instead of raw PKCS#11 device/slot/handle details.
+
+
+### Crypto API security defaults
+
+The host now defaults to a safer public diagnostic posture:
+
+```json
+"CryptoApiSecurity": {
+  "ExposeDetailedErrors": false,
+  "ExposeSharedStateDetails": false
+}
+```
+
+That means:
+
+- auth failures return generic rejection text by default
+- alias/policy authorization failures return generic access-denied text by default
+- `/api/v1/shared-state` omits the SQLite path/connection target and record counts by default
+
+For private/internal troubleshooting, operators can opt back into the verbose behavior with:
+
+- `CryptoApiSecurity__ExposeDetailedErrors=true`
+- `CryptoApiSecurity__ExposeSharedStateDetails=true`
 
 ## Intentionally out of scope for this issue
 

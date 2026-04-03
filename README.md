@@ -244,6 +244,7 @@ For the intended boundary/runtime model, scale-out expectations, state-sharing r
 
 - [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md)
 - [docs/crypto-api-host.md](docs/crypto-api-host.md)
+- [docs/security-review-issue-112.md](docs/security-review-issue-112.md)
 
 ### 2c) Build and run the container image
 
