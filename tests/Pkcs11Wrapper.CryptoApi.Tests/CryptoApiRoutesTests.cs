@@ -109,7 +109,8 @@ public sealed class CryptoApiRoutesTests
 
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
             string content = await response.Content.ReadAsStringAsync();
-            Assert.Contains("Requested operation is not allowed for this key alias.", content, StringComparison.Ordinal);
+            Assert.Contains("The caller is not allowed to use the requested key alias or operation.", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("Requested operation is not allowed for this key alias.", content, StringComparison.Ordinal);
         }
         finally
         {
@@ -145,6 +146,103 @@ public sealed class CryptoApiRoutesTests
         }
     }
 
+    [Fact]
+    public async Task SharedStateEndpointHidesConnectionTargetAndCountsByDefault()
+    {
+        string databasePath = CreateDatabasePath();
+        await using WebApplicationFactory<Program> factory = CreateFactory(databasePath);
+        try
+        {
+            using HttpClient httpClient = factory.CreateClient();
+            using HttpResponseMessage response = await httpClient.GetAsync("/api/v1/shared-state");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            JsonElement root = json.RootElement;
+            Assert.True(root.GetProperty("configured").GetBoolean());
+            Assert.Equal("Sqlite", root.GetProperty("provider").GetString());
+            Assert.True(root.TryGetProperty("schemaVersion", out _));
+            Assert.True(root.TryGetProperty("sharedReadyAreas", out _));
+            Assert.False(root.TryGetProperty("connectionTarget", out _));
+            Assert.False(root.TryGetProperty("apiClientCount", out _));
+            Assert.False(root.TryGetProperty("apiClientKeyCount", out _));
+            Assert.False(root.TryGetProperty("keyAliasCount", out _));
+            Assert.False(root.TryGetProperty("policyCount", out _));
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task AuthEndpointsUseGenericFailureDetailsByDefault()
+    {
+        string databasePath = CreateDatabasePath();
+        await using WebApplicationFactory<Program> factory = CreateFactory(databasePath);
+        try
+        {
+            using HttpClient httpClient = factory.CreateClient();
+
+            using HttpResponseMessage authResponse = await httpClient.GetAsync("/api/v1/auth/self");
+            string authContent = await authResponse.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.Unauthorized, authResponse.StatusCode);
+            Assert.Contains("The provided API credentials were rejected.", authContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("API key id and secret are required.", authContent, StringComparison.Ordinal);
+
+            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+            using HttpResponseMessage authorizationResponse = await httpClient.PostAsync(
+                "/api/v1/operations/authorize",
+                CreateJsonContent("{\"keyAlias\":\"missing-alias\",\"operation\":\"sign\"}"));
+
+            string authorizationContent = await authorizationResponse.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.Forbidden, authorizationResponse.StatusCode);
+            Assert.Contains("The caller is not allowed to use the requested key alias or operation.", authorizationContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("Requested key alias was not found.", authorizationContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task SecurityOptionsCanRestoreDetailedDiagnosticsForPrivateDeployments()
+    {
+        string databasePath = CreateDatabasePath();
+        await using WebApplicationFactory<Program> factory = CreateFactory(
+            databasePath,
+            null,
+            new Dictionary<string, string?>
+            {
+                ["CryptoApiSecurity:ExposeDetailedErrors"] = "true",
+                ["CryptoApiSecurity:ExposeSharedStateDetails"] = "true"
+            });
+
+        try
+        {
+            using HttpClient httpClient = factory.CreateClient();
+
+            using HttpResponseMessage sharedStateResponse = await httpClient.GetAsync("/api/v1/shared-state");
+            string sharedStateContent = await sharedStateResponse.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, sharedStateResponse.StatusCode);
+            Assert.Contains("connectionTarget", sharedStateContent, StringComparison.Ordinal);
+            Assert.Contains("apiClientCount", sharedStateContent, StringComparison.Ordinal);
+
+            using HttpResponseMessage authResponse = await httpClient.GetAsync("/api/v1/auth/self");
+            string authContent = await authResponse.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.Unauthorized, authResponse.StatusCode);
+            Assert.Contains("API key id and secret are required.", authContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
     private static async Task<SeededAccess> SeedAuthorizedAccessAsync(WebApplicationFactory<Program> factory, IReadOnlyCollection<string> allowedOperations, string aliasName)
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -173,14 +271,14 @@ public sealed class CryptoApiRoutesTests
         return new SeededAccess(client, key, alias, policy);
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(string databasePath, Action<IServiceCollection>? configureServices = null)
+    private static WebApplicationFactory<Program> CreateFactory(string databasePath, Action<IServiceCollection>? configureServices = null, IReadOnlyDictionary<string, string?>? additionalConfiguration = null)
         => new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Development");
                 builder.ConfigureAppConfiguration((_, configurationBuilder) =>
                 {
-                    configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                    Dictionary<string, string?> configuration = new()
                     {
                         ["CryptoApiHost:ServiceName"] = "Pkcs11Wrapper.CryptoApi.Tests",
                         ["CryptoApiHost:ApiBasePath"] = "/api/v1",
@@ -188,7 +286,17 @@ public sealed class CryptoApiRoutesTests
                         ["CryptoApiSharedPersistence:Provider"] = "Sqlite",
                         ["CryptoApiSharedPersistence:ConnectionString"] = $"Data Source={databasePath}",
                         ["CryptoApiSharedPersistence:AutoInitialize"] = "true"
-                    });
+                    };
+
+                    if (additionalConfiguration is not null)
+                    {
+                        foreach ((string key, string? value) in additionalConfiguration)
+                        {
+                            configuration[key] = value;
+                        }
+                    }
+
+                    configurationBuilder.AddInMemoryCollection(configuration);
                 });
 
                 if (configureServices is not null)
