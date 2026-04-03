@@ -12,6 +12,7 @@ no_build=false
 fixture_root=""
 fixture_env=""
 admin_data_root=""
+crypto_api_shared_db=""
 server_pid=""
 server_running=false
 
@@ -154,6 +155,7 @@ fi
 "${playwright_command[@]}" "${playwright_install_args[@]}" 2>&1 | tee "$artifact_root/playwright-install.log"
 
 admin_data_root="$(mktemp -d -t pkcs11wrapper-admin-storage-XXXXXX)"
+crypto_api_shared_db="$admin_data_root/crypto-api-shared.db"
 admin_user="ci-admin"
 admin_password="AdminE2E!Pass123"
 admin_device_name="CI Seeded SoftHSM"
@@ -195,6 +197,9 @@ export AdminStorage__DataRoot="$admin_data_root"
 export LocalAdminBootstrap__UserName="$admin_user"
 export LocalAdminBootstrap__Password="$admin_password"
 export LocalAdminLoginThrottle__MaxFailures="100"
+export CryptoApiSharedPersistence__Provider="Sqlite"
+export CryptoApiSharedPersistence__ConnectionString="Data Source=$crypto_api_shared_db"
+export CryptoApiSharedPersistence__AutoInitialize="true"
 
 (
   cd "$repo_root"
