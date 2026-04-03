@@ -100,10 +100,21 @@ public partial class Keys
             return;
         }
 
-        _slots = await Admin.GetSlotsAsync(deviceId);
-        _selectedSlotId = _slots.FirstOrDefault()?.SlotId.ToString();
-        await LoadProtectedPinAsync();
-        await ReloadSlotCapabilitiesAsync();
+        try
+        {
+            _slots = await Admin.GetSlotsAsync(deviceId);
+            _selectedSlotId = _slots.FirstOrDefault()?.SlotId.ToString();
+            await LoadProtectedPinAsync();
+            await ReloadSlotCapabilitiesAsync();
+        }
+        catch (Exception ex)
+        {
+            _slots = [];
+            _selectedSlotId = null;
+            _userPin = null;
+            _rememberPin = false;
+            SetStatus(ex.Message, true);
+        }
     }
 
     private async Task LoadProtectedPinAsync()

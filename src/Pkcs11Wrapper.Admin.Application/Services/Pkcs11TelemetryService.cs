@@ -100,13 +100,16 @@ public sealed class Pkcs11TelemetryService(IPkcs11TelemetryStore store, IAdminAc
                 string.IsNullOrWhiteSpace(activityTraceId) ? actor.SessionId : activityTraceId,
                 [.. operationEvent.Fields.Select(field => new AdminPkcs11TelemetryField(field.Name, field.Classification.ToString(), field.Value))]);
 
-            try
+            _ = Task.Run(async () =>
             {
-                store.AppendAsync(entry).GetAwaiter().GetResult();
-            }
-            catch
-            {
-            }
+                try
+                {
+                    await store.AppendAsync(entry);
+                }
+                catch
+                {
+                }
+            });
         }
     }
 }
