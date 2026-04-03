@@ -52,6 +52,9 @@ public sealed class CryptoApiConfigurationTests
         Assert.Contains("GET /api/crypto/shared-state", descriptor.CurrentSurface);
         Assert.Contains("GET /api/crypto/auth/self", descriptor.CurrentSurface);
         Assert.Contains("POST /api/crypto/operations/authorize", descriptor.CurrentSurface);
+        Assert.Contains("POST /api/crypto/operations/sign", descriptor.CurrentSurface);
+        Assert.Contains("POST /api/crypto/operations/verify", descriptor.CurrentSurface);
+        Assert.Contains("POST /api/crypto/operations/random", descriptor.CurrentSurface);
         Assert.NotEqual(default, descriptor.StartedAtUtc);
         Assert.False(string.IsNullOrWhiteSpace(descriptor.InstanceId));
     }
