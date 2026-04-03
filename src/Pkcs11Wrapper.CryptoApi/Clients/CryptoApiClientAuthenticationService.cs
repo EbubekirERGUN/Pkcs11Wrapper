@@ -39,14 +39,14 @@ public sealed class CryptoApiClientAuthenticationService(
             return Failed("API client is disabled.");
         }
 
-        if (!key.IsEnabled)
-        {
-            return Failed("API key is disabled.");
-        }
-
         if (key.RevokedAtUtc is not null)
         {
             return Failed("API key has been revoked.");
+        }
+
+        if (!key.IsEnabled)
+        {
+            return Failed("API key is disabled.");
         }
 
         if (key.ExpiresAtUtc is DateTimeOffset expiresAtUtc && expiresAtUtc <= now)

@@ -2,7 +2,7 @@ namespace Pkcs11Wrapper.CryptoApi.SharedState;
 
 public static class CryptoApiSharedStateConstants
 {
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
 
     public static IReadOnlyList<string> SharedReadyAreas { get; } =
     [

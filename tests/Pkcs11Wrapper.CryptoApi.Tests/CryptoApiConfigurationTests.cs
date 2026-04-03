@@ -51,6 +51,7 @@ public sealed class CryptoApiConfigurationTests
         Assert.Contains("API key hashing, rotation, and revocation metadata", descriptor.SharedReadyAreas);
         Assert.Contains("GET /api/crypto/shared-state", descriptor.CurrentSurface);
         Assert.Contains("GET /api/crypto/auth/self", descriptor.CurrentSurface);
+        Assert.Contains("POST /api/crypto/operations/authorize", descriptor.CurrentSurface);
         Assert.NotEqual(default, descriptor.StartedAtUtc);
         Assert.False(string.IsNullOrWhiteSpace(descriptor.InstanceId));
     }

@@ -1,3 +1,4 @@
+using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Runtime;
@@ -30,8 +31,8 @@ public static class CryptoApiRouteBuilderExtensions
                 [
                     $"{CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName}: public API key identifier",
                     $"{CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName}: one-time revealed API key secret",
-                    "Concrete crypto operation endpoints",
-                    "Request-scoped key resolution and policy enforcement backed by shared aliases/policies"
+                    $"POST {descriptor.ApiBasePath}/operations/authorize for alias + operation policy checks",
+                    "Concrete sign/verify/encrypt/decrypt request contracts that reuse the shared alias/policy model"
                 ]));
         });
 
@@ -44,8 +45,9 @@ public static class CryptoApiRouteBuilderExtensions
             return TypedResults.Ok(new CryptoApiOperationSurfaceDocument(
                 descriptor.ServiceName,
                 descriptor.ApiBasePath,
-                "Scaffold only. Concrete crypto request/response contracts will be added under this route space without turning the host into a stateful admin portal or relying on per-node local auth/policy files.",
-                ["sign", "verify", "encrypt", "decrypt", "unwrap/wrap", "key metadata lookup"]));
+                "The first request-scoped alias-routing and policy-enforcement slice is live via POST /operations/authorize. Concrete crypto request/response contracts will be added under this route space without turning the host into a stateful admin portal or relying on per-node local auth/policy files.",
+                ["sign", "verify", "encrypt", "decrypt", "unwrap/wrap", "key metadata lookup"],
+                ["POST /operations/authorize"]));
         });
 
         group.MapGet("/shared-state", static async Task<IResult> (ICryptoApiSharedStateStore sharedStateStore, CancellationToken cancellationToken) =>
@@ -86,6 +88,73 @@ public static class CryptoApiRouteBuilderExtensions
                 result.Client.BoundPolicyIds));
         });
 
+        group.MapPost("/operations/authorize", static async Task<IResult> (
+            HttpContext httpContext,
+            CryptoApiAuthorizeKeyOperationRequest request,
+            CryptoApiClientAuthenticationService authenticationService,
+            CryptoApiKeyOperationAuthorizationService authorizationService,
+            CancellationToken cancellationToken) =>
+        {
+            string? keyIdentifier = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName].ToString();
+            string? secret = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName].ToString();
+            CryptoApiClientAuthenticationResult authentication = await authenticationService.AuthenticateAsync(keyIdentifier, secret, cancellationToken);
+            if (!authentication.Succeeded || authentication.Client is null)
+            {
+                return Results.Problem(
+                    title: "API key authentication failed.",
+                    detail: authentication.FailureReason,
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            CryptoApiKeyOperationAuthorizationResult authorization;
+            try
+            {
+                authorization = await authorizationService.AuthorizeAsync(
+                    authentication.Client,
+                    request.KeyAlias,
+                    request.Operation,
+                    cancellationToken);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.Problem(
+                    title: "Invalid authorization request.",
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            if (!authorization.Succeeded || authorization.Authorization is null)
+            {
+                return Results.Problem(
+                    title: "Key alias authorization failed.",
+                    detail: authorization.FailureReason,
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            CryptoApiAuthorizedKeyOperation allowedOperation = authorization.Authorization;
+            return Results.Ok(new CryptoApiAuthorizedKeyOperationDocument(
+                Client: new CryptoApiAuthenticatedClientDocument(
+                    allowedOperation.Client.ClientId,
+                    allowedOperation.Client.ClientName,
+                    allowedOperation.Client.DisplayName,
+                    allowedOperation.Client.ApplicationType,
+                    allowedOperation.Client.AuthenticationMode,
+                    allowedOperation.Client.ClientKeyId,
+                    allowedOperation.Client.KeyIdentifier,
+                    allowedOperation.Client.CredentialType,
+                    allowedOperation.Client.AuthenticatedAtUtc,
+                    allowedOperation.Client.ExpiresAtUtc,
+                    allowedOperation.Client.BoundPolicyIds),
+                Authorization: new CryptoApiAuthorizedKeyOperationSummary(
+                    Operation: allowedOperation.Operation,
+                    AliasId: allowedOperation.AliasId,
+                    AliasName: allowedOperation.AliasName,
+                    AuthorizedAtUtc: allowedOperation.AuthorizedAtUtc),
+                Policies: allowedOperation.MatchedPolicies
+                    .Select(policy => new CryptoApiMatchedPolicyDocument(policy.PolicyId, policy.PolicyName, policy.Revision))
+                    .ToArray()));
+        });
+
         return endpoints;
     }
 
@@ -110,7 +179,8 @@ public static class CryptoApiRouteBuilderExtensions
         string ServiceName,
         string ApiBasePath,
         string Status,
-        IReadOnlyList<string> PlannedOperations);
+        IReadOnlyList<string> PlannedOperations,
+        IReadOnlyList<string> CurrentEndpoints);
 
     private sealed record CryptoApiAuthenticatedClientDocument(
         Guid ClientId,
@@ -124,4 +194,24 @@ public static class CryptoApiRouteBuilderExtensions
         DateTimeOffset AuthenticatedAtUtc,
         DateTimeOffset? ExpiresAtUtc,
         IReadOnlyList<Guid> BoundPolicyIds);
+
+    private sealed record CryptoApiAuthorizeKeyOperationRequest(
+        string KeyAlias,
+        string Operation);
+
+    private sealed record CryptoApiAuthorizedKeyOperationDocument(
+        CryptoApiAuthenticatedClientDocument Client,
+        CryptoApiAuthorizedKeyOperationSummary Authorization,
+        IReadOnlyList<CryptoApiMatchedPolicyDocument> Policies);
+
+    private sealed record CryptoApiAuthorizedKeyOperationSummary(
+        string Operation,
+        Guid AliasId,
+        string AliasName,
+        DateTimeOffset AuthorizedAtUtc);
+
+    private sealed record CryptoApiMatchedPolicyDocument(
+        Guid PolicyId,
+        string PolicyName,
+        int Revision);
 }
