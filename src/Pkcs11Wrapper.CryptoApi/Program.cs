@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Endpoints;
 using Pkcs11Wrapper.CryptoApi.Health;
@@ -43,6 +44,10 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<CryptoApiRuntimeDescriptorProvider>();
+builder.Services.AddSingleton<CryptoApiClientSecretGenerator>();
+builder.Services.AddSingleton<CryptoApiClientSecretHasher>();
+builder.Services.AddSingleton<CryptoApiClientManagementService>();
+builder.Services.AddSingleton<CryptoApiClientAuthenticationService>();
 builder.Services.AddSingleton<ICryptoApiSharedStateStore, SqliteCryptoApiSharedStateStore>();
 builder.Services.AddHealthChecks()
     .AddCheck<CryptoApiModuleReadinessHealthCheck>("pkcs11-module", tags: ["ready"])

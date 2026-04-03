@@ -70,6 +70,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
                 client_id,
                 client_name,
                 display_name,
+                application_type,
                 authentication_mode,
                 is_enabled,
                 notes,
@@ -79,6 +80,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
                 $clientId,
                 $clientName,
                 $displayName,
+                $applicationType,
                 $authenticationMode,
                 $isEnabled,
                 $notes,
@@ -87,6 +89,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             ON CONFLICT(client_id) DO UPDATE SET
                 client_name = excluded.client_name,
                 display_name = excluded.display_name,
+                application_type = excluded.application_type,
                 authentication_mode = excluded.authentication_mode,
                 is_enabled = excluded.is_enabled,
                 notes = excluded.notes,
@@ -95,6 +98,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         AddText(command, "$clientId", client.ClientId.ToString("D", CultureInfo.InvariantCulture));
         AddText(command, "$clientName", client.ClientName);
         AddText(command, "$displayName", client.DisplayName);
+        AddText(command, "$applicationType", client.ApplicationType);
         AddText(command, "$authenticationMode", client.AuthenticationMode);
         AddBoolean(command, "$isEnabled", client.IsEnabled);
         AddNullableText(command, "$notes", client.Notes);
@@ -120,46 +124,62 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
                 key_name,
                 key_identifier,
                 credential_type,
+                secret_hash_algorithm,
                 secret_hash,
                 secret_hint,
                 is_enabled,
                 created_at_utc,
                 updated_at_utc,
-                expires_at_utc)
+                expires_at_utc,
+                revoked_at_utc,
+                revoked_reason,
+                last_used_at_utc)
             VALUES (
                 $clientKeyId,
                 $clientId,
                 $keyName,
                 $keyIdentifier,
                 $credentialType,
+                $secretHashAlgorithm,
                 $secretHash,
                 $secretHint,
                 $isEnabled,
                 $createdAtUtc,
                 $updatedAtUtc,
-                $expiresAtUtc)
+                $expiresAtUtc,
+                $revokedAtUtc,
+                $revokedReason,
+                $lastUsedAtUtc)
             ON CONFLICT(client_key_id) DO UPDATE SET
                 client_id = excluded.client_id,
                 key_name = excluded.key_name,
                 key_identifier = excluded.key_identifier,
                 credential_type = excluded.credential_type,
+                secret_hash_algorithm = excluded.secret_hash_algorithm,
                 secret_hash = excluded.secret_hash,
                 secret_hint = excluded.secret_hint,
                 is_enabled = excluded.is_enabled,
                 updated_at_utc = excluded.updated_at_utc,
-                expires_at_utc = excluded.expires_at_utc;
+                expires_at_utc = excluded.expires_at_utc,
+                revoked_at_utc = excluded.revoked_at_utc,
+                revoked_reason = excluded.revoked_reason,
+                last_used_at_utc = excluded.last_used_at_utc;
             """;
         AddText(command, "$clientKeyId", clientKey.ClientKeyId.ToString("D", CultureInfo.InvariantCulture));
         AddText(command, "$clientId", clientKey.ClientId.ToString("D", CultureInfo.InvariantCulture));
         AddText(command, "$keyName", clientKey.KeyName);
         AddText(command, "$keyIdentifier", clientKey.KeyIdentifier);
         AddText(command, "$credentialType", clientKey.CredentialType);
+        AddText(command, "$secretHashAlgorithm", clientKey.SecretHashAlgorithm);
         AddText(command, "$secretHash", clientKey.SecretHash);
         AddNullableText(command, "$secretHint", clientKey.SecretHint);
         AddBoolean(command, "$isEnabled", clientKey.IsEnabled);
         AddText(command, "$createdAtUtc", FormatTimestamp(clientKey.CreatedAtUtc));
         AddText(command, "$updatedAtUtc", FormatTimestamp(clientKey.UpdatedAtUtc));
         AddNullableText(command, "$expiresAtUtc", clientKey.ExpiresAtUtc is null ? null : FormatTimestamp(clientKey.ExpiresAtUtc.Value));
+        AddNullableText(command, "$revokedAtUtc", clientKey.RevokedAtUtc is null ? null : FormatTimestamp(clientKey.RevokedAtUtc.Value));
+        AddNullableText(command, "$revokedReason", clientKey.RevokedReason);
+        AddNullableText(command, "$lastUsedAtUtc", clientKey.LastUsedAtUtc is null ? null : FormatTimestamp(clientKey.LastUsedAtUtc.Value));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -382,11 +402,12 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
     private static async Task EnsureSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = $"""
+        command.CommandText = """
             CREATE TABLE IF NOT EXISTS crypto_api_clients (
                 client_id TEXT PRIMARY KEY,
                 client_name TEXT NOT NULL UNIQUE,
                 display_name TEXT NOT NULL,
+                application_type TEXT NOT NULL DEFAULT 'service',
                 authentication_mode TEXT NOT NULL,
                 is_enabled INTEGER NOT NULL,
                 notes TEXT NULL,
@@ -400,12 +421,16 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
                 key_name TEXT NOT NULL,
                 key_identifier TEXT NOT NULL UNIQUE,
                 credential_type TEXT NOT NULL,
+                secret_hash_algorithm TEXT NOT NULL DEFAULT 'legacy-placeholder',
                 secret_hash TEXT NOT NULL,
                 secret_hint TEXT NULL,
                 is_enabled INTEGER NOT NULL,
                 created_at_utc TEXT NOT NULL,
                 updated_at_utc TEXT NOT NULL,
                 expires_at_utc TEXT NULL,
+                revoked_at_utc TEXT NULL,
+                revoked_reason TEXT NULL,
+                last_used_at_utc TEXT NULL,
                 FOREIGN KEY(client_id) REFERENCES crypto_api_clients(client_id) ON DELETE CASCADE
             );
 
@@ -453,15 +478,44 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             CREATE INDEX IF NOT EXISTS ix_crypto_api_client_keys_client_id
                 ON crypto_api_client_keys(client_id);
 
+            CREATE INDEX IF NOT EXISTS ix_crypto_api_client_keys_key_identifier
+                ON crypto_api_client_keys(key_identifier);
+
             CREATE INDEX IF NOT EXISTS ix_crypto_api_client_policy_bindings_policy_id
                 ON crypto_api_client_policy_bindings(policy_id);
 
             CREATE INDEX IF NOT EXISTS ix_crypto_api_key_alias_policy_bindings_policy_id
                 ON crypto_api_key_alias_policy_bindings(policy_id);
-
-            PRAGMA user_version = {CryptoApiSharedStateConstants.SchemaVersion};
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+
+        await EnsureColumnExistsAsync(connection, "crypto_api_clients", "application_type", "TEXT NOT NULL DEFAULT 'service'", cancellationToken);
+        await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "secret_hash_algorithm", "TEXT NOT NULL DEFAULT 'legacy-placeholder'", cancellationToken);
+        await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "revoked_at_utc", "TEXT NULL", cancellationToken);
+        await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "revoked_reason", "TEXT NULL", cancellationToken);
+        await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "last_used_at_utc", "TEXT NULL", cancellationToken);
+
+        await using SqliteCommand versionCommand = connection.CreateCommand();
+        versionCommand.CommandText = $"PRAGMA user_version = {CryptoApiSharedStateConstants.SchemaVersion};";
+        await versionCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureColumnExistsAsync(SqliteConnection connection, string tableName, string columnName, string sqlTypeClause, CancellationToken cancellationToken)
+    {
+        await using SqliteCommand pragma = connection.CreateCommand();
+        pragma.CommandText = $"PRAGMA table_info({tableName});";
+        await using SqliteDataReader reader = await pragma.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        await using SqliteCommand alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlTypeClause};";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<int> CountRowsAsync(SqliteConnection connection, string tableName, CancellationToken cancellationToken)
@@ -502,7 +556,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         List<CryptoApiClientRecord> clients = [];
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT client_id, client_name, display_name, authentication_mode, is_enabled, notes, created_at_utc, updated_at_utc
+            SELECT client_id, client_name, display_name, application_type, authentication_mode, is_enabled, notes, created_at_utc, updated_at_utc
             FROM crypto_api_clients
             ORDER BY client_name;
             """;
@@ -513,11 +567,12 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
                 ClientId: Guid.Parse(reader.GetString(0)),
                 ClientName: reader.GetString(1),
                 DisplayName: reader.GetString(2),
-                AuthenticationMode: reader.GetString(3),
-                IsEnabled: reader.GetBoolean(4),
-                Notes: reader.IsDBNull(5) ? null : reader.GetString(5),
-                CreatedAtUtc: ParseTimestamp(reader.GetString(6)),
-                UpdatedAtUtc: ParseTimestamp(reader.GetString(7))));
+                ApplicationType: reader.GetString(3),
+                AuthenticationMode: reader.GetString(4),
+                IsEnabled: reader.GetBoolean(5),
+                Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
+                CreatedAtUtc: ParseTimestamp(reader.GetString(7)),
+                UpdatedAtUtc: ParseTimestamp(reader.GetString(8))));
         }
 
         return clients;
@@ -528,7 +583,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         List<CryptoApiClientKeyRecord> clientKeys = [];
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT client_key_id, client_id, key_name, key_identifier, credential_type, secret_hash, secret_hint, is_enabled, created_at_utc, updated_at_utc, expires_at_utc
+            SELECT client_key_id, client_id, key_name, key_identifier, credential_type, secret_hash_algorithm, secret_hash, secret_hint, is_enabled, created_at_utc, updated_at_utc, expires_at_utc, revoked_at_utc, revoked_reason, last_used_at_utc
             FROM crypto_api_client_keys
             ORDER BY key_name;
             """;
@@ -541,12 +596,16 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
                 KeyName: reader.GetString(2),
                 KeyIdentifier: reader.GetString(3),
                 CredentialType: reader.GetString(4),
-                SecretHash: reader.GetString(5),
-                SecretHint: reader.IsDBNull(6) ? null : reader.GetString(6),
-                IsEnabled: reader.GetBoolean(7),
-                CreatedAtUtc: ParseTimestamp(reader.GetString(8)),
-                UpdatedAtUtc: ParseTimestamp(reader.GetString(9)),
-                ExpiresAtUtc: reader.IsDBNull(10) ? null : ParseTimestamp(reader.GetString(10))));
+                SecretHashAlgorithm: reader.GetString(5),
+                SecretHash: reader.GetString(6),
+                SecretHint: reader.IsDBNull(7) ? null : reader.GetString(7),
+                IsEnabled: reader.GetBoolean(8),
+                CreatedAtUtc: ParseTimestamp(reader.GetString(9)),
+                UpdatedAtUtc: ParseTimestamp(reader.GetString(10)),
+                ExpiresAtUtc: reader.IsDBNull(11) ? null : ParseTimestamp(reader.GetString(11)),
+                RevokedAtUtc: reader.IsDBNull(12) ? null : ParseTimestamp(reader.GetString(12)),
+                RevokedReason: reader.IsDBNull(13) ? null : reader.GetString(13),
+                LastUsedAtUtc: reader.IsDBNull(14) ? null : ParseTimestamp(reader.GetString(14))));
         }
 
         return clientKeys;

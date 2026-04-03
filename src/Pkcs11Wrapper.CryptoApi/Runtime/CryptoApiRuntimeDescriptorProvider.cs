@@ -37,6 +37,7 @@ public sealed class CryptoApiRuntimeDescriptorProvider(
                 $"GET {apiBasePath}/runtime",
                 $"GET {apiBasePath}/operations",
                 $"GET {apiBasePath}/shared-state",
+                $"GET {apiBasePath}/auth/self",
                 $"GET {CryptoApiHostDefaults.HealthLivePath}",
                 $"GET {CryptoApiHostDefaults.HealthReadyPath}"
             ]);

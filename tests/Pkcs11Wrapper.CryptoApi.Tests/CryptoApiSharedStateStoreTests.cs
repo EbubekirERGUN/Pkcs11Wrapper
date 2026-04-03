@@ -30,7 +30,8 @@ public sealed class CryptoApiSharedStateStoreTests
                 clientId,
                 "ingress-gateway",
                 "Ingress Gateway",
-                "shared-secret",
+                "gateway",
+                "api-key",
                 true,
                 "Primary calling service",
                 now,
@@ -40,12 +41,16 @@ public sealed class CryptoApiSharedStateStoreTests
                 clientId,
                 "primary-hmac",
                 "kid-ingress-primary",
-                "shared-secret",
-                "sha256:4e59db4f1d23f6b7",
+                "api-key-secret",
+                "pbkdf2-sha256-v1",
+                "pbkdf2-sha256-v1$100000$salt$hash",
                 "ing...mary",
                 true,
                 now,
                 now,
+                null,
+                null,
+                null,
                 null));
             await writer.UpsertPolicyAsync(new CryptoApiPolicyRecord(
                 policyId,
@@ -85,12 +90,16 @@ public sealed class CryptoApiSharedStateStoreTests
 
             CryptoApiClientRecord client = Assert.Single(snapshot.Clients);
             Assert.Equal("ingress-gateway", client.ClientName);
-            Assert.Equal("shared-secret", client.AuthenticationMode);
+            Assert.Equal("gateway", client.ApplicationType);
+            Assert.Equal("api-key", client.AuthenticationMode);
 
             CryptoApiClientKeyRecord clientKey = Assert.Single(snapshot.ClientKeys);
             Assert.Equal(clientId, clientKey.ClientId);
             Assert.Equal("kid-ingress-primary", clientKey.KeyIdentifier);
-            Assert.Equal("sha256:4e59db4f1d23f6b7", clientKey.SecretHash);
+            Assert.Equal("pbkdf2-sha256-v1", clientKey.SecretHashAlgorithm);
+            Assert.Equal("pbkdf2-sha256-v1$100000$salt$hash", clientKey.SecretHash);
+            Assert.Null(clientKey.RevokedAtUtc);
+            Assert.Null(clientKey.LastUsedAtUtc);
 
             CryptoApiKeyAliasRecord alias = Assert.Single(snapshot.KeyAliases);
             Assert.Equal((ulong)7, alias.SlotId);
@@ -110,10 +119,17 @@ public sealed class CryptoApiSharedStateStoreTests
         }
         finally
         {
-            if (File.Exists(databasePath))
-            {
-                File.Delete(databasePath);
-            }
+            DeleteDatabaseArtifacts(databasePath);
         }
+    }
+
+    private static void DeleteDatabaseArtifacts(string databasePath)
+    {
+        string walPath = databasePath + "-wal";
+        string shmPath = databasePath + "-shm";
+
+        if (File.Exists(databasePath)) File.Delete(databasePath);
+        if (File.Exists(walPath)) File.Delete(walPath);
+        if (File.Exists(shmPath)) File.Delete(shmPath);
     }
 }

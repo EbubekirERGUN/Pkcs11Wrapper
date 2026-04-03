@@ -48,7 +48,9 @@ public sealed class CryptoApiConfigurationTests
         Assert.True(descriptor.SharedPersistenceConfigured);
         Assert.Equal("Sqlite", descriptor.SharedPersistenceProvider);
         Assert.Contains("API clients and client keys", descriptor.SharedReadyAreas);
+        Assert.Contains("API key hashing, rotation, and revocation metadata", descriptor.SharedReadyAreas);
         Assert.Contains("GET /api/crypto/shared-state", descriptor.CurrentSurface);
+        Assert.Contains("GET /api/crypto/auth/self", descriptor.CurrentSurface);
         Assert.NotEqual(default, descriptor.StartedAtUtc);
         Assert.False(string.IsNullOrWhiteSpace(descriptor.InstanceId));
     }

@@ -25,6 +25,7 @@ public sealed record CryptoApiClientRecord(
     Guid ClientId,
     string ClientName,
     string DisplayName,
+    string ApplicationType,
     string AuthenticationMode,
     bool IsEnabled,
     string? Notes,
@@ -37,12 +38,16 @@ public sealed record CryptoApiClientKeyRecord(
     string KeyName,
     string KeyIdentifier,
     string CredentialType,
+    string SecretHashAlgorithm,
     string SecretHash,
     string? SecretHint,
     bool IsEnabled,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    DateTimeOffset? ExpiresAtUtc);
+    DateTimeOffset? ExpiresAtUtc,
+    DateTimeOffset? RevokedAtUtc,
+    string? RevokedReason,
+    DateTimeOffset? LastUsedAtUtc);
 
 public sealed record CryptoApiKeyAliasRecord(
     Guid AliasId,

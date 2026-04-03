@@ -83,8 +83,10 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - stateless, machine-facing boundary separate from the admin dashboard
 - DI/config binding for service identity, API base path, PKCS#11 runtime, and shared persistence
 - `/health/live` + `/health/ready` endpoints, with readiness validating the configured PKCS#11 module and shared persistence when configured
-- `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, and `/api/v1/shared-state` route space for the emerging machine-facing contract
+- `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, `/api/v1/shared-state`, and `/api/v1/auth/self` route space for the emerging machine-facing contract
 - pragmatic shared SQLite-backed persistence for multi-instance API clients/keys, key aliases, policies, and policy bindings
+- first practical API-key lifecycle slice: generated secrets are shown once, stored only as hashes, and carry disable / revoke / expiry / last-used metadata
+- admin-panel control-plane page for managing Crypto API applications and shared API keys without turning the machine-facing host into a tenant portal
 - intended deployment model: **one admin dashboard + many stateless crypto API instances**
 
 ## Platform & validation status
@@ -96,7 +98,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 | PKCS#11 v3 interface discovery | ✅ | capability-gated when not exported by the module |
 | PKCS#11 v3 message APIs | ✅ | managed/API support implemented; runtime depends on module support |
 | Admin panel | ✅ | functional Blazor Server management surface with auth, local users, config transfer, audit integrity, and PKCS#11 Lab |
-| Crypto API host scaffold | ✅ | stateless ASP.NET Core host with DI/config, service documents, health/readiness, and shared SQLite-backed auth/policy persistence scaffold |
+| Crypto API host scaffold | ✅ | stateless ASP.NET Core host with DI/config, service documents, health/readiness, shared SQLite-backed auth/policy persistence, and the first hashed API-key lifecycle slice |
 | Vendor regression lane | ✅ | optional non-SoftHSM validation path |
 
 ## Repository architecture
@@ -231,6 +233,9 @@ Useful endpoints:
 - `/api/v1/runtime`
 - `/api/v1/operations`
 - `/api/v1/shared-state`
+- `/api/v1/auth/self` using `X-Api-Key-Id` + `X-Api-Key-Secret`
+
+If the admin dashboard is pointed at the same `CryptoApiSharedPersistence:ConnectionString`, admins can manage Crypto API applications and API keys from the **Crypto API Access** page.
 
 For the intended boundary/runtime model, shared persistence scope, and scale-out notes, see [docs/crypto-api-host.md](docs/crypto-api-host.md).
 

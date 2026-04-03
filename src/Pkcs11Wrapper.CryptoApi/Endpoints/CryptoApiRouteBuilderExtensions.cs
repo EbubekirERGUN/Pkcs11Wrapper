@@ -1,3 +1,4 @@
+using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.CryptoApi.SharedState;
@@ -27,7 +28,8 @@ public static class CryptoApiRouteBuilderExtensions
                 descriptor.SharedReadyAreas,
                 new CryptoApiHealthLinks(CryptoApiHostDefaults.HealthLivePath, CryptoApiHostDefaults.HealthReadyPath),
                 [
-                    "Request authentication/authorization backed by shared client/key state",
+                    $"{CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName}: public API key identifier",
+                    $"{CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName}: one-time revealed API key secret",
                     "Concrete crypto operation endpoints",
                     "Request-scoped key resolution and policy enforcement backed by shared aliases/policies"
                 ]));
@@ -57,6 +59,33 @@ public static class CryptoApiRouteBuilderExtensions
                     statusCode: StatusCodes.Status503ServiceUnavailable);
         });
 
+        group.MapGet("/auth/self", static async Task<IResult> (HttpContext httpContext, CryptoApiClientAuthenticationService authenticationService, CancellationToken cancellationToken) =>
+        {
+            string? keyIdentifier = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName].ToString();
+            string? secret = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName].ToString();
+            CryptoApiClientAuthenticationResult result = await authenticationService.AuthenticateAsync(keyIdentifier, secret, cancellationToken);
+            if (!result.Succeeded || result.Client is null)
+            {
+                return Results.Problem(
+                    title: "API key authentication failed.",
+                    detail: result.FailureReason,
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            return Results.Ok(new CryptoApiAuthenticatedClientDocument(
+                result.Client.ClientId,
+                result.Client.ClientName,
+                result.Client.DisplayName,
+                result.Client.ApplicationType,
+                result.Client.AuthenticationMode,
+                result.Client.ClientKeyId,
+                result.Client.KeyIdentifier,
+                result.Client.CredentialType,
+                result.Client.AuthenticatedAtUtc,
+                result.Client.ExpiresAtUtc,
+                result.Client.BoundPolicyIds));
+        });
+
         return endpoints;
     }
 
@@ -82,4 +111,17 @@ public static class CryptoApiRouteBuilderExtensions
         string ApiBasePath,
         string Status,
         IReadOnlyList<string> PlannedOperations);
+
+    private sealed record CryptoApiAuthenticatedClientDocument(
+        Guid ClientId,
+        string ClientName,
+        string DisplayName,
+        string ApplicationType,
+        string AuthenticationMode,
+        Guid ClientKeyId,
+        string KeyIdentifier,
+        string CredentialType,
+        DateTimeOffset AuthenticatedAtUtc,
+        DateTimeOffset? ExpiresAtUtc,
+        IReadOnlyList<Guid> BoundPolicyIds);
 }

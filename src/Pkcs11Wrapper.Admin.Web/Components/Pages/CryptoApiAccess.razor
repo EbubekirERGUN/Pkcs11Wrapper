@@ -1,0 +1,436 @@
+@page "/crypto-api-access"
+@using Pkcs11Wrapper.CryptoApi.Clients
+@attribute [Authorize(Policy = AdminRoles.Admin)]
+@inject CryptoApiClientManagementService Access
+
+<PageTitle>Crypto API Access</PageTitle>
+
+<section class="page-hero">
+    <div class="page-hero-copy">
+        <div class="page-eyebrow">Control plane</div>
+        <h1>Crypto API Access</h1>
+        <p class="page-lead">Create customer-facing Crypto API applications, mint one-time-reveal API keys, and keep the first lifecycle controls pragmatic: enable/disable, expiry readiness, and revoke without storing plaintext secrets.</p>
+        <div class="page-hero-tags">
+            <span class="page-tag">API clients</span>
+            <span class="page-tag">One-time secret reveal</span>
+            <span class="page-tag">Hashed at rest</span>
+            <span class="page-tag">Admin-only</span>
+        </div>
+    </div>
+    <div class="page-hero-side">
+        <div class="hero-panel">
+            <div class="hero-panel-title">Persistence</div>
+            <div class="hero-panel-value">Shared</div>
+            <div class="hero-panel-copy">This screen manages the shared Crypto API client/key store consumed by stateless API instances, not a tenant portal.</div>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-panel-title">Secret model</div>
+            <div class="hero-panel-value">Reveal once</div>
+            <div class="hero-panel-copy">Generated secrets are displayed only at creation time. After that, operators can manage identifiers and lifecycle metadata, not recover plaintext.</div>
+        </div>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="crypto-api-access-status">@_statusMessage</div>
+}
+
+@if (_revealedKey is not null)
+{
+    <div class="alert alert-warning" data-testid="crypto-api-access-secret">
+        <div class="fw-semibold">New API key secret — copy it now</div>
+        <div class="small mt-2">Key identifier</div>
+        <code>@_revealedKey.KeyIdentifier</code>
+        <div class="small mt-3">Secret</div>
+        <code>@_revealedKey.Secret</code>
+        <div class="small mt-2">This secret will not be shown again. Store it in your secret manager before leaving this page.</div>
+    </div>
+}
+
+@if (_snapshot is null)
+{
+    <div class="empty-state">Loading...</div>
+}
+else if (!_snapshot.SharedPersistenceConfigured)
+{
+    <div class="alert alert-warning">
+        <div class="fw-semibold">Crypto API shared persistence is not configured for the admin app.</div>
+        <div class="small mt-2">Set <code>CryptoApiSharedPersistence:ConnectionString</code> to the same shared SQLite database used by the Crypto API host, then reopen this page.</div>
+    </div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100 metric-card">
+                <div class="card-body">
+                    <div class="metric-label">Applications</div>
+                    <div class="display-6 metric-meta">@_snapshot.Clients.Count</div>
+                    <div class="small metric-note">Shared store schema v@_snapshot.SchemaVersion</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100 metric-card">
+                <div class="card-body">
+                    <div class="metric-label">Active applications</div>
+                    <div class="display-6 metric-meta">@_snapshot.Clients.Count(client => client.IsEnabled)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100 metric-card">
+                <div class="card-body">
+                    <div class="metric-label">API keys</div>
+                    <div class="display-6 metric-meta">@_snapshot.Clients.Sum(client => client.Keys.Count)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100 metric-card">
+                <div class="card-body">
+                    <div class="metric-label">Connection target</div>
+                    <div class="metric-meta small text-break">@(_snapshot.ConnectionTarget ?? "configured")</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-xl-4">
+            <div class="card shadow-sm feature-card workflow-card mb-4">
+                <div class="card-header">Create API client</div>
+                <div class="card-body row g-3">
+                    <div class="col-12">
+                        <label class="form-label">Client name</label>
+                        <input class="form-control" @bind="_createClientName" @bind:event="oninput" placeholder="payments-gateway" data-testid="crypto-api-client-name" />
+                        <div class="form-text">Stable machine-facing identifier.</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Display name</label>
+                        <input class="form-control" @bind="_createDisplayName" @bind:event="oninput" placeholder="Payments Gateway" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Application type</label>
+                        <input class="form-control" @bind="_createApplicationType" @bind:event="oninput" placeholder="gateway" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-control" rows="3" @bind="_createNotes"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-primary" @onclick="CreateClientAsync" data-testid="crypto-api-client-submit">Create client</button>
+                    </div>
+                </div>
+            </div>
+
+            @if (_selectedClient is not null)
+            {
+                <div class="card shadow-sm feature-card workflow-card accent-card-secondary">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Manage client: @_selectedClient.DisplayName</span>
+                        <span class="badge @(_selectedClient.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(_selectedClient.IsEnabled ? "Enabled" : "Disabled")</span>
+                    </div>
+                    <div class="card-body row g-3">
+                        <div class="col-12 small text-muted">
+                            <div><strong>Name:</strong> @_selectedClient.ClientName</div>
+                            <div><strong>Type:</strong> @_selectedClient.ApplicationType</div>
+                            <div><strong>Auth mode:</strong> @_selectedClient.AuthenticationMode</div>
+                            @if (!string.IsNullOrWhiteSpace(_selectedClient.Notes))
+                            {
+                                <div class="mt-1"><strong>Notes:</strong> @_selectedClient.Notes</div>
+                            }
+                        </div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-outline-primary" @onclick="ToggleClientAsync">@(_selectedClient.IsEnabled ? "Disable client" : "Enable client")</button>
+                        </div>
+                        <div class="col-12"><hr class="my-1" /></div>
+                        <div class="col-12">
+                            <label class="form-label">New API key name</label>
+                            <input class="form-control" @bind="_newKeyName" @bind:event="oninput" placeholder="primary" data-testid="crypto-api-key-name" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Expire after days (optional)</label>
+                            <input class="form-control" type="number" min="0" @bind="_newKeyExpiresInDays" />
+                            <div class="form-text">Leave empty or zero for no expiry.</div>
+                        </div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-warning" @onclick="CreateKeyAsync" data-testid="crypto-api-key-submit">Generate API key</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="col-xl-8">
+            <div class="card shadow-sm feature-card mb-4">
+                <div class="card-header">Crypto API applications</div>
+                <div class="card-body p-0">
+                    @if (_snapshot.Clients.Count == 0)
+                    {
+                        <div class="p-3"><div class="empty-state">No Crypto API applications have been created yet.</div></div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive table-shell">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Application</th>
+                                        <th>Type</th>
+                                        <th>Keys</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (CryptoApiManagedClient client in _snapshot.Clients)
+                                    {
+                                        <tr class="@(ReferenceEquals(client, _selectedClient) ? "table-active" : null)">
+                                            <td>
+                                                <div class="fw-semibold">@client.DisplayName</div>
+                                                <div class="small text-muted">@client.ClientName</div>
+                                            </td>
+                                            <td class="small">@client.ApplicationType</td>
+                                            <td class="small">@client.Keys.Count</td>
+                                            <td>
+                                                <span class="badge @(client.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(client.IsEnabled ? "Enabled" : "Disabled")</span>
+                                            </td>
+                                            <td class="text-end">
+                                                <button class="btn btn-sm btn-outline-primary" @onclick="() => SelectClient(client)">Manage</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (_selectedClient is not null)
+            {
+                <div class="card shadow-sm feature-card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>API keys for @_selectedClient.DisplayName</span>
+                        <span class="small text-muted">Public id + lifecycle metadata only</span>
+                    </div>
+                    <div class="card-body p-0">
+                        @if (_selectedClient.Keys.Count == 0)
+                        {
+                            <div class="p-3"><div class="empty-state">No API keys for this client yet.</div></div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive table-shell">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Key</th>
+                                            <th>Status</th>
+                                            <th>Usage</th>
+                                            <th>Expiry</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (CryptoApiManagedClientKey key in _selectedClient.Keys)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    <div class="fw-semibold">@key.KeyName</div>
+                                                    <div class="small text-muted">@key.KeyIdentifier</div>
+                                                    <div class="small text-muted">Hash: @key.SecretHashAlgorithm</div>
+                                                </td>
+                                                <td>
+                                                    <div class="d-flex flex-wrap gap-1">
+                                                        <span class="badge @(key.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(key.IsEnabled ? "Enabled" : "Disabled")</span>
+                                                        @if (key.RevokedAtUtc is not null)
+                                                        {
+                                                            <span class="badge text-bg-danger">Revoked</span>
+                                                        }
+                                                    </div>
+                                                    @if (!string.IsNullOrWhiteSpace(key.SecretHint))
+                                                    {
+                                                        <div class="small text-muted mt-1">Hint: @key.SecretHint</div>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(key.RevokedReason))
+                                                    {
+                                                        <div class="small text-muted mt-1">@key.RevokedReason</div>
+                                                    }
+                                                </td>
+                                                <td class="small text-muted">@(key.LastUsedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Never")</td>
+                                                <td class="small text-muted">@(key.ExpiresAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "No expiry")</td>
+                                                <td class="text-end">
+                                                    <div class="btn-group btn-group-sm" role="group">
+                                                        <button class="btn btn-outline-primary" @onclick="() => ToggleKeyAsync(key)">@(key.IsEnabled ? "Disable" : "Enable")</button>
+                                                        <button class="btn btn-outline-danger" @onclick="() => RevokeKeyAsync(key)" disabled="@(key.RevokedAtUtc is not null)">Revoke</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private CryptoApiClientManagementSnapshot? _snapshot;
+    private CryptoApiManagedClient? _selectedClient;
+    private CryptoApiCreatedClientKey? _revealedKey;
+    private string? _statusMessage;
+    private bool _statusIsError;
+
+    private string _createClientName = string.Empty;
+    private string _createDisplayName = string.Empty;
+    private string _createApplicationType = "service";
+    private string _createNotes = string.Empty;
+
+    private string _newKeyName = string.Empty;
+    private int? _newKeyExpiresInDays;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync(Guid? selectedClientId = null)
+    {
+        _snapshot = await Access.GetSnapshotAsync();
+        if (_snapshot.Clients.Count == 0)
+        {
+            _selectedClient = null;
+            return;
+        }
+
+        _selectedClient = selectedClientId is null
+            ? _selectedClient is null
+                ? _snapshot.Clients[0]
+                : _snapshot.Clients.FirstOrDefault(client => client.ClientId == _selectedClient.ClientId) ?? _snapshot.Clients[0]
+            : _snapshot.Clients.FirstOrDefault(client => client.ClientId == selectedClientId.Value) ?? _snapshot.Clients[0];
+    }
+
+    private void SelectClient(CryptoApiManagedClient client)
+    {
+        _selectedClient = client;
+        _revealedKey = null;
+        _statusMessage = null;
+    }
+
+    private async Task CreateClientAsync()
+    {
+        try
+        {
+            CryptoApiManagedClient created = await Access.CreateClientAsync(new CreateCryptoApiClientRequest(
+                ClientName: _createClientName,
+                DisplayName: _createDisplayName,
+                ApplicationType: _createApplicationType,
+                Notes: _createNotes));
+
+            _createClientName = string.Empty;
+            _createDisplayName = string.Empty;
+            _createApplicationType = "service";
+            _createNotes = string.Empty;
+            _revealedKey = null;
+            await ReloadAsync(created.ClientId);
+            _statusMessage = "Crypto API client created.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task ToggleClientAsync()
+    {
+        if (_selectedClient is null)
+        {
+            return;
+        }
+
+        try
+        {
+            bool enable = !_selectedClient.IsEnabled;
+            await Access.SetClientEnabledAsync(_selectedClient.ClientId, enable);
+            await ReloadAsync(_selectedClient.ClientId);
+            _statusMessage = enable ? "Crypto API client enabled." : "Crypto API client disabled.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task CreateKeyAsync()
+    {
+        if (_selectedClient is null)
+        {
+            return;
+        }
+
+        try
+        {
+            int expiryDays = _newKeyExpiresInDays.GetValueOrDefault();
+            DateTimeOffset? expiresAtUtc = expiryDays > 0
+                ? DateTimeOffset.UtcNow.AddDays(expiryDays)
+                : null;
+
+            _revealedKey = await Access.CreateClientKeyAsync(new CreateCryptoApiClientKeyRequest(
+                ClientId: _selectedClient.ClientId,
+                KeyName: _newKeyName,
+                ExpiresAtUtc: expiresAtUtc));
+
+            _newKeyName = string.Empty;
+            _newKeyExpiresInDays = null;
+            await ReloadAsync(_selectedClient.ClientId);
+            _statusMessage = "Crypto API key generated. Copy the revealed secret now.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task ToggleKeyAsync(CryptoApiManagedClientKey key)
+    {
+        try
+        {
+            bool enable = !key.IsEnabled;
+            await Access.SetClientKeyEnabledAsync(key.ClientKeyId, enable);
+            await ReloadAsync(_selectedClient?.ClientId);
+            _statusMessage = enable ? "Crypto API key enabled." : "Crypto API key disabled.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+
+    private async Task RevokeKeyAsync(CryptoApiManagedClientKey key)
+    {
+        try
+        {
+            await Access.RevokeClientKeyAsync(key.ClientKeyId);
+            await ReloadAsync(_selectedClient?.ClientId);
+            _statusMessage = "Crypto API key revoked.";
+            _statusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+    }
+}
