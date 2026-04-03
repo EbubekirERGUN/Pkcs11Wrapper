@@ -283,18 +283,8 @@ Admin panel, core wrapper'ın içine gömülmek yerine **kütüphanenin üstünd
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor uyumluluk profili ve env sözleşmesi
 - [docs/luna-integration.md](docs/luna-integration.md) - wrapper, admin panel, smoke ve vendor regression için pratik Thales Luna client/module kurulum rehberi
 - [docs/luna-compatibility-audit.md](docs/luna-compatibility-audit.md) - Thales Luna genel dokümantasyonuna göre mevcut wrapper/admin/runtime kapsamı uyumluluk denetimi
-- [docs/cloudhsm-integration.md](docs/cloudhsm-integration.md) - wrapper ve admin panel kullanımı için pratik AWS CloudHSM Client SDK 5 kurulum rehberi
-- [docs/cloudhsm-compatibility-audit.md](docs/cloudhsm-compatibility-audit.md) - AWS CloudHSM standart PKCS#11 uyumluluğunun mevcut wrapper/admin/runtime kapsamıyla public-doc denetimi
-- [docs/azure-cloud-hsm-integration.md](docs/azure-cloud-hsm-integration.md) - wrapper/admin panel kullanımı ve Cloud HSM vs Managed HSM sınırı için pratik Azure Cloud HSM SDK/PKCS#11 kurulum rehberi
-- [docs/azure-cloud-hsm-compatibility-audit.md](docs/azure-cloud-hsm-compatibility-audit.md) - Azure Cloud HSM'in direct PKCS#11 uyumunun mevcut wrapper/admin/runtime kapsamıyla public-doc denetimi
-- [docs/google-cloud-hsm-integration.md](docs/google-cloud-hsm-integration.md) - wrapper ve admin panel kullanımı için Google Cloud KMS / Cloud HSM via kmsp11 kurulum rehberi
-- [docs/google-cloud-hsm-compatibility-audit.md](docs/google-cloud-hsm-compatibility-audit.md) - Google Cloud HSM'in dolaylı kmsp11 PKCS#11 yolunun mevcut wrapper/admin/runtime kapsamıyla public-doc denetimi
-- [docs/ibm-cloud-hpcs-integration.md](docs/ibm-cloud-hpcs-integration.md) - wrapper/admin panel kullanımı ve direct-vs-GREP11 sınırı için IBM Cloud Hyper Protect Crypto Services EP11 PKCS#11 kurulum rehberi
-- [docs/ibm-cloud-hpcs-compatibility-audit.md](docs/ibm-cloud-hpcs-compatibility-audit.md) - IBM Cloud HPCS direct PKCS#11 uyumunun mevcut wrapper/admin/runtime kapsamıyla public-doc denetimi
-- [docs/oci-dedicated-kms-integration.md](docs/oci-dedicated-kms-integration.md) - wrapper/admin panel kullanımı ve direct-vs-OCI-Vault sınırı için Oracle OCI Dedicated KMS kurulum rehberi
-- [docs/oci-dedicated-kms-compatibility-audit.md](docs/oci-dedicated-kms-compatibility-audit.md) - Oracle OCI Dedicated KMS PKCS#11 uyumunun mevcut wrapper/admin/runtime kapsamıyla public-doc denetimi
 - [docs/luna-vendor-extension-design.md](docs/luna-vendor-extension-design.md) - gelecekteki Luna-only `CA_*` desteği için önerilen paket/sınır/yükleme/test stratejisi
-- [docs/vendor-audit-integration.md](docs/vendor-audit-integration.md) - wrapper telemetry ile vendor-native HSM audit farkını ve Thales Luna için CLI/syslog/export/API entegrasyon seçeneklerini değerlendiren not
+- [docs/vendor-audit-integration.md](docs/vendor-audit-integration.md) - wrapper telemetry ile vendor-native HSM audit farkını ve Thales Luna için CLI/syslog/export entegrasyon seçeneklerini değerlendiren not
 - [docs/smoke.md](docs/smoke.md) - smoke sample davranışı ve troubleshooting
 - [docs/telemetry-redaction.md](docs/telemetry-redaction.md) - PKCS#11 telemetry redaction politikası
 - [docs/telemetry-integrations.md](docs/telemetry-integrations.md) - `ILogger` ve `ActivitySource` / OpenTelemetry entegrasyon rehberi

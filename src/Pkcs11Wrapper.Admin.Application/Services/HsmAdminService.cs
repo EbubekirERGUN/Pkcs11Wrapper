@@ -564,40 +564,13 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         bool supportsAesGen = mechanisms.Any(x => x.Name == "CKM_AES_KEY_GEN" && x.SupportsGenerate);
         bool supportsRsaGen = mechanisms.Any(x => x.Name == "CKM_RSA_PKCS_KEY_PAIR_GEN" && x.SupportsGenerateKeyPair);
         bool supportsCreateObject = tokenPresent;
-        bool googleBlockedAesGen = false;
-        bool googleBlockedRsaGen = false;
 
-        if (IsGoogleCloudKmsp11(device))
-        {
-            warnings.Add("Google Cloud KMS / kmsp11 remains an indirect PKCS#11 adapter path in this repo. Browse/test/destroy flows are the realistic current admin fit; generic import/copy/edit flows are not.");
-            if (supportsAesGen)
-            {
-                warnings.Add("Google Cloud KMS / kmsp11 advertises CKM_AES_KEY_GEN, but the current admin AES generation form stays disabled because kmsp11 key creation requires Google-specific CKA_KMS_* template attributes.");
-                supportsAesGen = false;
-                googleBlockedAesGen = true;
-            }
-
-            if (supportsRsaGen)
-            {
-                warnings.Add("Google Cloud KMS / kmsp11 advertises CKM_RSA_PKCS_KEY_PAIR_GEN, but the current admin RSA generation form stays disabled because kmsp11 key creation requires Google-specific CKA_KMS_* template attributes.");
-                supportsRsaGen = false;
-                googleBlockedRsaGen = true;
-            }
-
-            if (supportsCreateObject)
-            {
-                warnings.Add("Google Cloud KMS / kmsp11 does not support C_CreateObject, so raw AES import/create stays disabled on this admin surface.");
-            }
-
-            supportsCreateObject = false;
-        }
-
-        if (!supportsAesGen && !googleBlockedAesGen)
+        if (!supportsAesGen)
         {
             warnings.Add("AES generate is gated because CKM_AES_KEY_GEN with generate support is not exposed by the selected slot.");
         }
 
-        if (!supportsRsaGen && !googleBlockedRsaGen)
+        if (!supportsRsaGen)
         {
             warnings.Add("RSA key-pair generate is gated because CKM_RSA_PKCS_KEY_PAIR_GEN with generate-key-pair support is not exposed by the selected slot.");
         }
@@ -613,7 +586,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] label = Encoding.UTF8.GetBytes(request.Label.Trim());
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        EnsureVendorKeyManagementSupported(device, VendorKeyManagementOperation.GenerateAesKey);
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "generate AES keys");
@@ -635,7 +607,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] value = ParseRequiredHex(request.ValueHex, nameof(request.ValueHex));
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        EnsureVendorKeyManagementSupported(device, VendorKeyManagementOperation.ImportAesKey);
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "import AES keys");
@@ -657,7 +628,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] exponent = ParseRequiredHex(request.PublicExponentHex, nameof(request.PublicExponentHex));
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        EnsureVendorKeyManagementSupported(device, VendorKeyManagementOperation.GenerateRsaKeyPair);
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "generate RSA key pairs");
@@ -783,7 +753,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         ValidateUpdateObjectAttributesRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        EnsureVendorKeyManagementSupported(device, VendorKeyManagementOperation.UpdateObjectAttributes);
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "update object attributes");
@@ -803,7 +772,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         ValidateCopyObjectRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        EnsureVendorKeyManagementSupported(device, VendorKeyManagementOperation.CopyObject);
         using Pkcs11Module module = CreateInitializedModule(device);
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "copy objects");
@@ -1682,28 +1650,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
     private static bool ShouldRetryReadWriteAfterOpenSessionFailure(bool readWriteRequested, Pkcs11Exception exception)
         => !readWriteRequested && exception.Result.Value == CkrFunctionFailed;
-
-    private static bool IsGoogleCloudKmsp11(HsmDeviceProfile? device)
-        => string.Equals(device?.Vendor?.VendorId, "google", StringComparison.Ordinal)
-            && string.Equals(device?.Vendor?.ProfileId, "cloud-kms-kmsp11", StringComparison.Ordinal);
-
-    private static void EnsureVendorKeyManagementSupported(HsmDeviceProfile device, VendorKeyManagementOperation operation)
-    {
-        if (!IsGoogleCloudKmsp11(device))
-        {
-            return;
-        }
-
-        throw operation switch
-        {
-            VendorKeyManagementOperation.GenerateAesKey => new InvalidOperationException("Google Cloud KMS / kmsp11 key generation is not yet wired through the generic admin AES form because kmsp11 requires Google-specific CKA_KMS_* template attributes."),
-            VendorKeyManagementOperation.ImportAesKey => new InvalidOperationException("Google Cloud KMS / kmsp11 does not support C_CreateObject, so raw AES import/create is not available through the current admin panel."),
-            VendorKeyManagementOperation.GenerateRsaKeyPair => new InvalidOperationException("Google Cloud KMS / kmsp11 key-pair generation is not yet wired through the generic admin RSA form because kmsp11 requires Google-specific CKA_KMS_* template attributes."),
-            VendorKeyManagementOperation.UpdateObjectAttributes => new InvalidOperationException("Google Cloud KMS / kmsp11 does not support C_SetAttributeValue, so generic attribute editing is not available through the current admin panel."),
-            VendorKeyManagementOperation.CopyObject => new InvalidOperationException("Google Cloud KMS / kmsp11 does not support C_CopyObject, so generic copy flows are not available through the current admin panel."),
-            _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "Unsupported vendor-specific key-management operation.")
-        };
-    }
 
     private static string LoginLabSessionIfRequested(Pkcs11Session session, Pkcs11LabRequest request, List<string> notes)
     {
@@ -2822,15 +2768,6 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     private AdminSessionSnapshot GetRequiredSessionSnapshot(Guid sessionId)
         => sessionRegistry.GetSnapshots().FirstOrDefault(x => x.SessionId == sessionId)
             ?? throw new InvalidOperationException($"Tracked session '{sessionId}' was not found after the operation.");
-
-    private enum VendorKeyManagementOperation
-    {
-        GenerateAesKey,
-        ImportAesKey,
-        GenerateRsaKeyPair,
-        UpdateObjectAttributes,
-        CopyObject
-    }
 
     private enum AttributeValueKind
     {

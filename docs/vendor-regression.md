@@ -2,11 +2,6 @@
 
 See also: `docs/luna-integration.md` for the practical Luna client/module setup path across wrapper, admin panel, smoke, and vendor regression.
 See also: `docs/luna-compatibility-audit.md` for the current Thales Luna-specific scope boundary and extension-gap audit.
-See also: `docs/cloudhsm-integration.md` and `docs/cloudhsm-compatibility-audit.md` for the current AWS CloudHSM support boundary.
-See also: `docs/azure-cloud-hsm-integration.md` and `docs/azure-cloud-hsm-compatibility-audit.md` for the current Azure Cloud HSM support boundary.
-See also: `docs/google-cloud-hsm-integration.md` and `docs/google-cloud-hsm-compatibility-audit.md` for the current Google Cloud HSM / kmsp11 support boundary.
-See also: `docs/ibm-cloud-hpcs-integration.md` and `docs/ibm-cloud-hpcs-compatibility-audit.md` for the current IBM Cloud Hyper Protect Crypto Services support boundary.
-See also: `docs/oci-dedicated-kms-integration.md` and `docs/oci-dedicated-kms-compatibility-audit.md` for the current Oracle OCI Dedicated KMS support boundary.
 See also: `docs/luna-vendor-extension-design.md` for the proposed package/boundary/loading strategy for future Luna-only `CA_*` support.
 
 ## Purpose
@@ -144,113 +139,6 @@ Based on the completed audit, these should remain capability-gated, unsupported,
 - all Luna `CA_*` extension APIs, including extension replacements such as `CA_WaitForSlotEvent` and `CA_SessionCancel`
 
 If one of the capability-gated checks is absent because the Luna runtime or token policy does not expose it, that should be interpreted as a skipped/capability-gated result, not as proof that the wrapper is broken.
-
-## Why there is not yet a checked-in AWS CloudHSM profile
-
-See also: `docs/cloudhsm-integration.md` and `docs/cloudhsm-compatibility-audit.md`.
-
-AWS CloudHSM is now a documented target for the repo, but there is intentionally **no** checked-in `cloudhsm-*` vendor-regression profile yet.
-
-Reason:
-
-- AWS Client SDK 5 documents that read-only `C_OpenSession` is not supported
-- AWS’s supported-API page does not currently list several operations assumed elsewhere in the broader repo/runtime surface, including `C_CopyObject`, `C_SetAttributeValue`, `C_InitToken`, `C_InitPIN`, `C_SetPIN`, `C_GetOperationState`, and PKCS#11 v3-only paths
-- the existing smoke/vendor-regression flow would need CloudHSM-specific capability gating before a profile could be described as reliable rather than misleading
-
-So the current CloudHSM support slice is:
-
-- strong documentation
-- admin-panel readiness improvements
-- explicit wrapper/admin setup guidance
-
-rather than a premature vendor-lane profile that would overstate validation depth.
-
-## Why there is not yet a checked-in Azure Cloud HSM profile
-
-See also: `docs/azure-cloud-hsm-integration.md` and `docs/azure-cloud-hsm-compatibility-audit.md`.
-
-Azure Cloud HSM is now a documented target for the repo, but there is intentionally **no** checked-in `azure-*` vendor-regression profile yet.
-
-Reason:
-
-- the direct PKCS#11 path depends on a prepared Azure host runtime that includes `azcloudhsm_client`, `azcloudhsm_resource.cfg`, `azcloudhsm_application.cfg`, `PO.crt`, and private-network reachability to the cluster
-- Azure's reviewed public docs publish a broad standard PKCS#11 function table, but honest end-to-end validation still requires a live Azure Cloud HSM environment that was not available during issue #70
-- Azure documents shared host-side client-session behavior, so a naive checked-in profile could mislead operators into expecting isolated local/CI semantics that are not guaranteed on a shared host
-- Azure's Cloud-HSM-vs-Managed-HSM product boundary matters, and a checked-in vendor profile should not blur that by implying Azure Key Vault Managed HSM or broader Azure service-encryption scenarios are already covered by the current PKCS#11 lane
-- the current generic vendor lane does not provision Azure networking, onboarding, SSH/bootstrap, or user synchronization state, so a checked-in profile would overstate operational maturity
-
-So the current Azure support slice is:
-
-- strong documentation
-- admin-panel vendor-profile guidance
-- explicit Azure Cloud HSM vs Azure Managed HSM boundary clarification
-
-rather than a premature vendor-lane profile that would overstate validation depth.
-
-## Why there is not yet a checked-in Google Cloud HSM profile
-
-See also: `docs/google-cloud-hsm-integration.md` and `docs/google-cloud-hsm-compatibility-audit.md`.
-
-Google Cloud HSM is now a documented target for the repo, but there is intentionally **no** checked-in `google-*` vendor-regression profile yet.
-
-Reason:
-
-- the official Google PKCS#11 path is **indirect** through `kmsp11` and Cloud KMS rather than a direct local HSM client/runtime contract
-- kmsp11 requires a real config file plus real Google authentication/IAM, so a checked-in profile would risk implying repeatable local/CI coverage that the repo cannot honestly provide without live cloud access
-- Google's documented function table intentionally excludes operations assumed elsewhere in the broader vendor lane, including `C_CreateObject`, `C_CopyObject`, `C_SetAttributeValue`, `C_WrapKey`, `C_UnwrapKey`, `C_DeriveKey`, `C_InitToken`, `C_InitPIN`, `C_SetPIN`, `C_Digest*`, and operation-state paths
-- kmsp11 key creation depends on Google-specific `CKA_KMS_*` template attributes, which the current generic vendor lane does not model cleanly
-- the current wrapper/admin path depends on host-level `KMS_PKCS11_CONFIG` rather than a repo-managed per-profile initialize-argument channel
-
-So the current Google support slice is:
-
-- strong documentation
-- admin-panel readiness improvements and guardrails
-- explicit wrapper/admin setup guidance
-
-rather than a premature vendor-lane profile that would overstate validation depth.
-
-## Why there is not yet a checked-in IBM Cloud HPCS profile
-
-See also: `docs/ibm-cloud-hpcs-integration.md` and `docs/ibm-cloud-hpcs-compatibility-audit.md`.
-
-IBM Cloud Hyper Protect Crypto Services is now a documented target for the repo, but there is intentionally **no** checked-in `ibm-*` vendor-regression profile yet.
-
-Reason:
-
-- the direct PKCS#11 path depends on a real HPCS instance, EP11 endpoint reachability, `grep11client.yaml`, keystore UUIDs, and IBM IAM service-ID/API-key setup
-- IBM's reviewed public docs publish a stronger PKCS#11 function table than several other cloud vendors, but honest end-to-end validation still requires a live cloud environment that was not available during issue #69
-- optional authenticated-keystore passwords and optional EP11 mutual TLS add more runtime/bootstrap state that the current generic vendor lane cannot verify offline
-- IBM also publishes a separate GREP11 gRPC path, and a checked-in vendor profile should not blur that boundary by implying all IBM HPCS integration styles are already covered by the current PKCS#11 lane
-- IBM's reviewed direct-client packaging is Linux-only for the current repo boundary, so a checked-in cross-platform vendor profile would overstate maturity
-
-So the current IBM support slice is:
-
-- strong documentation
-- admin-panel vendor-profile guidance
-- explicit direct-PKCS#11-vs-GREP11 boundary clarification
-
-rather than a premature vendor-lane profile that would overstate validation depth.
-
-## Why there is not yet a checked-in OCI Dedicated KMS profile
-
-See also: `docs/oci-dedicated-kms-integration.md` and `docs/oci-dedicated-kms-compatibility-audit.md`.
-
-Oracle OCI Dedicated KMS is now a documented target for the repo, but there is intentionally **no** checked-in `oci-*` vendor-regression profile yet.
-
-Reason:
-
-- the direct PKCS#11 path depends on a real OCI HSM cluster, client certificates/keys, and a running `client_daemon`
-- Oracle's reviewed public docs confirm the Linux PKCS#11 packaging path, login model, and some mechanism families, but they do **not** publish the kind of exhaustive supported-API matrix that would justify broad repo claims from docs alone
-- Oracle's reviewed Windows docs describe CNG/KSP rather than a Windows PKCS#11 path for the current repo boundary
-- no live OCI environment was available during issue #68 to prove the existing vendor lane contract end to end
-
-So the current OCI support slice is:
-
-- strong documentation
-- admin-panel vendor-profile guidance
-- explicit direct-vs-indirect Oracle product-boundary clarification
-
-rather than a premature vendor-lane profile that would overstate validation depth.
 
 ## Recommended local usage
 
