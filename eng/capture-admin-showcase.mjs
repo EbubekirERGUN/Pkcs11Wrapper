@@ -95,6 +95,8 @@ async function captureSlots(page, config, screenshotPath) {
   await waitForVisible(page, '[data-testid="slots-device"]');
   await page.selectOption('[data-testid="slots-device"]', { label: config.SHOWCASE_DEVICE_NAME });
   await page.click('[data-testid="slots-load"]');
+  await waitForText(page.locator('[data-testid="slots-status"]'), 'Loaded', 15000);
+  await waitForVisible(page, '[data-testid="slots-table"]');
   await settle(page);
   await settle(page);
   await saveScreenshot(page, screenshotPath);
