@@ -6,8 +6,15 @@
 
 - `build-test-aot` (default SoftHSM Linux lane)
 - `admin-runtime-e2e` (Linux Playwright-backed admin runtime lane)
-- `build-test-windows` (Windows SoftHSM runtime + NativeAOT lane)
+- `build-test-windows` (Windows SoftHSM regression lane with hosted-smoke limitation notes)
 - `vendor-regression` (optional non-SoftHSM lane, manual dispatch only)
+
+`.github/workflows/release.yml` defines:
+
+- `preflight` (version/tag/release-notes alignment)
+- `linux-release-validation` (`./eng/verify-release.sh` + release-bundle assembly)
+- `windows-release-regression` (release-readiness regression on `windows-latest`)
+- `publish-release` (optional NuGet push + GitHub release asset publication)
 
 `.github/workflows/benchmarks.yml` defines:
 
@@ -18,6 +25,11 @@ Triggers:
 - push to `main` and `master`
 - all pull requests
 - `workflow_dispatch` with optional vendor-lane inputs
+
+Release workflow triggers:
+
+- push tags matching `v*`
+- `workflow_dispatch` with a required `version` input and optional GitHub release / NuGet publication flags
 
 Benchmark workflow triggers:
 
@@ -33,6 +45,15 @@ Workflow-level behavior:
 - `concurrency` cancels superseded runs on the same ref
 - each CI job has a 30-minute timeout
 - `actions/setup-dotnet` caches NuGet packages based on `global.json`, `Directory.Build.props`, and project files
+
+Release workflow behavior:
+
+- `preflight` resolves the repository's **effective** version via MSBuild instead of assuming `VersionPrefix` alone
+- tagged releases fail fast if `v<version>` and `docs/release-notes/v<version>.md` are not aligned
+- Linux release validation reuses `./eng/verify-release.sh` instead of introducing a second packaging path
+- release bundles include package artifacts, validation archives, Linux NativeAOT smoke output, `SHA256SUMS.txt`, and `release-manifest.json`
+- NuGet publication is optional and only runs when the workflow is allowed to publish **and** `NUGET_API_KEY` is configured
+- GitHub releases are created or updated from the checked-in release-notes markdown so release text stays reviewable in-repo
 
 Ordered Linux steps:
 
@@ -69,9 +90,8 @@ Ordered Windows steps:
 - `dotnet restore Pkcs11Wrapper.sln`
 - `dotnet build Pkcs11Wrapper.sln -c Release --no-restore`
 - `./eng/run-regression-tests.ps1`
-- `./eng/run-smoke.ps1 -Strict`
-- `./eng/run-smoke-aot.ps1 -Strict`
-- upload fixture, regression, runtime-smoke, and NativeAOT-smoke artifacts
+- record the hosted-Windows smoke limitation in the job summary unless the runtime-smoke toggle is explicitly enabled
+- upload fixture, regression, and any optional smoke artifacts
 
 Job-level env:
 

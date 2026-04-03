@@ -1,0 +1,358 @@
+name: release
+run-name: >-
+  release • ${{ github.event_name }} • ${{ github.ref_name }} • run #${{ github.run_number }}
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Effective repository version to validate or release
+        required: true
+        type: string
+      create_github_release:
+        description: Create or update the GitHub release for v<version>
+        required: false
+        default: false
+        type: boolean
+      publish_to_nuget:
+        description: Publish validated packages to NuGet when NUGET_API_KEY is configured
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.preflight.outputs.version }}
+      tag: ${{ steps.preflight.outputs.tag }}
+      release_notes_path: ${{ steps.preflight.outputs.release_notes_path }}
+      release_bundle_dir: ${{ steps.preflight.outputs.release_bundle_dir }}
+      release_title: ${{ steps.preflight.outputs.release_title }}
+      is_prerelease: ${{ steps.preflight.outputs.is_prerelease }}
+      release_requested: ${{ steps.preflight.outputs.release_requested }}
+      publish_to_nuget: ${{ steps.preflight.outputs.publish_to_nuget }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            Directory.Build.props
+            **/*.csproj
+
+      - name: Make release scripts executable
+        run: chmod +x eng/release-preflight.sh eng/assemble-release-artifacts.sh eng/verify-release.sh
+
+      - name: Resolve release inputs
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version='${{ inputs.version }}'
+          tag=''
+          release_requested='${{ inputs.create_github_release }}'
+          publish_to_nuget='${{ inputs.publish_to_nuget }}'
+
+          if [[ '${{ github.event_name }}' == 'push' ]]; then
+            version=''
+            tag='${{ github.ref_name }}'
+            release_requested='true'
+            publish_to_nuget='true'
+          else
+            tag="v$version"
+          fi
+
+          if [[ -n "$version" ]]; then
+            ./eng/release-preflight.sh --version "$version" --tag "$tag"
+          else
+            ./eng/release-preflight.sh --tag "$tag"
+          fi
+
+          {
+            printf 'release_requested=%s\n' "$release_requested"
+            printf 'publish_to_nuget=%s\n' "$publish_to_nuget"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Summarize preflight
+        shell: bash
+        run: |
+          {
+            echo '# Release preflight'
+            echo
+            printf -- '- Version: `%s`\n' '${{ steps.preflight.outputs.version }}'
+            printf -- '- Tag: `%s`\n' '${{ steps.preflight.outputs.tag }}'
+            printf -- '- Release notes: `%s`\n' '${{ steps.preflight.outputs.release_notes_path }}'
+            printf -- '- GitHub release requested: `%s`\n' '${{ steps.preflight.outputs.release_requested }}'
+            printf -- '- NuGet publish requested: `%s`\n' '${{ steps.preflight.outputs.publish_to_nuget }}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  linux-release-validation:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            Directory.Build.props
+            **/*.csproj
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential softhsm2 opensc file
+
+      - name: Make engineering scripts executable
+        run: chmod +x eng/build-pkcs11-v3-shim.sh eng/build-luna-extension-shim.sh eng/setup-softhsm-fixture.sh eng/run-regression-tests.sh eng/run-smoke-aot.sh eng/release-preflight.sh eng/verify-release.sh eng/assemble-release-artifacts.sh
+
+      - name: Verify release candidate
+        run: ./eng/verify-release.sh '${{ needs.preflight.outputs.version }}'
+
+      - name: Assemble release bundle
+        run: ./eng/assemble-release-artifacts.sh '${{ needs.preflight.outputs.version }}' '${{ needs.preflight.outputs.release_notes_path }}'
+
+      - name: Upload Linux release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkcs11wrapper-release-${{ needs.preflight.outputs.tag }}-linux
+          path: artifacts/releases/${{ needs.preflight.outputs.tag }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize Linux validation
+        shell: bash
+        run: |
+          {
+            echo '# Linux release validation'
+            echo
+            printf -- '- Version: `%s`\n' '${{ needs.preflight.outputs.version }}'
+            printf -- '- Bundle: `%s`\n' '${{ needs.preflight.outputs.release_bundle_dir }}'
+            printf -- '- Validation path: `./eng/verify-release.sh ${{ needs.preflight.outputs.version }}`\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  windows-release-regression:
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      CI: true
+      CI_ARTIFACT_ROOT: artifacts/release/windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            Directory.Build.props
+            **/*.csproj
+
+      - name: Install native dependencies
+        shell: pwsh
+        run: choco install opensc -y --no-progress
+
+      - name: Prepare artifact directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path $env:CI_ARTIFACT_ROOT | Out-Null
+
+      - name: Setup Windows SoftHSM fixture
+        shell: pwsh
+        run: .\eng\setup-softhsm-fixture.ps1 -DownloadPortable -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" 2>&1 | Tee-Object -FilePath (Join-Path $env:CI_ARTIFACT_ROOT 'fixture-setup.log')
+
+      - name: Restore
+        run: dotnet restore Pkcs11Wrapper.sln
+
+      - name: Build
+        run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore
+
+      - name: Windows regression tests
+        shell: pwsh
+        run: .\eng\run-regression-tests.ps1 -UseExistingEnv -EnvFilePath "$env:RUNNER_TEMP\pkcs11-fixture.ps1" -NoRestore -NoBuild 2>&1 | Tee-Object -FilePath (Join-Path $env:CI_ARTIFACT_ROOT 'regression.log')
+
+      - name: Bundle Windows release-readiness logs
+        shell: pwsh
+        run: |
+          $bundleDir = Join-Path 'artifacts/releases/${{ needs.preflight.outputs.tag }}' 'windows'
+          New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
+          $zipPath = Join-Path $bundleDir 'Pkcs11Wrapper-release-windows-regression-${{ needs.preflight.outputs.tag }}.zip'
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -Path (Join-Path $env:CI_ARTIFACT_ROOT '*') -DestinationPath $zipPath
+
+      - name: Upload Windows release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkcs11wrapper-release-${{ needs.preflight.outputs.tag }}-windows
+          path: artifacts/releases/${{ needs.preflight.outputs.tag }}/windows
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize Windows release readiness
+        shell: pwsh
+        run: |
+          @"
+          # Windows release readiness
+
+          - Version: `${{ needs.preflight.outputs.version }}`
+          - Validation: fixture provisioning + restore/build + regression suite on `windows-latest`
+          - Note: hosted Windows smoke and win-x64 NativeAOT smoke remain manual because the SoftHSM-for-Windows backend is not yet stable enough for GitHub-hosted runtime smoke.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+  publish-release:
+    needs:
+      - preflight
+      - linux-release-validation
+      - windows-release-regression
+    if: ${{ needs.preflight.outputs.release_requested == 'true' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: pkcs11wrapper-release-${{ needs.preflight.outputs.tag }}-linux
+          path: artifacts/release-linux
+
+      - name: Download Windows release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: pkcs11wrapper-release-${{ needs.preflight.outputs.tag }}-windows
+          path: artifacts/release-windows
+
+      - name: Setup .NET SDK
+        if: ${{ needs.preflight.outputs.publish_to_nuget == 'true' }}
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            Directory.Build.props
+            **/*.csproj
+
+      - name: Publish packages to NuGet (optional)
+        if: ${{ needs.preflight.outputs.publish_to_nuget == 'true' }}
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          if [[ -z "${NUGET_API_KEY:-}" ]]; then
+            {
+              echo '# NuGet publication skipped'
+              echo
+              echo 'The release workflow was allowed to publish, but `NUGET_API_KEY` is not configured for this repository.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          packages=(artifacts/release-linux/assets/*.nupkg)
+          symbol_packages=(artifacts/release-linux/assets/*.snupkg)
+
+          if (( ${#packages[@]} == 0 )); then
+            echo 'No .nupkg files were found in the release bundle.' >&2
+            exit 1
+          fi
+
+          if (( ${#symbol_packages[@]} == 0 )); then
+            echo 'No .snupkg files were found in the release bundle.' >&2
+            exit 1
+          fi
+
+          dotnet nuget push "${packages[@]}" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+          dotnet nuget push "${symbol_packages[@]}" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+
+          {
+            echo '# NuGet publication'
+            echo
+            printf -- '- Published packages for `%s`\n' '${{ needs.preflight.outputs.version }}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          tag='${{ needs.preflight.outputs.tag }}'
+          title='${{ needs.preflight.outputs.release_title }}'
+          notes='artifacts/release-linux/release-notes.md'
+          prerelease='${{ needs.preflight.outputs.is_prerelease }}'
+          assets=(artifacts/release-linux/assets/* artifacts/release-linux/release-manifest.json artifacts/release-windows/*)
+
+          if (( ${#assets[@]} == 0 )); then
+            echo 'No release assets were found to publish.' >&2
+            exit 1
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$title" --notes-file "$notes"
+          else
+            create_args=("$tag" --title "$title" --notes-file "$notes")
+
+            if [[ '${{ github.event_name }}' != 'push' ]]; then
+              create_args+=(--target '${{ github.sha }}')
+            fi
+
+            if [[ "$prerelease" == 'true' ]]; then
+              create_args+=(--prerelease)
+            fi
+
+            gh release create "${create_args[@]}"
+          fi
+
+          gh release upload "$tag" "${assets[@]}" --clobber
+
+          {
+            echo '# GitHub release'
+            echo
+            printf -- '- Release: `%s`\n' "$tag"
+            printf -- '- Title: `%s`\n' "$title"
+            printf -- '- Assets uploaded: `%s`\n' "${#assets[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
