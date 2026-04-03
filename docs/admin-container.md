@@ -71,6 +71,8 @@ The admin image now exposes two unauthenticated health endpoints:
 
 The image also bakes in a Docker `HEALTHCHECK` that probes `http://127.0.0.1:8080/health/ready` from inside the container, so a plain `docker ps` / `docker inspect` workflow can see whether the container is healthy without extra operator wiring.
 
+By design, the container does **not** expose the admin host's `/openapi/v1.json` or `/swagger` routes. Those discovery/testing routes are limited to the ASP.NET Core `Development` environment so operators do not accidentally publish an extra admin-surface index in normal deployments.
+
 Operationally, this is meant to catch practical container problems such as:
 
 - mounted admin storage that is missing or no longer writable

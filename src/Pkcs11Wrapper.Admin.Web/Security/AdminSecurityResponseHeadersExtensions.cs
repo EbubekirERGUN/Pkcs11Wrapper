@@ -34,5 +34,7 @@ public static class AdminSecurityResponseHeadersExtensions
         => path.StartsWithSegments("/login", StringComparison.OrdinalIgnoreCase)
             || path.StartsWithSegments("/account", StringComparison.OrdinalIgnoreCase)
             || path.StartsWithSegments("/configuration/export", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWithSegments("/telemetry/export", StringComparison.OrdinalIgnoreCase);
+            || path.StartsWithSegments("/telemetry/export", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWithSegments("/openapi", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase);
 }

@@ -146,6 +146,8 @@ dotnet run
 
 Kaynak ağacı üzerinden yerel geliştirmede ilk çalıştırma, `App_Data/bootstrap-admin.txt` altında bootstrap admin credential dosyasını üretir.
 
+Admin host `Development` ortamında çalışırken yalnızca gerçek admin HTTP endpoint'lerini belgeleyen OpenAPI dokümanı `/openapi/v1.json` altında, Swagger UI ise `/swagger` altında açılır. Bu route'lar üretim dağıtımlarında varsayılan olarak kapalı tutulur; böylece ekstra bir keşif/test yüzeyi açılmaz.
+
 CI/otomasyon/container senaryolarında runtime storage root'u, bootstrap credential'ı, ilk PKCS#11 module path'i ve runtime davranışını dışarıdan verebilirsin:
 
 ```bash
