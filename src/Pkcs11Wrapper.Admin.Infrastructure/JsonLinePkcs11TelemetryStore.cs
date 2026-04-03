@@ -7,6 +7,8 @@ namespace Pkcs11Wrapper.Admin.Infrastructure;
 
 public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOptions, AdminPkcs11TelemetryOptions? telemetryOptions = null) : IPkcs11TelemetryStore
 {
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
     private readonly SemaphoreSlim _mutex = new(1, 1);
     private readonly AdminPkcs11TelemetryOptions _telemetryOptions = telemetryOptions ?? new();
 
@@ -24,7 +26,7 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
             await RotateIfNeededForAppendAsync(lineBytes, cancellationToken);
 
             await using FileStream stream = new(path, FileMode.Append, FileAccess.Write, FileShare.Read, 64 * 1024, FileOptions.Asynchronous);
-            await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+            await using StreamWriter writer = new(stream, Utf8NoBom, leaveOpen: true);
             await writer.WriteAsync(line.AsMemory(), cancellationToken);
             await writer.FlushAsync(cancellationToken);
 

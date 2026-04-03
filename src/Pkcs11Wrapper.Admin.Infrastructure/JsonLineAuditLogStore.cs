@@ -8,6 +8,7 @@ namespace Pkcs11Wrapper.Admin.Infrastructure;
 
 public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditLogStore
 {
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
     private readonly SemaphoreSlim _mutex = new(1, 1);
     private AuditTailState? _tailState;
 
@@ -24,7 +25,7 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
             string line = JsonSerializer.Serialize(normalized, AdminJsonContext.Default.AdminAuditLogEntry) + Environment.NewLine;
 
             await using FileStream stream = new(path, FileMode.Append, FileAccess.Write, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough);
-            await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+            await using StreamWriter writer = new(stream, Utf8NoBom, leaveOpen: true);
             await writer.WriteAsync(line.AsMemory(), cancellationToken);
             await writer.FlushAsync(cancellationToken);
             await stream.FlushAsync(cancellationToken);
@@ -173,7 +174,7 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
 
         long position = stream.Length;
         byte[] buffer = new byte[4096];
-        StringBuilder reversed = new();
+        List<byte> reversedLineBytes = [];
         bool skippedTrailingNewline = false;
 
         while (position > 0 && lines.Count < take)
@@ -185,16 +186,16 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
 
             for (int index = read - 1; index >= 0; index--)
             {
-                char current = (char)buffer[index];
-                if (current == '\n')
+                byte current = buffer[index];
+                if (current == (byte)'\n')
                 {
-                    if (!skippedTrailingNewline && reversed.Length == 0)
+                    if (!skippedTrailingNewline && reversedLineBytes.Count == 0)
                     {
                         skippedTrailingNewline = true;
                         continue;
                     }
 
-                    AddCompletedLine(lines, reversed);
+                    AddCompletedLine(lines, reversedLineBytes);
                     if (lines.Count >= take)
                     {
                         break;
@@ -204,39 +205,44 @@ public sealed class JsonLineAuditLogStore(AdminStorageOptions options) : IAuditL
                 }
                 else
                 {
-                    reversed.Append(current);
+                    reversedLineBytes.Add(current);
                 }
             }
         }
 
-        if (lines.Count < take && reversed.Length > 0)
+        if (lines.Count < take && reversedLineBytes.Count > 0)
         {
-            AddCompletedLine(lines, reversed);
+            AddCompletedLine(lines, reversedLineBytes);
         }
 
         return lines;
     }
 
-    private static void AddCompletedLine(List<string> lines, StringBuilder reversed)
+    private static void AddCompletedLine(List<string> lines, List<byte> reversedLineBytes)
     {
-        if (reversed.Length == 0)
+        if (reversedLineBytes.Count == 0)
         {
             return;
         }
 
-        char[] chars = new char[reversed.Length];
-        for (int i = 0; i < reversed.Length; i++)
+        byte[] bytes = new byte[reversedLineBytes.Count];
+        for (int i = 0; i < reversedLineBytes.Count; i++)
         {
-            chars[i] = reversed[reversed.Length - 1 - i];
+            bytes[i] = reversedLineBytes[reversedLineBytes.Count - 1 - i];
         }
 
-        string line = new string(chars).TrimEnd('\r');
-        reversed.Clear();
+        string line = StripLeadingByteOrderMark(Encoding.UTF8.GetString(bytes)).TrimEnd('\r');
+        reversedLineBytes.Clear();
         if (!string.IsNullOrWhiteSpace(line))
         {
             lines.Add(line);
         }
     }
+
+    private static string StripLeadingByteOrderMark(string line)
+        => line.Length > 0 && line[0] == '\uFEFF'
+            ? line[1..]
+            : line;
 
     private static string ComputeHash(AdminAuditLogEntry entry)
     {
