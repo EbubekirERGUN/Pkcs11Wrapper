@@ -44,7 +44,22 @@ public sealed record CreateCryptoApiKeyAliasRequest(
     string? ObjectIdHex,
     string? Notes);
 
+public sealed record UpdateCryptoApiKeyAliasRequest(
+    Guid AliasId,
+    string AliasName,
+    string? DeviceRoute,
+    ulong? SlotId,
+    string? ObjectLabel,
+    string? ObjectIdHex,
+    string? Notes);
+
 public sealed record CreateCryptoApiPolicyRequest(
+    string PolicyName,
+    string? Description,
+    IReadOnlyCollection<string> AllowedOperations);
+
+public sealed record UpdateCryptoApiPolicyRequest(
+    Guid PolicyId,
     string PolicyName,
     string? Description,
     IReadOnlyCollection<string> AllowedOperations);

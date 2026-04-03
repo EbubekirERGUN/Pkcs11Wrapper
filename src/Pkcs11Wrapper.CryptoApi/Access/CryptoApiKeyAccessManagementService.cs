@@ -41,37 +41,17 @@ public sealed class CryptoApiKeyAccessManagementService(
 
         CryptoApiManagedKeyAlias[] aliases = snapshot.KeyAliases
             .OrderBy(alias => alias.AliasName, StringComparer.OrdinalIgnoreCase)
-            .Select(alias => new CryptoApiManagedKeyAlias(
-                AliasId: alias.AliasId,
-                AliasName: alias.AliasName,
-                DeviceRoute: alias.DeviceRoute,
-                SlotId: alias.SlotId,
-                ObjectLabel: alias.ObjectLabel,
-                ObjectIdHex: alias.ObjectIdHex,
-                Notes: alias.Notes,
-                IsEnabled: alias.IsEnabled,
-                CreatedAtUtc: alias.CreatedAtUtc,
-                UpdatedAtUtc: alias.UpdatedAtUtc,
-                BoundPolicyIds: boundPoliciesByAlias.TryGetValue(alias.AliasId, out Guid[]? policies) ? policies : []))
+            .Select(alias => MapAlias(
+                alias,
+                boundPoliciesByAlias.TryGetValue(alias.AliasId, out Guid[]? policies) ? policies : []))
             .ToArray();
 
         CryptoApiManagedPolicy[] policies = snapshot.Policies
             .OrderBy(policy => policy.PolicyName, StringComparer.OrdinalIgnoreCase)
-            .Select(policy =>
-            {
-                CryptoApiOperationPolicyDocument document = CryptoApiOperationPolicyDocumentCodec.Deserialize(policy.DocumentJson);
-                return new CryptoApiManagedPolicy(
-                    PolicyId: policy.PolicyId,
-                    PolicyName: policy.PolicyName,
-                    Description: policy.Description,
-                    Revision: policy.Revision,
-                    AllowedOperations: document.AllowedOperations,
-                    IsEnabled: policy.IsEnabled,
-                    CreatedAtUtc: policy.CreatedAtUtc,
-                    UpdatedAtUtc: policy.UpdatedAtUtc,
-                    BoundClientIds: boundClientsByPolicy.TryGetValue(policy.PolicyId, out Guid[]? clientIds) ? clientIds : [],
-                    BoundAliasIds: boundAliasesByPolicy.TryGetValue(policy.PolicyId, out Guid[]? aliasIds) ? aliasIds : []);
-            })
+            .Select(policy => MapPolicy(
+                policy,
+                boundClientsByPolicy.TryGetValue(policy.PolicyId, out Guid[]? clientIds) ? clientIds : [],
+                boundAliasesByPolicy.TryGetValue(policy.PolicyId, out Guid[]? aliasIds) ? aliasIds : []))
             .ToArray();
 
         return new CryptoApiKeyAccessSnapshot(
@@ -87,6 +67,7 @@ public sealed class CryptoApiKeyAccessManagementService(
     {
         string aliasName = NormalizeMachineName(request.AliasName, nameof(request.AliasName));
         string? deviceRoute = NormalizeOptionalMachineName(request.DeviceRoute, nameof(request.DeviceRoute));
+        ulong slotId = EnsureSlotId(request.SlotId, nameof(request.SlotId));
         string? objectLabel = NormalizeOptionalText(request.ObjectLabel, 160, nameof(request.ObjectLabel));
         string? objectIdHex = NormalizeObjectIdHex(request.ObjectIdHex);
         EnsureRouteTarget(objectLabel, objectIdHex);
@@ -102,7 +83,7 @@ public sealed class CryptoApiKeyAccessManagementService(
             AliasId: Guid.NewGuid(),
             AliasName: aliasName,
             DeviceRoute: deviceRoute,
-            SlotId: request.SlotId,
+            SlotId: slotId,
             ObjectLabel: objectLabel,
             ObjectIdHex: objectIdHex,
             Notes: NormalizeOptionalText(request.Notes, 400, nameof(request.Notes)),
@@ -111,18 +92,40 @@ public sealed class CryptoApiKeyAccessManagementService(
             UpdatedAtUtc: now);
 
         await sharedStateStore.UpsertKeyAliasAsync(record, cancellationToken);
-        return new CryptoApiManagedKeyAlias(
-            AliasId: record.AliasId,
-            AliasName: record.AliasName,
-            DeviceRoute: record.DeviceRoute,
-            SlotId: record.SlotId,
-            ObjectLabel: record.ObjectLabel,
-            ObjectIdHex: record.ObjectIdHex,
-            Notes: record.Notes,
-            IsEnabled: record.IsEnabled,
-            CreatedAtUtc: record.CreatedAtUtc,
-            UpdatedAtUtc: record.UpdatedAtUtc,
-            BoundPolicyIds: []);
+        return MapAlias(record, []);
+    }
+
+    public async Task<CryptoApiManagedKeyAlias> UpdateKeyAliasAsync(UpdateCryptoApiKeyAliasRequest request, CancellationToken cancellationToken = default)
+    {
+        string aliasName = NormalizeMachineName(request.AliasName, nameof(request.AliasName));
+        string? deviceRoute = NormalizeOptionalMachineName(request.DeviceRoute, nameof(request.DeviceRoute));
+        ulong slotId = EnsureSlotId(request.SlotId, nameof(request.SlotId));
+        string? objectLabel = NormalizeOptionalText(request.ObjectLabel, 160, nameof(request.ObjectLabel));
+        string? objectIdHex = NormalizeObjectIdHex(request.ObjectIdHex);
+        EnsureRouteTarget(objectLabel, objectIdHex);
+
+        CryptoApiSharedStateSnapshot snapshot = await sharedStateStore.GetSnapshotAsync(cancellationToken);
+        CryptoApiKeyAliasRecord existing = snapshot.KeyAliases.FirstOrDefault(candidate => candidate.AliasId == request.AliasId)
+            ?? throw new InvalidOperationException("Crypto API key alias was not found.");
+
+        if (snapshot.KeyAliases.Any(alias => alias.AliasId != request.AliasId && string.Equals(alias.AliasName, aliasName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"A key alias named '{aliasName}' already exists.");
+        }
+
+        CryptoApiKeyAliasRecord updated = existing with
+        {
+            AliasName = aliasName,
+            DeviceRoute = deviceRoute,
+            SlotId = slotId,
+            ObjectLabel = objectLabel,
+            ObjectIdHex = objectIdHex,
+            Notes = NormalizeOptionalText(request.Notes, 400, nameof(request.Notes)),
+            UpdatedAtUtc = timeProvider.GetUtcNow()
+        };
+
+        await sharedStateStore.UpsertKeyAliasAsync(updated, cancellationToken);
+        return MapAlias(updated, GetBoundPolicyIds(snapshot, updated.AliasId));
     }
 
     public async Task SetKeyAliasEnabledAsync(Guid aliasId, bool isEnabled, CancellationToken cancellationToken = default)
@@ -141,16 +144,7 @@ public sealed class CryptoApiKeyAccessManagementService(
     public async Task<CryptoApiManagedPolicy> CreatePolicyAsync(CreateCryptoApiPolicyRequest request, CancellationToken cancellationToken = default)
     {
         string policyName = NormalizeMachineName(request.PolicyName, nameof(request.PolicyName));
-        string[] allowedOperations = request.AllowedOperations
-            .Select(operation => string.Equals(operation?.Trim(), "*", StringComparison.Ordinal) ? "*" : CryptoApiOperationPolicyDocumentCodec.NormalizeOperation(operation, nameof(request.AllowedOperations)))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(static value => value, StringComparer.Ordinal)
-            .ToArray();
-
-        if (allowedOperations.Length == 0)
-        {
-            throw new ArgumentException("At least one allowed operation is required.", nameof(request.AllowedOperations));
-        }
+        string[] allowedOperations = NormalizeAllowedOperations(request.AllowedOperations, nameof(request.AllowedOperations));
 
         DateTimeOffset now = timeProvider.GetUtcNow();
         CryptoApiSharedStateSnapshot snapshot = await sharedStateStore.GetSnapshotAsync(cancellationToken);
@@ -170,17 +164,40 @@ public sealed class CryptoApiKeyAccessManagementService(
             UpdatedAtUtc: now);
 
         await sharedStateStore.UpsertPolicyAsync(record, cancellationToken);
-        return new CryptoApiManagedPolicy(
-            PolicyId: record.PolicyId,
-            PolicyName: record.PolicyName,
-            Description: record.Description,
-            Revision: record.Revision,
-            AllowedOperations: allowedOperations,
-            IsEnabled: record.IsEnabled,
-            CreatedAtUtc: record.CreatedAtUtc,
-            UpdatedAtUtc: record.UpdatedAtUtc,
-            BoundClientIds: [],
-            BoundAliasIds: []);
+        return MapPolicy(record, [], []);
+    }
+
+    public async Task<CryptoApiManagedPolicy> UpdatePolicyAsync(UpdateCryptoApiPolicyRequest request, CancellationToken cancellationToken = default)
+    {
+        string policyName = NormalizeMachineName(request.PolicyName, nameof(request.PolicyName));
+        string? description = NormalizeOptionalText(request.Description, 400, nameof(request.Description));
+        string[] allowedOperations = NormalizeAllowedOperations(request.AllowedOperations, nameof(request.AllowedOperations));
+        string documentJson = CryptoApiOperationPolicyDocumentCodec.Serialize(allowedOperations);
+
+        CryptoApiSharedStateSnapshot snapshot = await sharedStateStore.GetSnapshotAsync(cancellationToken);
+        CryptoApiPolicyRecord existing = snapshot.Policies.FirstOrDefault(candidate => candidate.PolicyId == request.PolicyId)
+            ?? throw new InvalidOperationException("Crypto API policy was not found.");
+
+        if (snapshot.Policies.Any(policy => policy.PolicyId != request.PolicyId && string.Equals(policy.PolicyName, policyName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"A policy named '{policyName}' already exists.");
+        }
+
+        bool changed = !string.Equals(existing.PolicyName, policyName, StringComparison.Ordinal)
+            || !string.Equals(existing.Description, description, StringComparison.Ordinal)
+            || !string.Equals(existing.DocumentJson, documentJson, StringComparison.Ordinal);
+
+        CryptoApiPolicyRecord updated = existing with
+        {
+            PolicyName = policyName,
+            Description = description,
+            Revision = changed ? existing.Revision + 1 : existing.Revision,
+            DocumentJson = documentJson,
+            UpdatedAtUtc = timeProvider.GetUtcNow()
+        };
+
+        await sharedStateStore.UpsertPolicyAsync(updated, cancellationToken);
+        return MapPolicy(updated, GetBoundClientIds(snapshot, updated.PolicyId), GetBoundAliasIds(snapshot, updated.PolicyId));
     }
 
     public async Task SetPolicyEnabledAsync(Guid policyId, bool isEnabled, CancellationToken cancellationToken = default)
@@ -216,6 +233,78 @@ public sealed class CryptoApiKeyAccessManagementService(
         await sharedStateStore.ReplaceKeyAliasPolicyBindingsAsync(aliasId, policyIds, cancellationToken);
     }
 
+    private static CryptoApiManagedKeyAlias MapAlias(CryptoApiKeyAliasRecord alias, IReadOnlyList<Guid> boundPolicyIds)
+        => new(
+            AliasId: alias.AliasId,
+            AliasName: alias.AliasName,
+            DeviceRoute: alias.DeviceRoute,
+            SlotId: alias.SlotId,
+            ObjectLabel: alias.ObjectLabel,
+            ObjectIdHex: alias.ObjectIdHex,
+            Notes: alias.Notes,
+            IsEnabled: alias.IsEnabled,
+            CreatedAtUtc: alias.CreatedAtUtc,
+            UpdatedAtUtc: alias.UpdatedAtUtc,
+            BoundPolicyIds: boundPolicyIds);
+
+    private static CryptoApiManagedPolicy MapPolicy(CryptoApiPolicyRecord policy, IReadOnlyList<Guid> boundClientIds, IReadOnlyList<Guid> boundAliasIds)
+    {
+        CryptoApiOperationPolicyDocument document = CryptoApiOperationPolicyDocumentCodec.Deserialize(policy.DocumentJson);
+        return new CryptoApiManagedPolicy(
+            PolicyId: policy.PolicyId,
+            PolicyName: policy.PolicyName,
+            Description: policy.Description,
+            Revision: policy.Revision,
+            AllowedOperations: document.AllowedOperations,
+            IsEnabled: policy.IsEnabled,
+            CreatedAtUtc: policy.CreatedAtUtc,
+            UpdatedAtUtc: policy.UpdatedAtUtc,
+            BoundClientIds: boundClientIds,
+            BoundAliasIds: boundAliasIds);
+    }
+
+    private static Guid[] GetBoundPolicyIds(CryptoApiSharedStateSnapshot snapshot, Guid aliasId)
+        => snapshot.KeyAliasPolicyBindings
+            .Where(binding => binding.AliasId == aliasId)
+            .Select(binding => binding.PolicyId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+
+    private static Guid[] GetBoundClientIds(CryptoApiSharedStateSnapshot snapshot, Guid policyId)
+        => snapshot.ClientPolicyBindings
+            .Where(binding => binding.PolicyId == policyId)
+            .Select(binding => binding.ClientId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+
+    private static Guid[] GetBoundAliasIds(CryptoApiSharedStateSnapshot snapshot, Guid policyId)
+        => snapshot.KeyAliasPolicyBindings
+            .Where(binding => binding.PolicyId == policyId)
+            .Select(binding => binding.AliasId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+
+    private static string[] NormalizeAllowedOperations(IReadOnlyCollection<string> allowedOperations, string parameterName)
+    {
+        string[] normalized = allowedOperations
+            .Select(operation => string.Equals(operation?.Trim(), "*", StringComparison.Ordinal)
+                ? "*"
+                : CryptoApiOperationPolicyDocumentCodec.NormalizeOperation(operation, parameterName))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(static value => value, StringComparer.Ordinal)
+            .ToArray();
+
+        if (normalized.Length == 0)
+        {
+            throw new ArgumentException("At least one allowed operation is required.", parameterName);
+        }
+
+        return normalized;
+    }
+
     private static void EnsurePoliciesExist(CryptoApiSharedStateSnapshot snapshot, IReadOnlyCollection<Guid> policyIds)
     {
         HashSet<Guid> knownPolicyIds = snapshot.Policies.Select(policy => policy.PolicyId).ToHashSet();
@@ -227,6 +316,9 @@ public sealed class CryptoApiKeyAccessManagementService(
             }
         }
     }
+
+    private static ulong EnsureSlotId(ulong? slotId, string parameterName)
+        => slotId ?? throw new ArgumentException("A PKCS#11 slot id is required to route an alias.", parameterName);
 
     private static void EnsureRouteTarget(string? objectLabel, string? objectIdHex)
     {

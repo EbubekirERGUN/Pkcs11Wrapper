@@ -368,7 +368,7 @@ Plan around these present-day constraints:
 - one admin dashboard is the documented operating model
 - Crypto API instances are stateless, but the shared control-plane state currently depends on SQLite
 - the repository does not yet provide a first-class Crypto API container image
-- the current admin UI already plugs into the shared Crypto API store for client/key lifecycle, but the overall control plane is still evolving
+- the current admin UI now covers the practical shared-store workflow for clients, keys, aliases, policies, and bindings, but the overall control plane is still intentionally conservative
 - current request execution depends on the locally configured PKCS#11 module path and HSM reachability on every API instance
 
 If you need a larger multi-host topology with stronger shared-state guarantees, treat that as a future backend/infrastructure step rather than forcing the current SQLite-based control plane into a shape it does not yet claim to support.

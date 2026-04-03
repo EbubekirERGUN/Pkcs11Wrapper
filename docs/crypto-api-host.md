@@ -52,7 +52,7 @@ The current slice is still deliberately small, but now includes the first practi
   - policy documents
   - client-to-policy and alias-to-policy bindings
 - generated API key secrets that are revealed once, hashed before persistence, and tracked with disable / revoke / expiry / last-used metadata
-- admin control-plane scaffolding in `Pkcs11Wrapper.Admin.Web` via the **Crypto API Access** page when it is configured against the same shared store
+- admin control-plane workflow in `Pkcs11Wrapper.Admin.Web` via the **Crypto API Access** page when it is configured against the same shared store, including client/key lifecycle plus alias/policy/binding management
 - dedicated test project covering base-path normalization, runtime descriptor metadata, readiness health behavior, shared-state round-tripping, lifecycle management, schema migration behavior, and customer-facing route/integration coverage
 
 ## Runtime model
