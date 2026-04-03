@@ -2,6 +2,8 @@
 
 This guide covers the **standalone container deployment** story for the `Pkcs11Wrapper` admin panel.
 
+If you are deploying the full runtime topology of **one admin dashboard + many stateless Crypto API instances**, read [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md) alongside this file. This page stays focused on the admin container itself.
+
 It builds on the repository's existing container image at `src/Pkcs11Wrapper.Admin.Web/Dockerfile` and the existing **local/dev/lab** SoftHSM compose bundle under `deploy/compose/softhsm-lab`, but keeps the focus on the operational questions a real container deployment needs answered:
 
 - which environment variables matter

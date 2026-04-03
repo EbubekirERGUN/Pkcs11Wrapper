@@ -108,7 +108,9 @@ flowchart LR
     A[Pkcs11Wrapper.Admin.Web\nBlazor Server Admin Panel] --> B[Pkcs11Wrapper.Admin.Application]
     B --> C[Pkcs11Wrapper.Admin.Infrastructure]
     B --> D[Pkcs11Wrapper]
+    A --> S[(Shared Crypto API state\nSQLite control-plane DB)]
     H[Pkcs11Wrapper.CryptoApi\nStateless ASP.NET Core Host] --> D
+    H --> S
     D --> E[Pkcs11Wrapper.Native]
     E --> F[PKCS#11 Module / HSM / SoftHSM]
     C --> G[JSON + Protected Local Storage + Audit Chain]
@@ -238,7 +240,10 @@ Useful endpoints:
 
 If the admin dashboard is pointed at the same `CryptoApiSharedPersistence:ConnectionString`, it can operate against the same shared control-plane data model used by Crypto API clients, aliases, policies, and bindings.
 
-For the intended boundary/runtime model, shared persistence scope, and scale-out notes, see [docs/crypto-api-host.md](docs/crypto-api-host.md).
+For the intended boundary/runtime model, scale-out expectations, state-sharing rules, and deployment guidance, see:
+
+- [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md)
+- [docs/crypto-api-host.md](docs/crypto-api-host.md)
 
 ### 2c) Build and run the container image
 
@@ -364,8 +369,10 @@ Current capabilities include:
 - [docs/benchmarks.md](docs/benchmarks.md) - benchmark scope, rerun flow, periodic tracking model
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - latest committed Linux benchmark baseline
 - [docs/admin-container.md](docs/admin-container.md) - standalone admin-container deployment guide, volume layout, PKCS#11 mount patterns, and local/dev vs production-safe guidance
+- [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md) - single-dashboard + multi-instance Crypto API topology, scaling expectations, shared-state boundaries, and container/deployment guidance
 - [docs/crypto-api-host.md](docs/crypto-api-host.md) - stateless Crypto API host boundary, shared persistence model, config, and current scaffold endpoints
 - `deploy/container/admin-panel.env.example` - starter env template for the standalone admin container path
+- `deploy/container/crypto-api.env.example` - starter env template for operator-built Crypto API process/container wrappers
 - [deploy/compose/softhsm-lab/README.md](deploy/compose/softhsm-lab/README.md) - local/dev/lab compose stack for the admin panel + SoftHSM backend
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - local admin-panel operations and recovery runbook
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract

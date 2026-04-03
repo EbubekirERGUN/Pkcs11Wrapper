@@ -4,6 +4,8 @@
 
 It is intentionally **thin** and intentionally **separate** from the admin dashboard stack.
 
+For the operator-facing deployment model covering **one admin dashboard + many stateless Crypto API instances**, shared-state boundaries, and container guidance, see [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md). This page stays focused on the host surface itself.
+
 ## Why this host exists
 
 The repo now has two different application boundaries:
@@ -144,6 +146,9 @@ Notes:
 - `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
 - `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
 - The admin panel can point at the same `CryptoApiSharedPersistence` section to stay on the same shared control-plane data model used for clients, aliases, policies, and bindings.
+
+For the full operator deployment model, see [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md).
+If you are wrapping this host in your own container or supervisor, start from `deploy/container/crypto-api.env.example`.
 
 ## Local run example
 
