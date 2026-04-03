@@ -28,9 +28,11 @@ A small, current showcase slice from the admin panel:
 
 - **Dashboard** — recovery-first operations overview and role-aware console framing
 - **Devices** — HSM profile inventory, connection-governance workflow, and vendor-aware management surface
-- **Slots** — token visibility and slot-level operational entry point before key/session work
+- **Slots** — live slot/token visibility and slot-level operational entry point before key/session work
 
 Capture notes and the reproducible screenshot flow live in [docs/showcase/2026-04-final/README.md](docs/showcase/2026-04-final/README.md).
+
+Telemetry, security/admin recovery, and Crypto API Access are intentionally represented in the sections below instead of turning the showcase into a noisy screenshot dump.
 
 ## Why this project exists
 
@@ -75,6 +77,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - tracked session visibility and control (`login` / `logout` / `cancel` / `close-all` + invalidation visibility)
 - PKCS#11 Lab diagnostics, crypto experiments, object workflows, and scenario replay helpers
 - PKCS#11 telemetry viewer with redacted device / slot / mechanism / status filtering, bounded retention/rotation, safe export, and audit correlation links
+- Crypto API Access control-plane workflows for shared-store applications, API keys, aliases, policies, and bindings
 - protected PIN cache + append-only chained audit log integrity
 
 ### Crypto API host scaffold
@@ -97,7 +100,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 | Windows | ✅ | fixture-backed runtime regression + `win-x64` NativeAOT smoke through SoftHSM-for-Windows + OpenSC |
 | PKCS#11 v3 interface discovery | ✅ | capability-gated when not exported by the module |
 | PKCS#11 v3 message APIs | ✅ | managed/API support implemented; runtime depends on module support |
-| Admin panel | ✅ | functional Blazor Server management surface with auth, local users, config transfer, audit integrity, and PKCS#11 Lab |
+| Admin panel | ✅ | functional Blazor Server management surface with auth, local users, config transfer, audit integrity, PKCS#11 Lab, telemetry, and Crypto API Access control-plane flows |
 | Crypto API host scaffold | ✅ | stateless ASP.NET Core host with DI/config, service documents, health/readiness, shared SQLite-backed auth/policy persistence, hashed API-key lifecycle controls, and the first alias-routing/policy-enforcement slice |
 | Vendor regression lane | ✅ | optional non-SoftHSM validation path |
 
@@ -360,6 +363,7 @@ Current capabilities include:
 - device-profile configuration export/import
 - PKCS#11 Lab for diagnostics, crypto operations, object inspection, wrap/unwrap, raw attribute reads, and scenario replay
 - PKCS#11 telemetry viewer for redacted wrapper-level operation traces, bounded retention/export control, and audit correlation
+- Crypto API Access for shared-store application onboarding, API-key lifecycle, alias routing, policy definitions, and binding management
 - append-only chained audit entries with integrity verification
 
 ## Documentation map

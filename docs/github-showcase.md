@@ -51,6 +51,8 @@ The README now uses this smaller final set:
 
 1. `docs/showcase/2026-04-final/admin-dashboard.png`
 2. `docs/showcase/2026-04-final/admin-devices.png`
-3. `docs/showcase/2026-04-final/admin-slots.png`
+3. `docs/showcase/2026-04-final/admin-slots.png` (captured from the loaded slot inventory state, not the pre-load shell)
+
+Telemetry, security/admin recovery, and Crypto API Access are intentionally carried by README copy and linked docs rather than expanding the showcase into a second screenshot row.
 
 If the repo needs one more follow-up asset later, add a **single short admin panel clip** instead of expanding back into a large screenshot dump.
