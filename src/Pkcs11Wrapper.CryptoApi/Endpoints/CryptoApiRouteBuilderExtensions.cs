@@ -3,6 +3,7 @@ using Pkcs11Wrapper.Native;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Operations;
+using Pkcs11Wrapper.CryptoApi.RateLimiting;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.CryptoApi.SharedState;
 
@@ -10,11 +11,19 @@ namespace Pkcs11Wrapper.CryptoApi.Endpoints;
 
 public static class CryptoApiRouteBuilderExtensions
 {
-    public static IEndpointRouteBuilder MapCryptoApiRoutes(this IEndpointRouteBuilder endpoints, CryptoApiHostOptions hostOptions, CryptoApiSecurityOptions securityOptions)
+    public static IEndpointRouteBuilder MapCryptoApiRoutes(this IEndpointRouteBuilder endpoints, CryptoApiHostOptions hostOptions, CryptoApiSecurityOptions securityOptions, CryptoApiRateLimitingOptions rateLimitingOptions)
     {
         string apiBasePath = CryptoApiHostDefaults.NormalizeBasePath(hostOptions.ApiBasePath);
         RouteGroupBuilder group = endpoints.MapGroup(apiBasePath)
             .WithTags("Crypto API");
+
+        RouteGroupBuilder authGroup = group.MapGroup("/auth")
+            .RequireRateLimiting(CryptoApiRateLimitingExtensions.AuthenticationPolicyName)
+            .WithCryptoApiRateLimitScope("customer-authentication", rateLimitingOptions.Authentication.WindowSeconds);
+
+        RouteGroupBuilder operationExecutionGroup = group.MapGroup("/operations")
+            .RequireRateLimiting(CryptoApiRateLimitingExtensions.OperationsPolicyName)
+            .WithCryptoApiRateLimitScope("customer-operations", rateLimitingOptions.Operations.WindowSeconds);
 
         group.MapGet("/", static (CryptoApiRuntimeDescriptorProvider descriptorProvider) =>
         {
@@ -24,7 +33,7 @@ public static class CryptoApiRouteBuilderExtensions
                 descriptor.InstanceId,
                 descriptor.ApiBasePath,
                 descriptor.DeploymentModel,
-                "Machine-facing host for customer-facing sign/verify/random workflows backed by shared API-key auth, alias routing, and policy checks. No local operator UI or per-node auth/policy files.",
+                "Machine-facing host for customer-facing sign/verify/random workflows backed by shared API-key auth, alias routing, policy checks, and per-instance built-in rate limiting. No local operator UI or per-node auth/policy files.",
                 descriptor.CurrentSurface,
                 descriptor.SharedPersistenceConfigured,
                 descriptor.SharedPersistenceProvider,
@@ -48,7 +57,7 @@ public static class CryptoApiRouteBuilderExtensions
             return TypedResults.Ok(new CryptoApiOperationSurfaceDocument(
                 descriptor.ServiceName,
                 descriptor.ApiBasePath,
-                "Customer-facing v1 sign/verify/random routes are live and reuse the shared API-key, alias-routing, and policy-enforcement model.",
+                "Customer-facing v1 sign/verify/random routes are live and reuse the shared API-key, alias-routing, and policy-enforcement model plus per-instance rate limiting with 429 + Retry-After responses.",
                 ["sign", "verify", "random"],
                 ["key metadata lookup", "encrypt", "decrypt", "wrap", "unwrap"],
                 ["POST /operations/authorize", "POST /operations/sign", "POST /operations/verify", "POST /operations/random"]));
@@ -65,7 +74,7 @@ public static class CryptoApiRouteBuilderExtensions
                     statusCode: StatusCodes.Status503ServiceUnavailable);
         });
 
-        group.MapGet("/auth/self", async Task<IResult> (HttpContext httpContext, CryptoApiClientAuthenticationService authenticationService, CancellationToken cancellationToken) =>
+        authGroup.MapGet("/self", async Task<IResult> (HttpContext httpContext, CryptoApiClientAuthenticationService authenticationService, CancellationToken cancellationToken) =>
         {
             AuthenticationAttempt authentication = await AuthenticateAsync(httpContext, authenticationService, securityOptions, cancellationToken);
             if (authentication.Error is not null)
@@ -77,7 +86,7 @@ public static class CryptoApiRouteBuilderExtensions
             return Results.Ok(ToAuthenticatedClientDocument(client));
         });
 
-        group.MapPost("/operations/authorize", async Task<IResult> (
+        operationExecutionGroup.MapPost("/authorize", async Task<IResult> (
             HttpContext httpContext,
             CryptoApiAuthorizeKeyOperationRequest request,
             CryptoApiClientAuthenticationService authenticationService,
@@ -111,7 +120,7 @@ public static class CryptoApiRouteBuilderExtensions
                     .ToArray()));
         });
 
-        group.MapPost("/operations/sign", async Task<IResult> (
+        operationExecutionGroup.MapPost("/sign", async Task<IResult> (
             HttpContext httpContext,
             CryptoApiSignRequest request,
             CryptoApiClientAuthenticationService authenticationService,
@@ -151,7 +160,7 @@ public static class CryptoApiRouteBuilderExtensions
             }
         });
 
-        group.MapPost("/operations/verify", async Task<IResult> (
+        operationExecutionGroup.MapPost("/verify", async Task<IResult> (
             HttpContext httpContext,
             CryptoApiVerifyRequest request,
             CryptoApiClientAuthenticationService authenticationService,
@@ -190,7 +199,7 @@ public static class CryptoApiRouteBuilderExtensions
             }
         });
 
-        group.MapPost("/operations/random", async Task<IResult> (
+        operationExecutionGroup.MapPost("/random", async Task<IResult> (
             HttpContext httpContext,
             CryptoApiRandomRequest request,
             CryptoApiClientAuthenticationService authenticationService,

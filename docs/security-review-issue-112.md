@@ -97,8 +97,8 @@ These are **not** fixed by this issue and should remain explicit in docs/roadmap
 2. **Login throttling is still in-memory per process.**
    It helps against casual brute force but resets on process restart and is not shared across multiple admin instances.
 
-3. **Crypto API rate limiting is still not built in.**
-   Upstream gateways/load balancers should still enforce request-rate, body-size, and abuse controls.
+3. **Crypto API rate limiting is now built in, but it is intentionally instance-local.**
+   The host now enforces per-instance customer-endpoint rate limits keyed by presented API key id (with remote-IP fallback when no key id is present), and 429 responses include `Retry-After` plus problem-details metadata. Upstream gateways/load balancers should still enforce fleet-wide request-rate, body-size, and abuse controls.
 
 4. **SQLite is still the shared control-plane backend.**
    That remains acceptable only for the documented conservative deployment model with trustworthy file-locking/WAL semantics.
@@ -113,6 +113,6 @@ These are **not** fixed by this issue and should remain explicit in docs/roadmap
 
 Validation should include at least:
 
-- targeted Crypto API route tests for generic error behavior and sanitized shared-state output
+- targeted Crypto API route tests for generic error behavior, sanitized shared-state output, and 429 / `Retry-After` rate-limit behavior
 - admin integration tests proving hardening headers are present and tokenless login POSTs fail
 - normal repo build/test validation for the touched projects

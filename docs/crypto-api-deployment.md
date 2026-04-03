@@ -249,6 +249,29 @@ A good pattern is:
 4. observe HSM/session behavior, readiness stability, and latency tails
 5. scale further only when the external PKCS#11 tier proves it can handle the load
 
+## Built-in rate limiting in a scaled-out topology
+
+The Crypto API host now includes a practical first built-in limiter for `/api/v1/auth/self` and the customer-facing `/api/v1/operations/*` POST routes.
+
+That limiter is intentionally:
+
+- **per instance**
+- **partitioned by presented API key id** (with remote-IP fallback when no key id is present)
+- **zero-queue by default**, so rejected traffic gets immediate `429 Too Many Requests`
+
+What that means operationally:
+
+- if you run one API instance, the built-in limiter gives a real local abuse-control baseline
+- if you run many API instances behind a load balancer, the effective fleet-wide budget is roughly the per-instance budget multiplied by the number of healthy instances that can receive the caller's traffic
+- if you need strict tenant/global quotas, keep enforcing them at the ingress/gateway layer rather than trying to treat the current SQLite control-plane store as a hot-path distributed counter system
+
+This is a deliberate trade-off for the current product shape:
+
+- it protects the machine-facing API immediately
+- it does not add shared-state writes on every request
+- it keeps the stateless-HTTP-worker architecture honest
+- it avoids overselling SQLite as a distributed rate-limit backend
+
 ## Current routing/alias expectations
 
 Today, alias records in shared state can carry:

@@ -42,6 +42,7 @@ The current slice is still deliberately small, but now includes the first practi
 - customer-facing random endpoint at `/api/v1/operations/random`
 - shared-state descriptor endpoint at `/api/v1/shared-state`
 - authenticated self-introspection endpoint at `/api/v1/auth/self`
+- built-in customer-endpoint rate limiting with predictable `429 Too Many Requests` + `Retry-After` responses
 - liveness endpoint at `/health/live`
 - readiness endpoint at `/health/ready`
 - readiness check that attempts to load the configured PKCS#11 module via `Pkcs11Module.Load(...)`
@@ -145,6 +146,10 @@ Notes:
 - `CryptoApiSharedPersistence:Provider` currently supports only `Sqlite`.
 - `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
 - `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
+- `CryptoApiRateLimiting` adds built-in limits for `/api/v1/auth/self` and the customer-facing `/api/v1/operations/*` POST routes.
+- The first slice is intentionally **instance-local**, not shared across the fleet. A caller can consume up to the configured budget on each Crypto API instance behind the load balancer.
+- Partitioning is keyed by the presented `X-Api-Key-Id` header when present, with remote-IP fallback when no key id is available.
+- Rejections do not queue by default; the host immediately returns `429 Too Many Requests` and includes `Retry-After` plus a problem-details body so machine clients can back off deterministically.
 - The admin panel can point at the same `CryptoApiSharedPersistence` section to stay on the same shared control-plane data model used for clients, aliases, policies, and bindings.
 
 For the full operator deployment model, see [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md).
@@ -181,6 +186,35 @@ Useful endpoints:
 `POST /api/v1/operations/authorize` remains the low-level alias/policy check.
 `POST /api/v1/operations/sign`, `verify`, and `random` reuse that same authentication + authorization model and keep the public contract stable and customer-facing: callers provide alias names, high-level algorithms such as `RS256` / `PS256` / `ES256` / `HS256`, and base64 payloads instead of raw PKCS#11 device/slot/handle details.
 
+### Built-in rate limiting behavior
+
+The host now ships a practical first built-in rate-limiting slice for customer-facing routes:
+
+- `/api/v1/auth/self`
+  - default budget: **60 requests / minute / presented API key id**
+- `/api/v1/operations/authorize`
+- `/api/v1/operations/sign`
+- `/api/v1/operations/verify`
+- `/api/v1/operations/random`
+  - default budget: **600 requests / minute / presented API key id / instance**
+
+Why this shape:
+
+- it protects the public Crypto API surface without introducing shared counter writes into the SQLite control-plane path
+- it keeps the API instances stateless and horizontally replaceable
+- it gives machine callers deterministic backoff behavior instead of silent slowdowns or long server-side queues
+
+Important caveats:
+
+- the limiter is **not cluster-global**; multiple API instances mean multiple per-instance budgets
+- the limiter runs before full authentication/authorization, so the presented key id is the practical partition key
+- upstream ingress/gateway policy should still enforce fleet-wide quotas, body-size limits, and abuse controls
+
+Rejected requests return:
+
+- HTTP `429 Too Many Requests`
+- `Retry-After` response header when the limiter can compute it
+- an `application/problem+json` body with machine-friendly scope / mode metadata
 
 ### Crypto API security defaults
 

@@ -243,7 +243,103 @@ public sealed class CryptoApiRoutesTests
         }
     }
 
-    private static async Task<SeededAccess> SeedAuthorizedAccessAsync(WebApplicationFactory<Program> factory, IReadOnlyCollection<string> allowedOperations, string aliasName)
+    [Fact]
+    public async Task AuthEndpointReturnsRateLimitProblemDetailsAndRetryAfterHeader()
+    {
+        string databasePath = CreateDatabasePath();
+        await using WebApplicationFactory<Program> factory = CreateFactory(
+            databasePath,
+            null,
+            new Dictionary<string, string?>
+            {
+                ["CryptoApiRateLimiting:Authentication:PermitLimit"] = "1",
+                ["CryptoApiRateLimiting:Authentication:WindowSeconds"] = "60",
+                ["CryptoApiRateLimiting:Authentication:SegmentsPerWindow"] = "6",
+                ["CryptoApiRateLimiting:Authentication:QueueLimit"] = "0"
+            });
+
+        try
+        {
+            using HttpClient httpClient = factory.CreateClient();
+
+            using HttpResponseMessage firstResponse = await httpClient.GetAsync("/api/v1/auth/self");
+            Assert.Equal(HttpStatusCode.Unauthorized, firstResponse.StatusCode);
+
+            using HttpResponseMessage secondResponse = await httpClient.GetAsync("/api/v1/auth/self");
+            string content = await secondResponse.Content.ReadAsStringAsync();
+
+            Assert.Equal(HttpStatusCode.TooManyRequests, secondResponse.StatusCode);
+            Assert.Equal("application/problem+json", secondResponse.Content.Headers.ContentType?.MediaType);
+            Assert.True(secondResponse.Headers.TryGetValues("Retry-After", out IEnumerable<string>? retryAfterValues));
+            Assert.NotEmpty(retryAfterValues);
+            Assert.Contains("Rate limit exceeded.", content, StringComparison.Ordinal);
+            Assert.Contains("customer-authentication", content, StringComparison.Ordinal);
+            Assert.Contains("instance-local", content, StringComparison.Ordinal);
+            Assert.Contains("retryAfterSeconds", content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task OperationRateLimitsArePartitionedByPresentedApiKeyId()
+    {
+        string databasePath = CreateDatabasePath();
+        FakeCustomerOperationService fakeOperations = new();
+        await using WebApplicationFactory<Program> factory = CreateFactory(
+            databasePath,
+            services => services.AddSingleton<ICryptoApiCustomerOperationService>(fakeOperations),
+            new Dictionary<string, string?>
+            {
+                ["CryptoApiRateLimiting:Operations:PermitLimit"] = "1",
+                ["CryptoApiRateLimiting:Operations:WindowSeconds"] = "60",
+                ["CryptoApiRateLimiting:Operations:SegmentsPerWindow"] = "6",
+                ["CryptoApiRateLimiting:Operations:QueueLimit"] = "0"
+            });
+
+        try
+        {
+            SeededAccess firstAccess = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer", policyName: $"gateway-sign-{Guid.NewGuid():N}");
+            SeededAccess secondAccess = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer-2", policyName: $"gateway-sign-{Guid.NewGuid():N}");
+
+            using HttpClient firstClient = factory.CreateClient();
+            firstClient.DefaultRequestHeaders.Add("X-Api-Key-Id", firstAccess.Key.KeyIdentifier);
+            firstClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", firstAccess.Key.Secret);
+
+            using HttpResponseMessage firstAllowed = await firstClient.PostAsync(
+                "/api/v1/operations/sign",
+                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+            Assert.Equal(HttpStatusCode.OK, firstAllowed.StatusCode);
+
+            using HttpResponseMessage firstRejected = await firstClient.PostAsync(
+                "/api/v1/operations/sign",
+                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+            string rejectedContent = await firstRejected.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.TooManyRequests, firstRejected.StatusCode);
+            Assert.Contains("customer-operations", rejectedContent, StringComparison.Ordinal);
+
+            using HttpClient secondClient = factory.CreateClient();
+            secondClient.DefaultRequestHeaders.Add("X-Api-Key-Id", secondAccess.Key.KeyIdentifier);
+            secondClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", secondAccess.Key.Secret);
+
+            using HttpResponseMessage secondAllowed = await secondClient.PostAsync(
+                "/api/v1/operations/sign",
+                CreateJsonContent("{\"keyAlias\":\"payments-signer-2\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+
+            Assert.Equal(HttpStatusCode.OK, secondAllowed.StatusCode);
+            Assert.Equal(2, fakeOperations.Calls.Count);
+            Assert.Equal("payments-signer", fakeOperations.Calls[0].AliasName);
+            Assert.Equal("payments-signer-2", fakeOperations.Calls[1].AliasName);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    private static async Task<SeededAccess> SeedAuthorizedAccessAsync(WebApplicationFactory<Program> factory, IReadOnlyCollection<string> allowedOperations, string aliasName, string? policyName = null)
     {
         using IServiceScope scope = factory.Services.CreateScope();
         CryptoApiClientManagementService clientManagement = scope.ServiceProvider.GetRequiredService<CryptoApiClientManagementService>();
@@ -256,7 +352,7 @@ public sealed class CryptoApiRoutesTests
             Notes: null));
         CryptoApiCreatedClientKey key = await clientManagement.CreateClientKeyAsync(new CreateCryptoApiClientKeyRequest(client.ClientId, "primary", null));
         CryptoApiManagedPolicy policy = await accessManagement.CreatePolicyAsync(new CreateCryptoApiPolicyRequest(
-            PolicyName: $"gateway-{string.Join('-', allowedOperations)}",
+            PolicyName: policyName ?? $"gateway-{string.Join('-', allowedOperations)}",
             Description: null,
             AllowedOperations: allowedOperations));
         CryptoApiManagedKeyAlias alias = await accessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
