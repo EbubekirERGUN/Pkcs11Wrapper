@@ -57,13 +57,14 @@ public sealed class CryptoApiSharedStateStoreTests
                 "signing-default",
                 "Default sign policy",
                 1,
-                "{\"operations\":[\"sign\"],\"aliases\":[\"payments-signer\"]}",
+                "{\"version\":1,\"allowedOperations\":[\"sign\"]}",
                 true,
                 now,
                 now));
             await writer.UpsertKeyAliasAsync(new CryptoApiKeyAliasRecord(
                 aliasId,
                 "payments-signer",
+                "hsm-eu-primary",
                 7,
                 "Payments signing key",
                 "A1B2C3D4",
@@ -102,12 +103,13 @@ public sealed class CryptoApiSharedStateStoreTests
             Assert.Null(clientKey.LastUsedAtUtc);
 
             CryptoApiKeyAliasRecord alias = Assert.Single(snapshot.KeyAliases);
+            Assert.Equal("hsm-eu-primary", alias.DeviceRoute);
             Assert.Equal((ulong)7, alias.SlotId);
             Assert.Equal("Payments signing key", alias.ObjectLabel);
 
             CryptoApiPolicyRecord policy = Assert.Single(snapshot.Policies);
             Assert.Equal("signing-default", policy.PolicyName);
-            Assert.Contains("payments-signer", policy.DocumentJson, StringComparison.Ordinal);
+            Assert.Contains("allowedOperations", policy.DocumentJson, StringComparison.Ordinal);
 
             CryptoApiClientPolicyBinding clientBinding = Assert.Single(snapshot.ClientPolicyBindings);
             Assert.Equal(clientId, clientBinding.ClientId);

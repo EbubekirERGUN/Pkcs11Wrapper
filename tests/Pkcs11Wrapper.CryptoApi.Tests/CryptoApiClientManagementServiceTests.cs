@@ -77,7 +77,7 @@ public sealed class CryptoApiClientManagementServiceTests
     }
 
     [Fact]
-    public async Task ExistingVersion1SharedStateDatabaseMigratesToVersion2Schema()
+    public async Task ExistingVersion1SharedStateDatabaseMigratesToCurrentSchema()
     {
         string databasePath = CreateDatabasePath();
         try

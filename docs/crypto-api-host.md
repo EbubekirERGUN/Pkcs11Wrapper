@@ -1,4 +1,4 @@
-# Crypto API host scaffold + API key lifecycle slice
+# Crypto API host scaffold + API key lifecycle + alias/policy slice
 
 `Pkcs11Wrapper.CryptoApi` is the first machine-facing service host for the repository.
 
@@ -26,7 +26,7 @@ The admin app remains the place for operations and governance. The crypto API ho
 
 ## Current scaffold contents
 
-The current slice is still deliberately small, but now includes the first practical API client / API key lifecycle foundation for future multi-instance deployments:
+The current slice is still deliberately small, but now includes the first practical API client / API key lifecycle foundation plus the first alias-routing / policy-enforcement slice for future multi-instance deployments:
 
 - dedicated `src/Pkcs11Wrapper.CryptoApi` project in the solution
 - ASP.NET Core host with DI + configuration binding
@@ -34,6 +34,7 @@ The current slice is still deliberately small, but now includes the first practi
 - versioned route group rooted at `/api/v1`
 - runtime descriptor endpoint at `/api/v1/runtime`
 - explicit future operation namespace at `/api/v1/operations`
+- alias-routing + policy-check endpoint at `/api/v1/operations/authorize`
 - shared-state descriptor endpoint at `/api/v1/shared-state`
 - authenticated self-introspection endpoint at `/api/v1/auth/self`
 - liveness endpoint at `/health/live`
@@ -93,14 +94,17 @@ The store prepares the state that cannot safely stay per-node local once API ins
   - secret hint for operator troubleshooting without recoverability
   - disable, revoke, expiry, and last-used metadata for lifecycle readiness
 - **Key aliases**
-  - stable alias name used by future API requests
-  - slot/object-resolution metadata (`slot_id`, label, object-id hex)
+  - stable alias name used by customer-facing API requests
+  - internal routing metadata (`device_route`, `slot_id`, object label, object-id hex)
+  - raw PKCS#11 locator details stay in shared state and internal services, not in the customer-facing response surface
 - **Policies**
   - versioned JSON policy document payload
+  - pragmatic v1 model: allowed operation list (for example `sign`, `verify`, `encrypt`, `decrypt`)
   - enable/disable state
 - **Bindings**
   - client → policy
   - alias → policy
+  - authorization succeeds only when an enabled client and enabled alias share at least one enabled policy whose document allows the requested operation
 
 That gives the repo a concrete place to keep future request authentication, alias resolution, and policy enforcement inputs outside any single node.
 
@@ -134,7 +138,7 @@ Notes:
 - `CryptoApiSharedPersistence:Provider` currently supports only `Sqlite`.
 - `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
 - `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
-- The admin panel can point at the same `CryptoApiSharedPersistence` section to manage shared clients and keys from the **Crypto API Access** page.
+- The admin panel can point at the same `CryptoApiSharedPersistence` section to stay on the same shared control-plane data model used for clients, aliases, policies, and bindings.
 
 ## Local run example
 
@@ -156,9 +160,11 @@ Useful endpoints:
 - `/api/v1/operations`
 - `/api/v1/shared-state`
 - `/api/v1/auth/self` using `X-Api-Key-Id` + `X-Api-Key-Secret`
+- `POST /api/v1/operations/authorize` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "operation": "sign" }`
 
 `/api/v1/shared-state` returns provider/schema/count metadata when the shared store is configured and available.
-`/api/v1/auth/self` is the first practical authentication slice: it validates the hashed shared secret, enforces disabled / revoked / expired state, updates last-used metadata, and returns the authenticated client context that future crypto operations can reuse.
+`/api/v1/auth/self` validates the hashed shared secret, enforces disabled / revoked / expired state, updates last-used metadata, and returns the authenticated client context that future crypto operations can reuse.
+`POST /api/v1/operations/authorize` is the first customer-facing alias/policy slice: callers target a key alias instead of raw PKCS#11 locator details, the host resolves that alias to the internal route metadata, and the response confirms the authorization result without exposing the underlying PKCS#11 path.
 
 ## Intentionally out of scope for this issue
 

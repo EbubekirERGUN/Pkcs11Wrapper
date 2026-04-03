@@ -197,6 +197,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             INSERT INTO crypto_api_key_aliases (
                 alias_id,
                 alias_name,
+                device_route,
                 slot_id,
                 object_label,
                 object_id_hex,
@@ -207,6 +208,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             VALUES (
                 $aliasId,
                 $aliasName,
+                $deviceRoute,
                 $slotId,
                 $objectLabel,
                 $objectIdHex,
@@ -216,6 +218,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
                 $updatedAtUtc)
             ON CONFLICT(alias_id) DO UPDATE SET
                 alias_name = excluded.alias_name,
+                device_route = excluded.device_route,
                 slot_id = excluded.slot_id,
                 object_label = excluded.object_label,
                 object_id_hex = excluded.object_id_hex,
@@ -225,6 +228,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             """;
         AddText(command, "$aliasId", keyAlias.AliasId.ToString("D", CultureInfo.InvariantCulture));
         AddText(command, "$aliasName", keyAlias.AliasName);
+        AddNullableText(command, "$deviceRoute", keyAlias.DeviceRoute);
         AddNullableInt64(command, "$slotId", keyAlias.SlotId is null ? null : checked((long)keyAlias.SlotId.Value));
         AddNullableText(command, "$objectLabel", keyAlias.ObjectLabel);
         AddNullableText(command, "$objectIdHex", keyAlias.ObjectIdHex);
@@ -437,6 +441,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             CREATE TABLE IF NOT EXISTS crypto_api_key_aliases (
                 alias_id TEXT PRIMARY KEY,
                 alias_name TEXT NOT NULL UNIQUE,
+                device_route TEXT NULL,
                 slot_id INTEGER NULL,
                 object_label TEXT NULL,
                 object_id_hex TEXT NULL,
@@ -494,6 +499,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "revoked_at_utc", "TEXT NULL", cancellationToken);
         await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "revoked_reason", "TEXT NULL", cancellationToken);
         await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "last_used_at_utc", "TEXT NULL", cancellationToken);
+        await EnsureColumnExistsAsync(connection, "crypto_api_key_aliases", "device_route", "TEXT NULL", cancellationToken);
 
         await using SqliteCommand versionCommand = connection.CreateCommand();
         versionCommand.CommandText = $"PRAGMA user_version = {CryptoApiSharedStateConstants.SchemaVersion};";
@@ -616,7 +622,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         List<CryptoApiKeyAliasRecord> aliases = [];
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT alias_id, alias_name, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
+            SELECT alias_id, alias_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
             FROM crypto_api_key_aliases
             ORDER BY alias_name;
             """;
@@ -626,13 +632,14 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             aliases.Add(new CryptoApiKeyAliasRecord(
                 AliasId: Guid.Parse(reader.GetString(0)),
                 AliasName: reader.GetString(1),
-                SlotId: reader.IsDBNull(2) ? null : checked((ulong)reader.GetInt64(2)),
-                ObjectLabel: reader.IsDBNull(3) ? null : reader.GetString(3),
-                ObjectIdHex: reader.IsDBNull(4) ? null : reader.GetString(4),
-                Notes: reader.IsDBNull(5) ? null : reader.GetString(5),
-                IsEnabled: reader.GetBoolean(6),
-                CreatedAtUtc: ParseTimestamp(reader.GetString(7)),
-                UpdatedAtUtc: ParseTimestamp(reader.GetString(8))));
+                DeviceRoute: reader.IsDBNull(2) ? null : reader.GetString(2),
+                SlotId: reader.IsDBNull(3) ? null : checked((ulong)reader.GetInt64(3)),
+                ObjectLabel: reader.IsDBNull(4) ? null : reader.GetString(4),
+                ObjectIdHex: reader.IsDBNull(5) ? null : reader.GetString(5),
+                Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
+                IsEnabled: reader.GetBoolean(7),
+                CreatedAtUtc: ParseTimestamp(reader.GetString(8)),
+                UpdatedAtUtc: ParseTimestamp(reader.GetString(9))));
         }
 
         return aliases;
