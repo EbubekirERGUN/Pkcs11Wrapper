@@ -85,6 +85,9 @@ public static class CrashSafeFileStore
     public static string GetBackupPath(string path)
         => $"{path}.bak";
 
+    public static void PromoteTempFile(string destinationPath, string tempPath)
+        => PromoteTempFile(destinationPath, tempPath, onBeforeMove: null);
+
     private static FileStream CreateWriteThroughStream(string path)
         => new(
             path,
@@ -94,16 +97,32 @@ public static class CrashSafeFileStore
             64 * 1024,
             FileOptions.Asynchronous | FileOptions.WriteThrough);
 
-    private static void PromoteTempFile(string destinationPath, string tempPath)
+    internal static void PromoteTempFile(string destinationPath, string tempPath, Action? onBeforeMove)
     {
         string backupPath = GetBackupPath(destinationPath);
         if (File.Exists(destinationPath))
         {
-            File.Replace(tempPath, destinationPath, backupPath, ignoreMetadataErrors: true);
+            try
+            {
+                File.Replace(tempPath, destinationPath, backupPath, ignoreMetadataErrors: true);
+                return;
+            }
+            catch (FileNotFoundException) when (!File.Exists(destinationPath))
+            {
+                // Another writer/process removed the destination after our existence check.
+                // Fall through to the create path below and keep the temp payload intact.
+            }
         }
-        else
+
+        onBeforeMove?.Invoke();
+
+        try
         {
             File.Move(tempPath, destinationPath);
+        }
+        catch (IOException) when (File.Exists(destinationPath))
+        {
+            File.Replace(tempPath, destinationPath, backupPath, ignoreMetadataErrors: true);
         }
     }
 

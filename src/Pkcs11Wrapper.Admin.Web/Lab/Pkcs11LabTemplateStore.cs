@@ -161,14 +161,7 @@ public sealed class Pkcs11LabTemplateStore(IOptions<AdminStorageOptions> options
                 stream.Flush(flushToDisk: true);
             }
 
-            if (File.Exists(TemplateFilePath))
-            {
-                File.Replace(tempPath, TemplateFilePath, CrashSafeFileStore.GetBackupPath(TemplateFilePath), ignoreMetadataErrors: true);
-            }
-            else
-            {
-                File.Move(tempPath, TemplateFilePath);
-            }
+            CrashSafeFileStore.PromoteTempFile(TemplateFilePath, tempPath);
         }
         finally
         {
