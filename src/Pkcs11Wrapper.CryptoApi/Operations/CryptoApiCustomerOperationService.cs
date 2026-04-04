@@ -1,7 +1,6 @@
+using System.Runtime.CompilerServices;
 using System.Text;
-using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Access;
-using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.Native;
 
@@ -31,14 +30,14 @@ public sealed record CryptoApiRandomOperationResult(
     DateTimeOffset CompletedAtUtc);
 
 public sealed class CryptoApiPkcs11CustomerOperationService(
-    IOptions<CryptoApiRuntimeOptions> runtimeOptions,
     CryptoApiPkcs11Runtime pkcs11Runtime,
     TimeProvider timeProvider) : ICryptoApiCustomerOperationService
 {
     private const int MaxPayloadBytes = 1024 * 1024;
     private const int MaxRandomLength = 4096;
-    private const nuint CkrFunctionFailed = 0x00000006u;
-    private const nuint CkrUserAlreadyLoggedIn = 0x00000100u;
+    private static readonly nuint CkrObjectHandleInvalid = 0x00000082u;
+    private static readonly nuint CkrSessionHandleInvalid = 0x000000B3u;
+    private readonly ConditionalWeakTable<Pkcs11Session, SessionKeyHandleCache> _sessionKeyHandleCaches = new();
 
     public CryptoApiSignOperationResult Sign(CryptoApiAuthorizedKeyOperation authorization, string? algorithm, string? payloadBase64)
     {
@@ -46,14 +45,22 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
 
         SignatureAlgorithmProfile profile = SignatureAlgorithmProfile.Parse(algorithm);
         byte[] payload = ParseRequiredBase64(payloadBase64, nameof(payloadBase64), MaxPayloadBytes);
+        Pkcs11SlotId slotId = ResolveRequiredSlotId(authorization);
 
-        Pkcs11Module module = pkcs11Runtime.GetInitializedModule();
-        using Pkcs11Session session = OpenCompatibleSession(module, ResolveRequiredSlotId(authorization));
-        LoginIfConfigured(session);
+        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = pkcs11Runtime.RentSession(slotId);
+        Pkcs11Session session = sessionLease.Session;
+        ResolvedKeyLocator locator = ResolveRequiredLocator(authorization);
+        KeyHandleCacheKey cacheKey = CreateCacheKey(locator, profile, forSign: true);
 
-        Pkcs11ObjectHandle keyHandle = ResolveRequiredKeyHandle(session, authorization, profile, forSign: true);
-        Pkcs11Mechanism mechanism = profile.CreateMechanism();
-        byte[] signature = SignWithRetry(session, keyHandle, mechanism, payload);
+        byte[] signature = ExecuteWithKeyHandleRecovery(
+            sessionLease,
+            cacheKey,
+            () =>
+            {
+                Pkcs11ObjectHandle keyHandle = ResolveRequiredKeyHandle(session, authorization, locator, profile, forSign: true);
+                Pkcs11Mechanism mechanism = profile.CreateMechanism();
+                return SignWithRetry(session, keyHandle, mechanism, payload);
+            });
 
         return new CryptoApiSignOperationResult(profile.Name, signature, timeProvider.GetUtcNow());
     }
@@ -65,14 +72,22 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         SignatureAlgorithmProfile profile = SignatureAlgorithmProfile.Parse(algorithm);
         byte[] payload = ParseRequiredBase64(payloadBase64, nameof(payloadBase64), MaxPayloadBytes);
         byte[] signature = ParseRequiredBase64(signatureBase64, nameof(signatureBase64), MaxPayloadBytes);
+        Pkcs11SlotId slotId = ResolveRequiredSlotId(authorization);
 
-        Pkcs11Module module = pkcs11Runtime.GetInitializedModule();
-        using Pkcs11Session session = OpenCompatibleSession(module, ResolveRequiredSlotId(authorization));
-        LoginIfConfigured(session);
+        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = pkcs11Runtime.RentSession(slotId);
+        Pkcs11Session session = sessionLease.Session;
+        ResolvedKeyLocator locator = ResolveRequiredLocator(authorization);
+        KeyHandleCacheKey cacheKey = CreateCacheKey(locator, profile, forSign: false);
 
-        Pkcs11ObjectHandle keyHandle = ResolveRequiredKeyHandle(session, authorization, profile, forSign: false);
-        Pkcs11Mechanism mechanism = profile.CreateMechanism();
-        bool verified = session.Verify(keyHandle, mechanism, payload, signature);
+        bool verified = ExecuteWithKeyHandleRecovery(
+            sessionLease,
+            cacheKey,
+            () =>
+            {
+                Pkcs11ObjectHandle keyHandle = ResolveRequiredKeyHandle(session, authorization, locator, profile, forSign: false);
+                Pkcs11Mechanism mechanism = profile.CreateMechanism();
+                return session.Verify(keyHandle, mechanism, payload, signature);
+            });
 
         return new CryptoApiVerifyOperationResult(profile.Name, verified, timeProvider.GetUtcNow());
     }
@@ -83,12 +98,11 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(length, MaxRandomLength);
 
-        Pkcs11Module module = pkcs11Runtime.GetInitializedModule();
-        using Pkcs11Session session = OpenCompatibleSession(module, ResolveRequiredSlotId(authorization));
-        LoginIfConfigured(session);
+        Pkcs11SlotId slotId = ResolveRequiredSlotId(authorization);
+        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = pkcs11Runtime.RentSession(slotId);
 
         byte[] buffer = new byte[length];
-        session.GenerateRandom(buffer);
+        sessionLease.Session.GenerateRandom(buffer);
         return new CryptoApiRandomOperationResult(buffer, timeProvider.GetUtcNow());
     }
 
@@ -103,41 +117,7 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         return new Pkcs11SlotId((nuint)slotId.Value);
     }
 
-    private void LoginIfConfigured(Pkcs11Session session)
-    {
-        string userPin = runtimeOptions.Value.UserPin?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(userPin))
-        {
-            return;
-        }
-
-        byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin);
-        try
-        {
-            session.Login(Pkcs11UserType.User, pinUtf8);
-        }
-        catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrUserAlreadyLoggedIn)
-        {
-        }
-    }
-
-    private static Pkcs11Session OpenCompatibleSession(Pkcs11Module module, Pkcs11SlotId slotId)
-    {
-        try
-        {
-            return module.OpenSession(slotId, readWrite: false);
-        }
-        catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrFunctionFailed)
-        {
-            return module.OpenSession(slotId, readWrite: true);
-        }
-    }
-
-    private static Pkcs11ObjectHandle ResolveRequiredKeyHandle(
-        Pkcs11Session session,
-        CryptoApiAuthorizedKeyOperation authorization,
-        SignatureAlgorithmProfile profile,
-        bool forSign)
+    private static ResolvedKeyLocator ResolveRequiredLocator(CryptoApiAuthorizedKeyOperation authorization)
     {
         byte[] objectId = ParseOptionalHex(authorization.ResolvedRoute.ObjectIdHex);
         byte[] objectLabel = string.IsNullOrWhiteSpace(authorization.ResolvedRoute.ObjectLabel)
@@ -149,12 +129,55 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
             throw new CryptoApiOperationConfigurationException($"Key alias '{authorization.AliasName}' does not define a PKCS#11 object locator.");
         }
 
-        KeyResolutionAttempt result;
-        if (objectId.Length != 0)
+        return new ResolvedKeyLocator(
+            ObjectId: objectId,
+            ObjectIdHex: objectId.Length == 0 ? null : Convert.ToHexString(objectId),
+            ObjectLabel: objectLabel,
+            ObjectLabelText: objectLabel.Length == 0 ? null : authorization.ResolvedRoute.ObjectLabel?.Trim());
+    }
+
+    private T ExecuteWithKeyHandleRecovery<T>(
+        CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease,
+        KeyHandleCacheKey cacheKey,
+        Func<T> operation)
+    {
+        try
         {
-            result = TryResolveKeyHandle(session, objectId, label: null, profile, forSign);
+            return operation();
+        }
+        catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrObjectHandleInvalid)
+        {
+            GetOrCreateSessionKeyHandleCache(sessionLease.Session).Invalidate(cacheKey);
+            return operation();
+        }
+        catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrSessionHandleInvalid)
+        {
+            sessionLease.MarkBroken();
+            throw new CryptoApiOperationExecutionException("The PKCS#11 session became invalid during execution. Retry the request.", ex);
+        }
+    }
+
+    private Pkcs11ObjectHandle ResolveRequiredKeyHandle(
+        Pkcs11Session session,
+        CryptoApiAuthorizedKeyOperation authorization,
+        ResolvedKeyLocator locator,
+        SignatureAlgorithmProfile profile,
+        bool forSign)
+    {
+        KeyHandleCacheKey cacheKey = CreateCacheKey(locator, profile, forSign);
+        SessionKeyHandleCache cache = GetOrCreateSessionKeyHandleCache(session);
+        if (cache.TryGetValue(cacheKey, out Pkcs11ObjectHandle cachedHandle))
+        {
+            return cachedHandle;
+        }
+
+        KeyResolutionAttempt result;
+        if (locator.ObjectId.Length != 0)
+        {
+            result = TryResolveKeyHandle(session, locator.ObjectId, label: null, profile, forSign);
             if (result.Handle is not null)
             {
+                cache.Set(cacheKey, result.Handle.Value);
                 return result.Handle.Value;
             }
 
@@ -164,11 +187,12 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
             }
         }
 
-        if (objectLabel.Length != 0)
+        if (locator.ObjectLabel.Length != 0)
         {
-            result = TryResolveKeyHandle(session, id: null, objectLabel, profile, forSign);
+            result = TryResolveKeyHandle(session, id: null, locator.ObjectLabel, profile, forSign);
             if (result.Handle is not null)
             {
+                cache.Set(cacheKey, result.Handle.Value);
                 return result.Handle.Value;
             }
 
@@ -180,6 +204,17 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
 
         throw new CryptoApiOperationExecutionException($"Key alias '{authorization.AliasName}' could not be resolved to a PKCS#11 object for {(forSign ? "signing" : "verification")}.");
     }
+
+    private SessionKeyHandleCache GetOrCreateSessionKeyHandleCache(Pkcs11Session session)
+        => _sessionKeyHandleCaches.GetValue(session, static _ => new SessionKeyHandleCache());
+
+    private static KeyHandleCacheKey CreateCacheKey(ResolvedKeyLocator locator, SignatureAlgorithmProfile profile, bool forSign)
+        => new(
+            locator.ObjectIdHex,
+            locator.ObjectLabelText,
+            profile.KeyType,
+            forSign ? profile.SignObjectClass : profile.VerifyObjectClass,
+            forSign);
 
     private static KeyResolutionAttempt TryResolveKeyHandle(
         Pkcs11Session session,
@@ -277,6 +312,33 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         {
             throw new CryptoApiOperationConfigurationException($"Configured object ID hex '{value}' is not valid.", ex);
         }
+    }
+
+    private readonly record struct ResolvedKeyLocator(
+        byte[] ObjectId,
+        string? ObjectIdHex,
+        byte[] ObjectLabel,
+        string? ObjectLabelText);
+
+    private readonly record struct KeyHandleCacheKey(
+        string? ObjectIdHex,
+        string? ObjectLabel,
+        Pkcs11KeyType KeyType,
+        Pkcs11ObjectClass ObjectClass,
+        bool ForSign);
+
+    private sealed class SessionKeyHandleCache
+    {
+        private readonly Dictionary<KeyHandleCacheKey, Pkcs11ObjectHandle> _handles = new();
+
+        public bool TryGetValue(KeyHandleCacheKey key, out Pkcs11ObjectHandle handle)
+            => _handles.TryGetValue(key, out handle);
+
+        public void Set(KeyHandleCacheKey key, Pkcs11ObjectHandle handle)
+            => _handles[key] = handle;
+
+        public void Invalidate(KeyHandleCacheKey key)
+            => _handles.Remove(key);
     }
 
     private readonly record struct KeyResolutionAttempt(Pkcs11ObjectHandle? Handle, bool Ambiguous);

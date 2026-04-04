@@ -8,5 +8,7 @@ public sealed class CryptoApiRuntimeOptions
 
     public string? UserPin { get; set; }
 
+    public int MaxRetainedSessionsPerSlot { get; set; } = 16;
+
     public bool DisableHttpsRedirection { get; set; }
 }
