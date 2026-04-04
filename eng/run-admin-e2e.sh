@@ -12,7 +12,10 @@ no_build=false
 fixture_root=""
 fixture_env=""
 admin_data_root=""
-crypto_api_shared_db=""
+artifact_root=""
+crypto_api_shared_connection_string=""
+postgres_container_id=""
+postgres_container_managed=false
 server_pid=""
 server_running=false
 
@@ -71,10 +74,96 @@ with socket.socket() as sock:
 PY
 }
 
+wait_for_postgres_container() {
+  local container_id="$1"
+  local database_user="$2"
+  local database_name="$3"
+  local attempts="${4:-60}"
+
+  for ((i=1; i<=attempts; i++)); do
+    if docker exec "$container_id" pg_isready -U "$database_user" -d "$database_name" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if ! docker inspect "$container_id" >/dev/null 2>&1; then
+      printf 'Managed PostgreSQL container exited before readiness check completed.\n' >&2
+      return 1
+    fi
+
+    sleep 1
+  done
+
+  return 1
+}
+
+configure_shared_persistence() {
+  local configured_connection_string="${PKCS11WRAPPER_ADMIN_E2E_POSTGRES_CONNECTION_STRING:-${PKCS11WRAPPER_TEST_POSTGRES_CONNECTION_STRING:-${CryptoApiSharedPersistence__ConnectionString:-}}}"
+
+  if [[ -n "$configured_connection_string" ]]; then
+    crypto_api_shared_connection_string="$configured_connection_string"
+    printf 'Using configured PostgreSQL shared persistence for admin E2E.\n'
+    return
+  fi
+
+  case "${PKCS11WRAPPER_ADMIN_E2E_POSTGRES_PROVISION:-auto}" in
+    0|false|False|FALSE|no|No|NO)
+      printf 'Missing PostgreSQL shared persistence for admin E2E. Set PKCS11WRAPPER_ADMIN_E2E_POSTGRES_CONNECTION_STRING (or PKCS11WRAPPER_TEST_POSTGRES_CONNECTION_STRING / CryptoApiSharedPersistence__ConnectionString), or allow Docker auto-provisioning.\n' >&2
+      exit 1
+      ;;
+  esac
+
+  if ! command -v docker >/dev/null 2>&1; then
+    printf 'Docker is required to auto-provision PostgreSQL for admin E2E when no connection string is configured. Set PKCS11WRAPPER_ADMIN_E2E_POSTGRES_CONNECTION_STRING or install Docker.\n' >&2
+    exit 1
+  fi
+
+  local postgres_image="${PKCS11WRAPPER_ADMIN_E2E_POSTGRES_IMAGE:-postgres:17-alpine}"
+  local postgres_database="${PKCS11WRAPPER_ADMIN_E2E_POSTGRES_DB:-pkcs11wrapper_admin_e2e}"
+  local postgres_user="${PKCS11WRAPPER_ADMIN_E2E_POSTGRES_USER:-cryptoapi}"
+  local postgres_password="${PKCS11WRAPPER_ADMIN_E2E_POSTGRES_PASSWORD:-ChangeMe!Postgres123}"
+
+  printf 'Starting ephemeral PostgreSQL container for admin E2E (%s).\n' "$postgres_image"
+  postgres_container_id="$(docker run -d --rm \
+    -e POSTGRES_DB="$postgres_database" \
+    -e POSTGRES_USER="$postgres_user" \
+    -e POSTGRES_PASSWORD="$postgres_password" \
+    -p 127.0.0.1::5432 \
+    "$postgres_image")"
+  postgres_container_managed=true
+
+  local postgres_port
+  postgres_port="$(docker inspect -f '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$postgres_container_id")"
+  if [[ -z "$postgres_port" ]]; then
+    printf 'Failed to resolve mapped PostgreSQL port for container %s.\n' "$postgres_container_id" >&2
+    exit 1
+  fi
+
+  if ! wait_for_postgres_container "$postgres_container_id" "$postgres_user" "$postgres_database"; then
+    if [[ -n "$artifact_root" ]]; then
+      docker logs "$postgres_container_id" > "$artifact_root/postgres.log" 2>&1 || true
+    fi
+    printf 'Ephemeral PostgreSQL container did not become ready in time.\n' >&2
+    exit 1
+  fi
+
+  crypto_api_shared_connection_string="Host=127.0.0.1;Port=$postgres_port;Database=$postgres_database;Username=$postgres_user;Password=$postgres_password;SSL Mode=Disable"
+  printf 'Provisioned ephemeral PostgreSQL on 127.0.0.1:%s for admin E2E.\n' "$postgres_port"
+}
+
 cleanup() {
   if [[ "$server_running" == "true" && -n "$server_pid" ]]; then
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
+  fi
+
+  if [[ -n "$postgres_container_id" ]]; then
+    if [[ -n "$artifact_root" ]]; then
+      docker logs "$postgres_container_id" > "$artifact_root/postgres.log" 2>&1 || true
+    fi
+
+    if [[ "$postgres_container_managed" == "true" ]]; then
+      docker stop "$postgres_container_id" >/dev/null 2>&1 || true
+    fi
   fi
 
   if [[ -n "$admin_data_root" && -d "$admin_data_root" ]]; then
@@ -99,6 +188,8 @@ export DOTNET_NOLOGO="${DOTNET_NOLOGO:-true}"
 
 artifact_root="${CI_ARTIFACT_ROOT:-$repo_root/artifacts/ci/admin-e2e}"
 mkdir -p "$artifact_root"
+
+configure_shared_persistence
 
 if [[ "$use_existing_env" == "true" || "${PKCS11_USE_EXISTING_ENV:-0}" == "1" ]]; then
   printf 'Using existing PKCS#11 environment (SoftHSM fixture setup skipped)\n'
@@ -155,7 +246,6 @@ fi
 "${playwright_command[@]}" "${playwright_install_args[@]}" 2>&1 | tee "$artifact_root/playwright-install.log"
 
 admin_data_root="$(mktemp -d -t pkcs11wrapper-admin-storage-XXXXXX)"
-crypto_api_shared_db="$admin_data_root/crypto-api-shared.db"
 admin_user="ci-admin"
 admin_password="AdminE2E!Pass123"
 admin_device_name="CI Seeded SoftHSM"
@@ -197,8 +287,8 @@ export AdminStorage__DataRoot="$admin_data_root"
 export LocalAdminBootstrap__UserName="$admin_user"
 export LocalAdminBootstrap__Password="$admin_password"
 export LocalAdminLoginThrottle__MaxFailures="100"
-export CryptoApiSharedPersistence__Provider="Sqlite"
-export CryptoApiSharedPersistence__ConnectionString="Data Source=$crypto_api_shared_db"
+export CryptoApiSharedPersistence__Provider="Postgres"
+export CryptoApiSharedPersistence__ConnectionString="$crypto_api_shared_connection_string"
 export CryptoApiSharedPersistence__AutoInitialize="true"
 
 (

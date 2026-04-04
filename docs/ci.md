@@ -80,6 +80,8 @@ Ordered admin runtime E2E steps:
 - `./eng/run-admin-e2e.sh --no-restore --no-build`
 - upload browser traces/screenshots plus runtime/server logs as Actions artifacts
 
+`eng/run-admin-e2e.sh` now drives the admin host against the supported Postgres shared-persistence backend. If no connection string is preconfigured, the script will auto-provision a temporary local PostgreSQL container with Docker for the duration of the E2E run.
+
 Ordered Windows steps:
 
 - checkout the repository
@@ -221,6 +223,8 @@ dotnet build Pkcs11Wrapper.sln -c Release --no-restore
 ./eng/run-admin-e2e.sh
 ./eng/run-smoke-aot.sh
 ```
+
+For the admin E2E lane, either keep Docker available so the script can self-provision a temporary PostgreSQL instance, or export `PKCS11WRAPPER_ADMIN_E2E_POSTGRES_CONNECTION_STRING` to point at an existing Postgres database.
 
 If you only need targeted troubleshooting:
 
