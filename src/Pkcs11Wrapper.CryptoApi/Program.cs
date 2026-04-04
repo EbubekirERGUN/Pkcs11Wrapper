@@ -62,6 +62,7 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<CryptoApiRuntimeDescriptorProvider>();
+builder.Services.AddSingleton<CryptoApiPkcs11Runtime>();
 builder.Services.AddSingleton<CryptoApiClientSecretGenerator>();
 builder.Services.AddSingleton<CryptoApiClientSecretHasher>();
 builder.Services.AddSingleton<CryptoApiClientManagementService>();

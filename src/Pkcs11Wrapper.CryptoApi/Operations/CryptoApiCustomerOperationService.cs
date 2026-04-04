@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Configuration;
+using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.Native;
 
 namespace Pkcs11Wrapper.CryptoApi.Operations;
@@ -31,6 +32,7 @@ public sealed record CryptoApiRandomOperationResult(
 
 public sealed class CryptoApiPkcs11CustomerOperationService(
     IOptions<CryptoApiRuntimeOptions> runtimeOptions,
+    CryptoApiPkcs11Runtime pkcs11Runtime,
     TimeProvider timeProvider) : ICryptoApiCustomerOperationService
 {
     private const int MaxPayloadBytes = 1024 * 1024;
@@ -45,7 +47,7 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         SignatureAlgorithmProfile profile = SignatureAlgorithmProfile.Parse(algorithm);
         byte[] payload = ParseRequiredBase64(payloadBase64, nameof(payloadBase64), MaxPayloadBytes);
 
-        using Pkcs11Module module = CreateInitializedModule();
+        Pkcs11Module module = pkcs11Runtime.GetInitializedModule();
         using Pkcs11Session session = OpenCompatibleSession(module, ResolveRequiredSlotId(authorization));
         LoginIfConfigured(session);
 
@@ -64,7 +66,7 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         byte[] payload = ParseRequiredBase64(payloadBase64, nameof(payloadBase64), MaxPayloadBytes);
         byte[] signature = ParseRequiredBase64(signatureBase64, nameof(signatureBase64), MaxPayloadBytes);
 
-        using Pkcs11Module module = CreateInitializedModule();
+        Pkcs11Module module = pkcs11Runtime.GetInitializedModule();
         using Pkcs11Session session = OpenCompatibleSession(module, ResolveRequiredSlotId(authorization));
         LoginIfConfigured(session);
 
@@ -81,34 +83,13 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(length, MaxRandomLength);
 
-        using Pkcs11Module module = CreateInitializedModule();
+        Pkcs11Module module = pkcs11Runtime.GetInitializedModule();
         using Pkcs11Session session = OpenCompatibleSession(module, ResolveRequiredSlotId(authorization));
         LoginIfConfigured(session);
 
         byte[] buffer = new byte[length];
         session.GenerateRandom(buffer);
         return new CryptoApiRandomOperationResult(buffer, timeProvider.GetUtcNow());
-    }
-
-    private Pkcs11Module CreateInitializedModule()
-    {
-        string modulePath = runtimeOptions.Value.ModulePath?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(modulePath))
-        {
-            throw new CryptoApiOperationConfigurationException("Crypto API PKCS#11 module path is not configured.");
-        }
-
-        Pkcs11Module module = Pkcs11Module.Load(modulePath);
-        try
-        {
-            module.Initialize();
-            return module;
-        }
-        catch
-        {
-            module.Dispose();
-            throw;
-        }
     }
 
     private static Pkcs11SlotId ResolveRequiredSlotId(CryptoApiAuthorizedKeyOperation authorization)
