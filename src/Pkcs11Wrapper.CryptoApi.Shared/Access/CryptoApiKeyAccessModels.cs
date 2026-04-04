@@ -14,6 +14,7 @@ public sealed record CryptoApiKeyAccessSnapshot(
 public sealed record CryptoApiManagedKeyAlias(
     Guid AliasId,
     string AliasName,
+    string? RouteGroupName,
     string? DeviceRoute,
     ulong? SlotId,
     string? ObjectLabel,
@@ -38,6 +39,7 @@ public sealed record CryptoApiManagedPolicy(
 
 public sealed record CreateCryptoApiKeyAliasRequest(
     string AliasName,
+    string? RouteGroupName,
     string? DeviceRoute,
     ulong? SlotId,
     string? ObjectLabel,
@@ -47,6 +49,7 @@ public sealed record CreateCryptoApiKeyAliasRequest(
 public sealed record UpdateCryptoApiKeyAliasRequest(
     Guid AliasId,
     string AliasName,
+    string? RouteGroupName,
     string? DeviceRoute,
     ulong? SlotId,
     string? ObjectLabel,
@@ -68,9 +71,21 @@ public sealed record CryptoApiOperationPolicyDocument(
     int Version,
     IReadOnlyList<string> AllowedOperations);
 
+public sealed record CryptoApiRouteCandidate(
+    string? DeviceRoute,
+    ulong SlotId,
+    int Priority);
+
+public sealed record CryptoApiRoutePlan(
+    string? RouteGroupName,
+    string SelectionMode,
+    IReadOnlyList<CryptoApiRouteCandidate> Candidates,
+    string? ObjectLabel,
+    string? ObjectIdHex);
+
 public sealed record CryptoApiResolvedKeyRoute(
     string? DeviceRoute,
-    ulong? SlotId,
+    ulong SlotId,
     string? ObjectLabel,
     string? ObjectIdHex);
 
@@ -84,7 +99,7 @@ public sealed record CryptoApiAuthorizedKeyOperation(
     string Operation,
     Guid AliasId,
     string AliasName,
-    CryptoApiResolvedKeyRoute ResolvedRoute,
+    CryptoApiRoutePlan RoutePlan,
     IReadOnlyList<CryptoApiMatchedPolicy> MatchedPolicies,
     DateTimeOffset AuthorizedAtUtc);
 

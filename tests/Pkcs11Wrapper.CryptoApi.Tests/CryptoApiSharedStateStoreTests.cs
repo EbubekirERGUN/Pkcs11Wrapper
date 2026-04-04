@@ -82,6 +82,7 @@ public sealed class CryptoApiSharedStateStoreTests
         await writer.UpsertKeyAliasAsync(new CryptoApiKeyAliasRecord(
             aliasId,
             "payments-signer",
+            null,
             "hsm-eu-primary",
             7,
             "Payments signing key",
@@ -289,6 +290,7 @@ public sealed class CryptoApiSharedStateStoreTests
         await store.UpsertKeyAliasAsync(new CryptoApiKeyAliasRecord(
             aliasId,
             "payments-signer",
+            null,
             "hsm-eu-primary",
             7,
             "Payments signing key",

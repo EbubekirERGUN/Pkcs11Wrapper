@@ -161,6 +161,7 @@ public sealed class CryptoApiDistributedHotPathCacheTests
             AllowedOperations: ["sign"]));
         CryptoApiManagedKeyAlias alias = await services.AccessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
             AliasName: "payments-signer",
+            RouteGroupName: null,
             DeviceRoute: "hsm-eu-primary",
             SlotId: 7,
             ObjectLabel: "Payments signing key",

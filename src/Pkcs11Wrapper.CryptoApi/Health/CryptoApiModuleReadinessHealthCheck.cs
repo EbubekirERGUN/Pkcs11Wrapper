@@ -11,9 +11,21 @@ public sealed class CryptoApiModuleReadinessHealthCheck(CryptoApiPkcs11Runtime r
     {
         try
         {
-            Pkcs11Module module = runtime.GetInitializedModule();
-            _ = module.GetInfo();
-            return Task.FromResult(HealthCheckResult.Healthy("Configured PKCS#11 module is initialized and ready."));
+            IReadOnlyList<string> backends = runtime.GetNamedBackendNames();
+            if (backends.Count == 0)
+            {
+                Pkcs11Module module = runtime.GetInitializedModule();
+                _ = module.GetInfo();
+                return Task.FromResult(HealthCheckResult.Healthy("Configured PKCS#11 module is initialized and ready."));
+            }
+
+            foreach (string backend in backends)
+            {
+                Pkcs11Module module = runtime.GetInitializedModule(backend);
+                _ = module.GetInfo();
+            }
+
+            return Task.FromResult(HealthCheckResult.Healthy($"Configured PKCS#11 backends are initialized and ready ({backends.Count} backend(s))."));
         }
         catch (CryptoApiOperationConfigurationException ex)
         {

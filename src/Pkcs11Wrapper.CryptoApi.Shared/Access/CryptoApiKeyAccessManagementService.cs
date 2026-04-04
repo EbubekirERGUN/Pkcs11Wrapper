@@ -66,11 +66,12 @@ public sealed class CryptoApiKeyAccessManagementService(
     public async Task<CryptoApiManagedKeyAlias> CreateKeyAliasAsync(CreateCryptoApiKeyAliasRequest request, CancellationToken cancellationToken = default)
     {
         string aliasName = NormalizeMachineName(request.AliasName, nameof(request.AliasName));
+        string? routeGroupName = NormalizeOptionalMachineName(request.RouteGroupName, nameof(request.RouteGroupName));
         string? deviceRoute = NormalizeOptionalMachineName(request.DeviceRoute, nameof(request.DeviceRoute));
-        ulong slotId = EnsureSlotId(request.SlotId, nameof(request.SlotId));
+        ulong? slotId = request.SlotId;
         string? objectLabel = NormalizeOptionalText(request.ObjectLabel, 160, nameof(request.ObjectLabel));
         string? objectIdHex = NormalizeObjectIdHex(request.ObjectIdHex);
-        EnsureRouteTarget(objectLabel, objectIdHex);
+        ValidateAliasRouteDefinition(routeGroupName, deviceRoute, slotId, objectLabel, objectIdHex);
 
         DateTimeOffset now = timeProvider.GetUtcNow();
         CryptoApiSharedStateSnapshot snapshot = await sharedStateStore.GetSnapshotAsync(cancellationToken);
@@ -82,8 +83,9 @@ public sealed class CryptoApiKeyAccessManagementService(
         CryptoApiKeyAliasRecord record = new(
             AliasId: Guid.NewGuid(),
             AliasName: aliasName,
-            DeviceRoute: deviceRoute,
-            SlotId: slotId,
+            RouteGroupName: routeGroupName,
+            DeviceRoute: routeGroupName is null ? deviceRoute : null,
+            SlotId: routeGroupName is null ? slotId : null,
             ObjectLabel: objectLabel,
             ObjectIdHex: objectIdHex,
             Notes: NormalizeOptionalText(request.Notes, 400, nameof(request.Notes)),
@@ -98,11 +100,12 @@ public sealed class CryptoApiKeyAccessManagementService(
     public async Task<CryptoApiManagedKeyAlias> UpdateKeyAliasAsync(UpdateCryptoApiKeyAliasRequest request, CancellationToken cancellationToken = default)
     {
         string aliasName = NormalizeMachineName(request.AliasName, nameof(request.AliasName));
+        string? routeGroupName = NormalizeOptionalMachineName(request.RouteGroupName, nameof(request.RouteGroupName));
         string? deviceRoute = NormalizeOptionalMachineName(request.DeviceRoute, nameof(request.DeviceRoute));
-        ulong slotId = EnsureSlotId(request.SlotId, nameof(request.SlotId));
+        ulong? slotId = request.SlotId;
         string? objectLabel = NormalizeOptionalText(request.ObjectLabel, 160, nameof(request.ObjectLabel));
         string? objectIdHex = NormalizeObjectIdHex(request.ObjectIdHex);
-        EnsureRouteTarget(objectLabel, objectIdHex);
+        ValidateAliasRouteDefinition(routeGroupName, deviceRoute, slotId, objectLabel, objectIdHex);
 
         CryptoApiSharedStateSnapshot snapshot = await sharedStateStore.GetSnapshotAsync(cancellationToken);
         CryptoApiKeyAliasRecord existing = snapshot.KeyAliases.FirstOrDefault(candidate => candidate.AliasId == request.AliasId)
@@ -116,8 +119,9 @@ public sealed class CryptoApiKeyAccessManagementService(
         CryptoApiKeyAliasRecord updated = existing with
         {
             AliasName = aliasName,
-            DeviceRoute = deviceRoute,
-            SlotId = slotId,
+            RouteGroupName = routeGroupName,
+            DeviceRoute = routeGroupName is null ? deviceRoute : null,
+            SlotId = routeGroupName is null ? slotId : null,
             ObjectLabel = objectLabel,
             ObjectIdHex = objectIdHex,
             Notes = NormalizeOptionalText(request.Notes, 400, nameof(request.Notes)),
@@ -237,6 +241,7 @@ public sealed class CryptoApiKeyAccessManagementService(
         => new(
             AliasId: alias.AliasId,
             AliasName: alias.AliasName,
+            RouteGroupName: alias.RouteGroupName,
             DeviceRoute: alias.DeviceRoute,
             SlotId: alias.SlotId,
             ObjectLabel: alias.ObjectLabel,
@@ -317,8 +322,22 @@ public sealed class CryptoApiKeyAccessManagementService(
         }
     }
 
-    private static ulong EnsureSlotId(ulong? slotId, string parameterName)
-        => slotId ?? throw new ArgumentException("A PKCS#11 slot id is required to route an alias.", parameterName);
+    private static void ValidateAliasRouteDefinition(string? routeGroupName, string? deviceRoute, ulong? slotId, string? objectLabel, string? objectIdHex)
+    {
+        EnsureRouteTarget(objectLabel, objectIdHex);
+
+        if (routeGroupName is not null)
+        {
+            if (deviceRoute is not null || slotId is not null)
+            {
+                throw new ArgumentException("Specify either a route group name or a legacy device-route/slot binding, not both.");
+            }
+
+            return;
+        }
+
+        _ = slotId ?? throw new ArgumentException("A PKCS#11 slot id is required when an alias does not target a route group.");
+    }
 
     private static void EnsureRouteTarget(string? objectLabel, string? objectIdHex)
     {

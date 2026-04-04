@@ -140,7 +140,7 @@ public sealed class CryptoApiRequestPathCache : IDisposable
             Operation: entry.Operation,
             AliasId: entry.AliasId,
             AliasName: entry.AliasName,
-            ResolvedRoute: entry.ResolvedRoute,
+            RoutePlan: entry.RoutePlan,
             MatchedPolicies: entry.MatchedPolicies,
             AuthorizedAtUtc: now);
         return true;
@@ -161,7 +161,7 @@ public sealed class CryptoApiRequestPathCache : IDisposable
                 authorization.Operation,
                 authorization.AliasId,
                 authorization.AliasName,
-                authorization.ResolvedRoute,
+                authorization.RoutePlan,
                 authorization.MatchedPolicies),
             new MemoryCacheEntryOptions
             {
@@ -188,6 +188,6 @@ public sealed class CryptoApiRequestPathCache : IDisposable
         string Operation,
         Guid AliasId,
         string AliasName,
-        CryptoApiResolvedKeyRoute ResolvedRoute,
+        CryptoApiRoutePlan RoutePlan,
         IReadOnlyList<CryptoApiMatchedPolicy> MatchedPolicies);
 }

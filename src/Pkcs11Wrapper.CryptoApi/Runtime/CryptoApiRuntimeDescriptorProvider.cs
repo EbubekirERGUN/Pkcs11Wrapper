@@ -18,6 +18,8 @@ public sealed class CryptoApiRuntimeDescriptorProvider(
         string apiBasePath = CryptoApiHostDefaults.NormalizeBasePath(hostOptions.Value.ApiBasePath);
         string provider = CryptoApiSharedPersistenceDefaults.NormalizeProvider(sharedPersistenceOptions.Value.Provider);
         bool sharedPersistenceConfigured = !string.IsNullOrWhiteSpace(sharedPersistenceOptions.Value.ConnectionString);
+        int configuredBackendCount = runtimeOptions.Value.Backends.Count(static backend => backend.Enabled);
+        int configuredRouteGroupCount = runtimeOptions.Value.RouteGroups.Count;
 
         return new CryptoApiRuntimeDescriptor(
             ServiceName: string.IsNullOrWhiteSpace(hostOptions.Value.ServiceName)
@@ -27,7 +29,11 @@ public sealed class CryptoApiRuntimeDescriptorProvider(
             ApiBasePath: apiBasePath,
             DeploymentModel: "stateless",
             StartedAtUtc: _startedAtUtc,
-            ModuleConfigured: !string.IsNullOrWhiteSpace(runtimeOptions.Value.ModulePath),
+            ModuleConfigured: !string.IsNullOrWhiteSpace(runtimeOptions.Value.ModulePath)
+                || runtimeOptions.Value.Backends.Any(static backend => !string.IsNullOrWhiteSpace(backend.ModulePath)),
+            MultiBackendConfigured: configuredBackendCount > 0,
+            ConfiguredBackendCount: configuredBackendCount,
+            ConfiguredRouteGroupCount: configuredRouteGroupCount,
             SharedPersistenceConfigured: sharedPersistenceConfigured,
             SharedPersistenceProvider: provider,
             SharedReadyAreas: CryptoApiSharedStateConstants.SharedReadyAreas,

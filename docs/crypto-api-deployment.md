@@ -299,20 +299,30 @@ This is a deliberate trade-off for the current product shape:
 
 ## Current routing/alias expectations
 
-Today, alias records in shared state can carry:
+Issue #150 adds the first real routing / dispatch slice for multi-backend Crypto API deployments.
 
-- `device_route`
-- `slot_id`
-- `object_label`
-- `object_id_hex`
+Alias records in shared state can now carry either:
 
-For current runtime execution, the Crypto API operation path requires the PKCS#11 details that actually resolve a key in the local module context:
+- a **route group name** plus `object_label` and/or `object_id_hex`, or
+- the older legacy tuple: `device_route`, `slot_id`, `object_label` and/or `object_id_hex`
 
-- `slot_id`
-- `object_label` and/or `object_id_hex`
+Runtime routing is now explicit and host-configured:
 
-`device_route` is useful shared control-plane metadata, but the current in-process execution path does **not** use it as an external service-discovery hop.
-Do not build an operator assumption that `device_route` alone steers requests to different API pools.
+- `CryptoApiRuntime:Backends` defines named PKCS#11 backends available on the host
+- `CryptoApiRuntime:RouteGroups` defines backend pools / ordered candidates
+- aliases target those pools via `route_group_name`
+
+The request path now actually uses the configured route registry at execution time:
+
+- candidates are selected deterministically by priority order
+- unhealthy candidates are cooled down temporarily after recoverable execution failures
+- execution fails over to the next candidate when the current backend cannot complete the request
+
+Practical scope of this first slice:
+
+- it is a **priority / failover** dispatcher, not a service-mesh or weighted global load balancer
+- alias object locators are expected to be valid across the backend pool (for example replicated labels / object IDs)
+- if you need per-backend object identity divergence, treat that as follow-up work rather than something this first slice claims to solve
 
 ## Health, readiness, and rollout behavior
 
@@ -327,7 +337,7 @@ That readiness probe tells you whether the admin app can use its own storage, **
 
 - `/health/live` checks process liveness
 - `/health/ready` checks:
-  - whether the configured PKCS#11 module can be loaded
+  - whether the configured PKCS#11 module or named backends can be loaded
   - whether shared persistence is reachable when it is configured
 
 Use the Crypto API readiness endpoint as your load-balancer target gate.

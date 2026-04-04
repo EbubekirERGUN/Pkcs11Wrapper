@@ -110,7 +110,7 @@ The store prepares the state that cannot safely stay per-node local once API ins
   - disable, revoke, expiry, and last-used metadata for lifecycle readiness
 - **Key aliases**
   - stable alias name used by customer-facing API requests
-  - internal routing metadata (`device_route`, `slot_id`, object label, object-id hex)
+  - internal routing metadata (`route_group_name` for pooled routing, or legacy `device_route`/`slot_id`, plus object label / object-id hex)
   - raw PKCS#11 locator details stay in shared state and internal services, not in the customer-facing response surface
 - **Policies**
   - versioned JSON policy document payload
@@ -136,7 +136,29 @@ Current settings live under three sections:
   "CryptoApiRuntime": {
     "DisableHttpsRedirection": false,
     "ModulePath": "/usr/lib/libsofthsm2.so",
-    "UserPin": "98765432"
+    "UserPin": "98765432",
+    "Backends": [
+      {
+        "Name": "hsm-eu-primary",
+        "ModulePath": "/usr/lib/libvendorhsm.so",
+        "UserPin": "98765432"
+      },
+      {
+        "Name": "hsm-eu-secondary",
+        "ModulePath": "/usr/lib/libvendorhsm.so",
+        "UserPin": "98765432"
+      }
+    ],
+    "RouteGroups": [
+      {
+        "Name": "payments-signers",
+        "SelectionMode": "priority",
+        "Backends": [
+          { "BackendName": "hsm-eu-primary", "SlotId": 7, "Priority": 10 },
+          { "BackendName": "hsm-eu-secondary", "SlotId": 7, "Priority": 20 }
+        ]
+      }
+    ]
   },
   "CryptoApiSharedPersistence": {
     "Provider": "Postgres",
@@ -155,6 +177,12 @@ Current settings live under three sections:
   }
 }
 ```
+
+Notes:
+
+- if `Backends` is omitted, the top-level `ModulePath` / `UserPin` pair is treated as the default backend runtime
+- route groups still work in that single-runtime mode; backend names then act as logical route labels while execution reuses the default local module
+- new aliases should prefer `route_group_name`; keep direct `device_route` / `slot_id` only for legacy one-route bindings
 
 Notes:
 
