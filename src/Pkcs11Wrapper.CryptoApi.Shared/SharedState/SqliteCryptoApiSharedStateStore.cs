@@ -10,6 +10,11 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
     private const string AuthStateRevisionMetadataKey = "auth_state_revision";
 
     private readonly CryptoApiSharedPersistenceOptions _options = options.Value;
+    private readonly SemaphoreSlim _initializationGate = new(1, 1);
+    private volatile bool _databaseInitialized;
+    private long _databaseInitializationCount;
+
+    internal long DatabaseInitializationCount => Interlocked.Read(ref _databaseInitializationCount);
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -18,16 +23,36 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             return;
         }
 
-        await using SqliteConnection connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await PrepareConnectionAsync(connection, cancellationToken);
-
-        if (!_options.AutoInitialize)
+        if (_databaseInitialized)
         {
             return;
         }
 
-        await EnsureSchemaAsync(connection, cancellationToken);
+        await _initializationGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_databaseInitialized)
+            {
+                return;
+            }
+
+            await using SqliteConnection connection = CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+            await PrepareConnectionAsync(connection, cancellationToken);
+            await ConfigureDatabaseAsync(connection, cancellationToken);
+
+            if (_options.AutoInitialize)
+            {
+                await EnsureSchemaAsync(connection, cancellationToken);
+            }
+
+            _databaseInitialized = true;
+            Interlocked.Increment(ref _databaseInitializationCount);
+        }
+        finally
+        {
+            _initializationGate.Release();
+        }
     }
 
     public async Task<CryptoApiSharedStateStatus> GetStatusAsync(CancellationToken cancellationToken = default)
@@ -70,8 +95,124 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         await using SqliteConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await PrepareConnectionAsync(connection, cancellationToken);
-        await EnsureSchemaAsync(connection, cancellationToken);
         return await GetAuthStateRevisionCoreAsync(connection, cancellationToken);
+    }
+
+    public async Task<CryptoApiClientAuthenticationState?> GetClientAuthenticationStateAsync(string keyIdentifier, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(keyIdentifier);
+
+        if (!IsConfigured())
+        {
+            return null;
+        }
+
+        await EnsureConfiguredAndInitializedAsync(cancellationToken);
+
+        await using SqliteConnection connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await PrepareConnectionAsync(connection, cancellationToken);
+
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                c.client_id,
+                c.client_name,
+                c.display_name,
+                c.application_type,
+                c.authentication_mode,
+                c.is_enabled,
+                c.notes,
+                c.created_at_utc,
+                c.updated_at_utc,
+                k.client_key_id,
+                k.key_name,
+                k.key_identifier,
+                k.credential_type,
+                k.secret_hash_algorithm,
+                k.secret_hash,
+                k.secret_hint,
+                k.is_enabled,
+                k.created_at_utc,
+                k.updated_at_utc,
+                k.expires_at_utc,
+                k.revoked_at_utc,
+                k.revoked_reason,
+                k.last_used_at_utc
+            FROM crypto_api_client_keys k
+            INNER JOIN crypto_api_clients c ON c.client_id = k.client_id
+            WHERE k.key_identifier = $keyIdentifier
+            LIMIT 1;
+            """;
+        AddText(command, "$keyIdentifier", keyIdentifier);
+
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        CryptoApiClientRecord client = new(
+            ClientId: Guid.Parse(reader.GetString(0)),
+            ClientName: reader.GetString(1),
+            DisplayName: reader.GetString(2),
+            ApplicationType: reader.GetString(3),
+            AuthenticationMode: reader.GetString(4),
+            IsEnabled: reader.GetBoolean(5),
+            Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
+            CreatedAtUtc: ParseTimestamp(reader.GetString(7)),
+            UpdatedAtUtc: ParseTimestamp(reader.GetString(8)));
+
+        CryptoApiClientKeyRecord key = new(
+            ClientKeyId: Guid.Parse(reader.GetString(9)),
+            ClientId: client.ClientId,
+            KeyName: reader.GetString(10),
+            KeyIdentifier: reader.GetString(11),
+            CredentialType: reader.GetString(12),
+            SecretHashAlgorithm: reader.GetString(13),
+            SecretHash: reader.GetString(14),
+            SecretHint: reader.IsDBNull(15) ? null : reader.GetString(15),
+            IsEnabled: reader.GetBoolean(16),
+            CreatedAtUtc: ParseTimestamp(reader.GetString(17)),
+            UpdatedAtUtc: ParseTimestamp(reader.GetString(18)),
+            ExpiresAtUtc: reader.IsDBNull(19) ? null : ParseTimestamp(reader.GetString(19)),
+            RevokedAtUtc: reader.IsDBNull(20) ? null : ParseTimestamp(reader.GetString(20)),
+            RevokedReason: reader.IsDBNull(21) ? null : reader.GetString(21),
+            LastUsedAtUtc: reader.IsDBNull(22) ? null : ParseTimestamp(reader.GetString(22)));
+
+        Guid[] boundPolicyIds = await ReadClientBoundPolicyIdsAsync(connection, client.ClientId, cancellationToken);
+        return new CryptoApiClientAuthenticationState(client, key, boundPolicyIds);
+    }
+
+    public async Task<CryptoApiKeyAuthorizationState> GetKeyAuthorizationStateAsync(Guid clientId, string aliasName, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(aliasName);
+
+        if (!IsConfigured())
+        {
+            return new CryptoApiKeyAuthorizationState(null, null, []);
+        }
+
+        await EnsureConfiguredAndInitializedAsync(cancellationToken);
+
+        await using SqliteConnection connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await PrepareConnectionAsync(connection, cancellationToken);
+
+        CryptoApiClientRecord? client = await ReadClientByIdAsync(connection, clientId, cancellationToken);
+        if (client is null)
+        {
+            return new CryptoApiKeyAuthorizationState(null, null, []);
+        }
+
+        CryptoApiKeyAliasRecord? alias = await ReadKeyAliasByNameAsync(connection, aliasName, cancellationToken);
+        if (alias is null)
+        {
+            return new CryptoApiKeyAuthorizationState(client, null, []);
+        }
+
+        IReadOnlyList<CryptoApiPolicyRecord> sharedPolicies = await ReadSharedPoliciesAsync(connection, clientId, alias.AliasId, cancellationToken);
+        return new CryptoApiKeyAuthorizationState(client, alias, sharedPolicies);
     }
 
     public async Task UpsertClientAsync(CryptoApiClientRecord client, CancellationToken cancellationToken = default)
@@ -451,6 +592,10 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
     {
         await ExecutePragmaAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken);
         await ExecutePragmaAsync(connection, "PRAGMA busy_timeout = 5000;", cancellationToken);
+    }
+
+    private static async Task ConfigureDatabaseAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
         await ExecutePragmaAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
     }
 
@@ -615,6 +760,120 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         return value is null
             ? 1
             : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<Guid[]> ReadClientBoundPolicyIdsAsync(SqliteConnection connection, Guid clientId, CancellationToken cancellationToken)
+    {
+        List<Guid> policyIds = [];
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT policy_id
+            FROM crypto_api_client_policy_bindings
+            WHERE client_id = $clientId
+            ORDER BY policy_id;
+            """;
+        AddText(command, "$clientId", clientId.ToString("D", CultureInfo.InvariantCulture));
+
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            policyIds.Add(Guid.Parse(reader.GetString(0)));
+        }
+
+        return policyIds.ToArray();
+    }
+
+    private static async Task<CryptoApiClientRecord?> ReadClientByIdAsync(SqliteConnection connection, Guid clientId, CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT client_id, client_name, display_name, application_type, authentication_mode, is_enabled, notes, created_at_utc, updated_at_utc
+            FROM crypto_api_clients
+            WHERE client_id = $clientId
+            LIMIT 1;
+            """;
+        AddText(command, "$clientId", clientId.ToString("D", CultureInfo.InvariantCulture));
+
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new CryptoApiClientRecord(
+            ClientId: Guid.Parse(reader.GetString(0)),
+            ClientName: reader.GetString(1),
+            DisplayName: reader.GetString(2),
+            ApplicationType: reader.GetString(3),
+            AuthenticationMode: reader.GetString(4),
+            IsEnabled: reader.GetBoolean(5),
+            Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
+            CreatedAtUtc: ParseTimestamp(reader.GetString(7)),
+            UpdatedAtUtc: ParseTimestamp(reader.GetString(8)));
+    }
+
+    private static async Task<CryptoApiKeyAliasRecord?> ReadKeyAliasByNameAsync(SqliteConnection connection, string aliasName, CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT alias_id, alias_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
+            FROM crypto_api_key_aliases
+            WHERE alias_name = $aliasName COLLATE NOCASE
+            LIMIT 1;
+            """;
+        AddText(command, "$aliasName", aliasName);
+
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new CryptoApiKeyAliasRecord(
+            AliasId: Guid.Parse(reader.GetString(0)),
+            AliasName: reader.GetString(1),
+            DeviceRoute: reader.IsDBNull(2) ? null : reader.GetString(2),
+            SlotId: reader.IsDBNull(3) ? null : checked((ulong)reader.GetInt64(3)),
+            ObjectLabel: reader.IsDBNull(4) ? null : reader.GetString(4),
+            ObjectIdHex: reader.IsDBNull(5) ? null : reader.GetString(5),
+            Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
+            IsEnabled: reader.GetBoolean(7),
+            CreatedAtUtc: ParseTimestamp(reader.GetString(8)),
+            UpdatedAtUtc: ParseTimestamp(reader.GetString(9)));
+    }
+
+    private static async Task<IReadOnlyList<CryptoApiPolicyRecord>> ReadSharedPoliciesAsync(SqliteConnection connection, Guid clientId, Guid aliasId, CancellationToken cancellationToken)
+    {
+        List<CryptoApiPolicyRecord> policies = [];
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT DISTINCT p.policy_id, p.policy_name, p.description, p.revision, p.document_json, p.is_enabled, p.created_at_utc, p.updated_at_utc
+            FROM crypto_api_policies p
+            INNER JOIN crypto_api_client_policy_bindings cpb ON cpb.policy_id = p.policy_id
+            INNER JOIN crypto_api_key_alias_policy_bindings kapb ON kapb.policy_id = p.policy_id
+            WHERE cpb.client_id = $clientId
+              AND kapb.alias_id = $aliasId
+              AND p.is_enabled = 1
+            ORDER BY p.policy_name;
+            """;
+        AddText(command, "$clientId", clientId.ToString("D", CultureInfo.InvariantCulture));
+        AddText(command, "$aliasId", aliasId.ToString("D", CultureInfo.InvariantCulture));
+
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            policies.Add(new CryptoApiPolicyRecord(
+                PolicyId: Guid.Parse(reader.GetString(0)),
+                PolicyName: reader.GetString(1),
+                Description: reader.IsDBNull(2) ? null : reader.GetString(2),
+                Revision: reader.GetInt32(3),
+                DocumentJson: reader.GetString(4),
+                IsEnabled: reader.GetBoolean(5),
+                CreatedAtUtc: ParseTimestamp(reader.GetString(6)),
+                UpdatedAtUtc: ParseTimestamp(reader.GetString(7))));
+        }
+
+        return policies;
     }
 
     private static async Task IncrementAuthStateRevisionAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken)

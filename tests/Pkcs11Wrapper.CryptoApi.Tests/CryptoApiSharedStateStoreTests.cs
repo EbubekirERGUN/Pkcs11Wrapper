@@ -195,6 +195,249 @@ public sealed class CryptoApiSharedStateStoreTests
         }
     }
 
+    [Fact]
+    public async Task ClientAuthenticationStateQueryReturnsJoinedClientKeyAndBoundPolicies()
+    {
+        string databasePath = Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-auth-state-{Guid.NewGuid():N}.db");
+        try
+        {
+            CryptoApiSharedPersistenceOptions options = new()
+            {
+                Provider = "Sqlite",
+                ConnectionString = $"Data Source={databasePath}",
+                AutoInitialize = true
+            };
+
+            SqliteCryptoApiSharedStateStore store = new(Options.Create(options));
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid clientId = Guid.NewGuid();
+            Guid clientKeyId = Guid.NewGuid();
+            Guid boundPolicyId = Guid.NewGuid();
+            Guid unboundPolicyId = Guid.NewGuid();
+
+            await store.UpsertClientAsync(new CryptoApiClientRecord(
+                clientId,
+                "targeted-auth-client",
+                "Targeted Auth Client",
+                "gateway",
+                "api-key",
+                true,
+                null,
+                now,
+                now));
+            await store.UpsertClientKeyAsync(new CryptoApiClientKeyRecord(
+                clientKeyId,
+                clientId,
+                "primary",
+                "kid-targeted-auth",
+                "api-key-secret",
+                "pbkdf2-sha256-v1",
+                "pbkdf2-sha256-v1$100000$salt$hash",
+                "tar...uth",
+                true,
+                now,
+                now,
+                null,
+                null,
+                null,
+                now.AddMinutes(-1)));
+            await store.UpsertPolicyAsync(new CryptoApiPolicyRecord(
+                boundPolicyId,
+                "signing-bound",
+                null,
+                1,
+                "{\"version\":1,\"allowedOperations\":[\"sign\"]}",
+                true,
+                now,
+                now));
+            await store.UpsertPolicyAsync(new CryptoApiPolicyRecord(
+                unboundPolicyId,
+                "verify-unbound",
+                null,
+                1,
+                "{\"version\":1,\"allowedOperations\":[\"verify\"]}",
+                true,
+                now,
+                now));
+            await store.ReplaceClientPolicyBindingsAsync(clientId, [boundPolicyId]);
+
+            CryptoApiClientAuthenticationState? authenticationState = await store.GetClientAuthenticationStateAsync("kid-targeted-auth");
+
+            Assert.NotNull(authenticationState);
+            Assert.Equal(clientId, authenticationState!.Client.ClientId);
+            Assert.Equal(clientKeyId, authenticationState.Key.ClientKeyId);
+            Assert.Equal("targeted-auth-client", authenticationState.Client.ClientName);
+            Assert.Equal("kid-targeted-auth", authenticationState.Key.KeyIdentifier);
+            Assert.Equal(new[] { boundPolicyId }, authenticationState.BoundPolicyIds);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task KeyAuthorizationStateQueryReturnsOnlySharedEnabledPoliciesForAlias()
+    {
+        string databasePath = Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-authorization-state-{Guid.NewGuid():N}.db");
+        try
+        {
+            CryptoApiSharedPersistenceOptions options = new()
+            {
+                Provider = "Sqlite",
+                ConnectionString = $"Data Source={databasePath}",
+                AutoInitialize = true
+            };
+
+            SqliteCryptoApiSharedStateStore store = new(Options.Create(options));
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid clientId = Guid.NewGuid();
+            Guid aliasId = Guid.NewGuid();
+            Guid sharedPolicyId = Guid.NewGuid();
+            Guid clientOnlyPolicyId = Guid.NewGuid();
+            Guid disabledSharedPolicyId = Guid.NewGuid();
+
+            await store.UpsertClientAsync(new CryptoApiClientRecord(
+                clientId,
+                "targeted-authorization-client",
+                "Targeted Authorization Client",
+                "gateway",
+                "api-key",
+                true,
+                null,
+                now,
+                now));
+            await store.UpsertKeyAliasAsync(new CryptoApiKeyAliasRecord(
+                aliasId,
+                "payments-signer",
+                "hsm-eu-primary",
+                7,
+                "Payments signing key",
+                "A1B2C3D4",
+                null,
+                true,
+                now,
+                now));
+            await store.UpsertPolicyAsync(new CryptoApiPolicyRecord(
+                sharedPolicyId,
+                "shared-sign",
+                null,
+                1,
+                "{\"version\":1,\"allowedOperations\":[\"sign\"]}",
+                true,
+                now,
+                now));
+            await store.UpsertPolicyAsync(new CryptoApiPolicyRecord(
+                clientOnlyPolicyId,
+                "client-only",
+                null,
+                1,
+                "{\"version\":1,\"allowedOperations\":[\"verify\"]}",
+                true,
+                now,
+                now));
+            await store.UpsertPolicyAsync(new CryptoApiPolicyRecord(
+                disabledSharedPolicyId,
+                "disabled-shared",
+                null,
+                1,
+                "{\"version\":1,\"allowedOperations\":[\"unwrap\"]}",
+                false,
+                now,
+                now));
+
+            await store.ReplaceClientPolicyBindingsAsync(clientId, [sharedPolicyId, clientOnlyPolicyId, disabledSharedPolicyId]);
+            await store.ReplaceKeyAliasPolicyBindingsAsync(aliasId, [sharedPolicyId, disabledSharedPolicyId]);
+
+            CryptoApiKeyAuthorizationState authorizationState = await store.GetKeyAuthorizationStateAsync(clientId, "PAYMENTS-SIGNER");
+
+            Assert.NotNull(authorizationState.Client);
+            Assert.NotNull(authorizationState.Alias);
+            Assert.Equal(clientId, authorizationState.Client!.ClientId);
+            Assert.Equal(aliasId, authorizationState.Alias!.AliasId);
+            CryptoApiPolicyRecord policy = Assert.Single(authorizationState.SharedPolicies);
+            Assert.Equal(sharedPolicyId, policy.PolicyId);
+            Assert.Equal("shared-sign", policy.PolicyName);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task GetAuthStateRevisionInitializesDatabaseOnlyOncePerProcess()
+    {
+        string databasePath = Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-init-once-{Guid.NewGuid():N}.db");
+        try
+        {
+            CryptoApiSharedPersistenceOptions options = new()
+            {
+                Provider = "Sqlite",
+                ConnectionString = $"Data Source={databasePath}",
+                AutoInitialize = true
+            };
+
+            SqliteCryptoApiSharedStateStore store = new(Options.Create(options));
+
+            await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => store.GetAuthStateRevisionAsync()));
+            await store.GetAuthStateRevisionAsync();
+            await store.GetSnapshotAsync();
+
+            Assert.Equal(1, store.DatabaseInitializationCount);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task SnapshotReadsDoNotReinitializeDatabaseAfterWarmUp()
+    {
+        string databasePath = Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-snapshot-warm-{Guid.NewGuid():N}.db");
+        try
+        {
+            CryptoApiSharedPersistenceOptions options = new()
+            {
+                Provider = "Sqlite",
+                ConnectionString = $"Data Source={databasePath}",
+                AutoInitialize = true
+            };
+
+            SqliteCryptoApiSharedStateStore writer = new(Options.Create(options));
+            Guid clientId = Guid.NewGuid();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            await writer.UpsertClientAsync(new CryptoApiClientRecord(
+                clientId,
+                "warm-client",
+                "Warm Client",
+                "service",
+                "api-key",
+                true,
+                null,
+                now,
+                now));
+
+            SqliteCryptoApiSharedStateStore reader = new(Options.Create(options));
+
+            await reader.GetSnapshotAsync();
+            long afterWarmUp = reader.DatabaseInitializationCount;
+
+            await reader.GetAuthStateRevisionAsync();
+            await reader.GetSnapshotAsync();
+            await reader.GetSnapshotAsync();
+
+            Assert.Equal(1, afterWarmUp);
+            Assert.Equal(afterWarmUp, reader.DatabaseInitializationCount);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
     private static void DeleteDatabaseArtifacts(string databasePath)
     {
         string walPath = databasePath + "-wal";

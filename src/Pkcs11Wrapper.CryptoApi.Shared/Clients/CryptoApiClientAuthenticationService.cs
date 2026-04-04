@@ -49,18 +49,14 @@ public sealed class CryptoApiClientAuthenticationService
                 Client: cachedClient);
         }
 
-        CryptoApiSharedStateSnapshot snapshot = await _sharedStateStore.GetSnapshotAsync(cancellationToken);
-        CryptoApiClientKeyRecord? key = snapshot.ClientKeys.FirstOrDefault(candidate => string.Equals(candidate.KeyIdentifier, normalizedKeyIdentifier, StringComparison.Ordinal));
-        if (key is null)
+        CryptoApiClientAuthenticationState? authenticationState = await _sharedStateStore.GetClientAuthenticationStateAsync(normalizedKeyIdentifier, cancellationToken);
+        if (authenticationState is null)
         {
             return Failed("API key was not found.");
         }
 
-        CryptoApiClientRecord? client = snapshot.Clients.FirstOrDefault(candidate => candidate.ClientId == key.ClientId);
-        if (client is null)
-        {
-            return Failed("Owning API client was not found.");
-        }
+        CryptoApiClientRecord client = authenticationState.Client;
+        CryptoApiClientKeyRecord key = authenticationState.Key;
 
         if (!client.IsEnabled)
         {
@@ -89,13 +85,6 @@ public sealed class CryptoApiClientAuthenticationService
 
         await RefreshLastUsedIfNeededAsync(authStateRevision, key.ClientKeyId, normalizedKeyIdentifier, secretFingerprint, now, key.LastUsedAtUtc, cancellationToken);
 
-        Guid[] boundPolicyIds = snapshot.ClientPolicyBindings
-            .Where(binding => binding.ClientId == client.ClientId)
-            .Select(binding => binding.PolicyId)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToArray();
-
         CryptoApiAuthenticatedClient authenticatedClient = new(
             ClientId: client.ClientId,
             ClientName: client.ClientName,
@@ -107,7 +96,7 @@ public sealed class CryptoApiClientAuthenticationService
             CredentialType: key.CredentialType,
             AuthenticatedAtUtc: now,
             ExpiresAtUtc: key.ExpiresAtUtc,
-            BoundPolicyIds: boundPolicyIds);
+            BoundPolicyIds: authenticationState.BoundPolicyIds);
 
         _requestPathCache.SetAuthenticatedClient(authStateRevision, normalizedKeyIdentifier, secretFingerprint, authenticatedClient, now);
 

@@ -362,6 +362,7 @@ public sealed class CryptoApiRoutesTests
             SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
             CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
             int baselineSnapshotReads = store.SnapshotReads;
+            int baselineAuthenticationStateReads = store.AuthenticationStateReads;
             int baselineLastUsedTouches = store.LastUsedTouches;
 
             using HttpClient httpClient = factory.CreateClient();
@@ -375,14 +376,16 @@ public sealed class CryptoApiRoutesTests
                 timeProvider.Advance(TimeSpan.FromSeconds(10));
             }
 
-            Assert.Equal(1, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
             Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
 
             timeProvider.Advance(TimeSpan.FromSeconds(15));
             using HttpResponseMessage afterInterval = await httpClient.GetAsync("/api/v1/auth/self");
             Assert.Equal(HttpStatusCode.OK, afterInterval.StatusCode);
 
-            Assert.Equal(1, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
             Assert.Equal(2, store.LastUsedTouches - baselineLastUsedTouches);
         }
         finally
@@ -415,6 +418,8 @@ public sealed class CryptoApiRoutesTests
             SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
             CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
             int baselineSnapshotReads = store.SnapshotReads;
+            int baselineAuthenticationStateReads = store.AuthenticationStateReads;
+            int baselineAuthorizationStateReads = store.AuthorizationStateReads;
             int baselineLastUsedTouches = store.LastUsedTouches;
 
             using HttpClient httpClient = factory.CreateClient();
@@ -430,7 +435,9 @@ public sealed class CryptoApiRoutesTests
                 timeProvider.Advance(TimeSpan.FromSeconds(5));
             }
 
-            Assert.Equal(1, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
+            Assert.Equal(1, store.AuthorizationStateReads - baselineAuthorizationStateReads);
             Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
             Assert.Equal(3, fakeOperations.Calls.Count);
         }
@@ -621,6 +628,10 @@ public sealed class CryptoApiRoutesTests
     {
         public int SnapshotReads { get; private set; }
 
+        public int AuthenticationStateReads { get; private set; }
+
+        public int AuthorizationStateReads { get; private set; }
+
         public int LastUsedTouches { get; private set; }
 
         public Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -631,6 +642,18 @@ public sealed class CryptoApiRoutesTests
 
         public Task<long> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default)
             => inner.GetAuthStateRevisionAsync(cancellationToken);
+
+        public async Task<CryptoApiClientAuthenticationState?> GetClientAuthenticationStateAsync(string keyIdentifier, CancellationToken cancellationToken = default)
+        {
+            AuthenticationStateReads++;
+            return await inner.GetClientAuthenticationStateAsync(keyIdentifier, cancellationToken);
+        }
+
+        public async Task<CryptoApiKeyAuthorizationState> GetKeyAuthorizationStateAsync(Guid clientId, string aliasName, CancellationToken cancellationToken = default)
+        {
+            AuthorizationStateReads++;
+            return await inner.GetKeyAuthorizationStateAsync(clientId, aliasName, cancellationToken);
+        }
 
         public Task UpsertClientAsync(CryptoApiClientRecord client, CancellationToken cancellationToken = default)
             => inner.UpsertClientAsync(client, cancellationToken);

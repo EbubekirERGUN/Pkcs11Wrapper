@@ -8,6 +8,10 @@ public interface ICryptoApiSharedStateStore
 
     Task<long> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default);
 
+    Task<CryptoApiClientAuthenticationState?> GetClientAuthenticationStateAsync(string keyIdentifier, CancellationToken cancellationToken = default);
+
+    Task<CryptoApiKeyAuthorizationState> GetKeyAuthorizationStateAsync(Guid clientId, string aliasName, CancellationToken cancellationToken = default);
+
     Task UpsertClientAsync(CryptoApiClientRecord client, CancellationToken cancellationToken = default);
 
     Task UpsertClientKeyAsync(CryptoApiClientKeyRecord clientKey, CancellationToken cancellationToken = default);
