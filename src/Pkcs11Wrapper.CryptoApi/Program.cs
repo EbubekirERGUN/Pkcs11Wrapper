@@ -77,7 +77,7 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
     })
     .Validate(
         static options => CryptoApiSharedPersistenceDefaults.IsSupportedProvider(options.Provider),
-        $"Crypto API shared persistence supports '{CryptoApiSharedPersistenceDefaults.SqliteProvider}' and '{CryptoApiSharedPersistenceDefaults.PostgresProvider}'.")
+        $"Crypto API shared persistence supports '{CryptoApiSharedPersistenceDefaults.PostgresProvider}' only.")
     .ValidateOnStart();
 
 builder.Services.AddSingleton(TimeProvider.System);

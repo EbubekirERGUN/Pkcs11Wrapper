@@ -7,9 +7,8 @@ namespace Pkcs11Wrapper.CryptoApi.Tests;
 public sealed class CryptoApiConfigurationTests
 {
     [Theory]
-    [InlineData(null, "Sqlite")]
-    [InlineData("", "Sqlite")]
-    [InlineData("sqlite", "Sqlite")]
+    [InlineData(null, "Postgres")]
+    [InlineData("", "Postgres")]
     [InlineData(" Postgres ", "Postgres")]
     [InlineData("postgresql", "Postgres")]
     [InlineData("Npgsql", "Postgres")]
@@ -18,6 +17,13 @@ public sealed class CryptoApiConfigurationTests
         string actual = CryptoApiSharedPersistenceDefaults.NormalizeProvider(configuredProvider);
 
         Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void SqliteProviderIsNoLongerSupported()
+    {
+        Assert.False(CryptoApiSharedPersistenceDefaults.IsSupportedProvider("sqlite"));
+        Assert.Equal("sqlite", CryptoApiSharedPersistenceDefaults.NormalizeProvider("sqlite"));
     }
 
     [Theory]
@@ -48,8 +54,8 @@ public sealed class CryptoApiConfigurationTests
             }),
             Options.Create(new CryptoApiSharedPersistenceOptions
             {
-                Provider = "Sqlite",
-                ConnectionString = "Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db"
+                Provider = "Postgres",
+                ConnectionString = "Host=localhost;Port=5432;Database=pkcs11wrapper;Username=tester;Password=secret"
             }),
             TimeProvider.System);
 
@@ -60,7 +66,7 @@ public sealed class CryptoApiConfigurationTests
         Assert.Equal("stateless", descriptor.DeploymentModel);
         Assert.True(descriptor.ModuleConfigured);
         Assert.True(descriptor.SharedPersistenceConfigured);
-        Assert.Equal("Sqlite", descriptor.SharedPersistenceProvider);
+        Assert.Equal("Postgres", descriptor.SharedPersistenceProvider);
         Assert.Contains("API clients and client keys", descriptor.SharedReadyAreas);
         Assert.Contains("API key hashing, rotation, and revocation metadata", descriptor.SharedReadyAreas);
         Assert.Contains("GET /api/crypto/shared-state", descriptor.CurrentSurface);

@@ -1,4 +1,19 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${PKCS11WRAPPER_POSTGRES_DB:-pkcs11wrapper_cryptoapi}
+      POSTGRES_USER: ${PKCS11WRAPPER_POSTGRES_USER:-cryptoapi}
+      POSTGRES_PASSWORD: ${PKCS11WRAPPER_POSTGRES_PASSWORD:-ChangeMe!Postgres123}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PKCS11WRAPPER_POSTGRES_USER:-cryptoapi} -d ${PKCS11WRAPPER_POSTGRES_DB:-pkcs11wrapper_cryptoapi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
   softhsm:
     build:
       context: ../../..
@@ -29,6 +44,8 @@ services:
       context: ../../..
       dockerfile: deploy/compose/softhsm-lab/admin.Dockerfile
     depends_on:
+      postgres:
+        condition: service_healthy
       softhsm:
         condition: service_healthy
     ports:
@@ -43,13 +60,12 @@ services:
       AdminBootstrapDevice__ModulePath: /opt/pkcs11/lib/libsofthsm2.so
       AdminBootstrapDevice__DefaultTokenLabel: ${SOFTHSM_TOKEN_LABEL:-Pkcs11Wrapper CI Token}
       AdminBootstrapDevice__Notes: ${PKCS11WRAPPER_ADMIN_DEVICE_NOTES:-Local/dev/lab SoftHSM compose stack. Not production orchestrated.}
-      CryptoApiSharedPersistence__Provider: Sqlite
-      CryptoApiSharedPersistence__ConnectionString: Data Source=/var/lib/pkcs11wrapper-cryptoapi/shared-state.db
+      CryptoApiSharedPersistence__Provider: Postgres
+      CryptoApiSharedPersistence__ConnectionString: Host=postgres;Port=5432;Database=${PKCS11WRAPPER_POSTGRES_DB:-pkcs11wrapper_cryptoapi};Username=${PKCS11WRAPPER_POSTGRES_USER:-cryptoapi};Password=${PKCS11WRAPPER_POSTGRES_PASSWORD:-ChangeMe!Postgres123};SSL Mode=Disable
       CryptoApiSharedPersistence__AutoInitialize: "true"
       SOFTHSM2_CONF: /opt/pkcs11/softhsm/softhsm2.conf
     volumes:
       - admin-data:/var/lib/pkcs11wrapper-admin
-      - cryptoapi-shared-state:/var/lib/pkcs11wrapper-cryptoapi
       - softhsm-state:/opt/pkcs11/softhsm
     healthcheck:
       test: ["CMD", "dotnet", "Pkcs11Wrapper.Admin.Web.dll", "--container-healthcheck", "http://127.0.0.1:8080/health/ready"]
@@ -60,5 +76,5 @@ services:
 
 volumes:
   admin-data:
-  cryptoapi-shared-state:
+  postgres-data:
   softhsm-state:

@@ -101,7 +101,7 @@ These are **not** fixed by this issue and should remain explicit in docs/roadmap
    The host now enforces per-instance customer-endpoint rate limits keyed by presented API key id (with remote-IP fallback when no key id is present), and 429 responses include `Retry-After` plus problem-details metadata. Upstream gateways/load balancers should still enforce fleet-wide request-rate, body-size, and abuse controls.
 
 4. **Provider choice still matters operationally.**
-   SQLite remains acceptable for local/dev/lab and conservative shared-volume deployments with trustworthy file-locking/WAL semantics, while production-oriented multi-instance deployments should prefer Postgres.
+   PostgreSQL is now the supported shared persistence backend for the Crypto API control plane. Redis may improve hot-path performance, but it remains optional and non-authoritative.
 
 5. **Security headers are intentionally conservative.**
    A strict CSP was not added in this pass because the current interactive admin UI would need CSP-specific tuning/testing rather than a guessy header that could break the product.

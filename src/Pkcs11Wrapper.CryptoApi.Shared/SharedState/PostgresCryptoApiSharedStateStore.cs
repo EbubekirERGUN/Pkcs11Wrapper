@@ -12,6 +12,9 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
     private readonly CryptoApiSharedPersistenceOptions _options = options.Value;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private volatile bool _databaseInitialized;
+    private long _databaseInitializationCount;
+
+    internal long DatabaseInitializationCount => Interlocked.Read(ref _databaseInitializationCount);
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -42,6 +45,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             }
 
             _databaseInitialized = true;
+            Interlocked.Increment(ref _databaseInitializationCount);
         }
         finally
         {

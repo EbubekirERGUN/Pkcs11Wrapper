@@ -12,213 +12,172 @@ using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Operations;
 using Pkcs11Wrapper.CryptoApi.SharedState;
+using static Pkcs11Wrapper.CryptoApi.Tests.PostgresTestEnvironment;
 
 namespace Pkcs11Wrapper.CryptoApi.Tests;
 
 public sealed class CryptoApiRoutesTests
 {
-    [Fact]
+    [PostgresFact]
     public async Task AuthorizeEndpointAcceptsAliasBasedRequestAndHidesInternalRouteDetails()
     {
-        string databasePath = CreateDatabasePath();
-        await using WebApplicationFactory<Program> factory = CreateFactory(databasePath);
-        try
-        {
-            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(scope.Options);
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
 
-            HttpClient httpClient = factory.CreateClient();
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+        HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
 
-            using HttpResponseMessage response = await httpClient.PostAsync(
-                "/api/v1/operations/authorize",
-                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"operation\":\"sign\"}"));
+        using HttpResponseMessage response = await httpClient.PostAsync(
+            "/api/v1/operations/authorize",
+            CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"operation\":\"sign\"}"));
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            JsonElement root = json.RootElement;
-            Assert.Equal("payments-signer", root.GetProperty("authorization").GetProperty("aliasName").GetString());
-            Assert.Equal("sign", root.GetProperty("authorization").GetProperty("operation").GetString());
-            Assert.Equal("gateway-sign", root.GetProperty("policies")[0].GetProperty("policyName").GetString());
-            Assert.False(root.TryGetProperty("resolvedRoute", out _));
-            Assert.False(root.GetProperty("authorization").TryGetProperty("deviceRoute", out _));
-            Assert.False(root.GetProperty("authorization").TryGetProperty("slotId", out _));
-            Assert.False(root.GetProperty("authorization").TryGetProperty("objectLabel", out _));
-            Assert.False(root.GetProperty("authorization").TryGetProperty("objectIdHex", out _));
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement root = json.RootElement;
+        Assert.Equal("payments-signer", root.GetProperty("authorization").GetProperty("aliasName").GetString());
+        Assert.Equal("sign", root.GetProperty("authorization").GetProperty("operation").GetString());
+        Assert.Equal("gateway-sign", root.GetProperty("policies")[0].GetProperty("policyName").GetString());
+        Assert.False(root.TryGetProperty("resolvedRoute", out _));
+        Assert.False(root.GetProperty("authorization").TryGetProperty("deviceRoute", out _));
+        Assert.False(root.GetProperty("authorization").TryGetProperty("slotId", out _));
+        Assert.False(root.GetProperty("authorization").TryGetProperty("objectLabel", out _));
+        Assert.False(root.GetProperty("authorization").TryGetProperty("objectIdHex", out _));
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task SignEndpointReusesAliasAuthorizationAndReturnsCustomerFacingPayload()
     {
-        string databasePath = CreateDatabasePath();
+        await using PostgresTestScope scope = await CreateScopeAsync();
         FakeCustomerOperationService fakeOperations = new();
-        await using WebApplicationFactory<Program> factory = CreateFactory(databasePath, services =>
+        await using WebApplicationFactory<Program> factory = CreateFactory(scope.Options, services =>
         {
             services.AddSingleton<ICryptoApiCustomerOperationService>(fakeOperations);
         });
 
-        try
-        {
-            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
 
-            HttpClient httpClient = factory.CreateClient();
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+        HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
 
-            using HttpResponseMessage response = await httpClient.PostAsync(
-                "/api/v1/operations/sign",
-                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+        using HttpResponseMessage response = await httpClient.PostAsync(
+            "/api/v1/operations/sign",
+            CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            JsonElement root = json.RootElement;
-            Assert.Equal("payments-signer", root.GetProperty("aliasName").GetString());
-            Assert.Equal("RS256", root.GetProperty("algorithm").GetString());
-            Assert.Equal(Convert.ToBase64String([0x01, 0x02, 0x03, 0x04]), root.GetProperty("signatureBase64").GetString());
-            Assert.Equal(4, root.GetProperty("signatureLength").GetInt32());
-            Assert.False(root.TryGetProperty("deviceRoute", out _));
-            Assert.False(root.TryGetProperty("slotId", out _));
-            Assert.Single(fakeOperations.Calls);
-            Assert.Equal("sign", fakeOperations.Calls[0].Operation);
-            Assert.Equal("payments-signer", fakeOperations.Calls[0].AliasName);
-            Assert.Equal("RS256", fakeOperations.Calls[0].Algorithm);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement root = json.RootElement;
+        Assert.Equal("payments-signer", root.GetProperty("aliasName").GetString());
+        Assert.Equal("RS256", root.GetProperty("algorithm").GetString());
+        Assert.Equal(Convert.ToBase64String([0x01, 0x02, 0x03, 0x04]), root.GetProperty("signatureBase64").GetString());
+        Assert.Equal(4, root.GetProperty("signatureLength").GetInt32());
+        Assert.False(root.TryGetProperty("deviceRoute", out _));
+        Assert.False(root.TryGetProperty("slotId", out _));
+        Assert.Single(fakeOperations.Calls);
+        Assert.Equal("sign", fakeOperations.Calls[0].Operation);
+        Assert.Equal("payments-signer", fakeOperations.Calls[0].AliasName);
+        Assert.Equal("RS256", fakeOperations.Calls[0].Algorithm);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task AuthorizeEndpointReturnsForbiddenWhenPolicyDoesNotAllowOperation()
     {
-        string databasePath = CreateDatabasePath();
-        await using WebApplicationFactory<Program> factory = CreateFactory(databasePath);
-        try
-        {
-            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "decrypt-only-target");
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(scope.Options);
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "decrypt-only-target");
 
-            HttpClient httpClient = factory.CreateClient();
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+        HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
 
-            using HttpResponseMessage response = await httpClient.PostAsync(
-                "/api/v1/operations/authorize",
-                CreateJsonContent("{\"keyAlias\":\"decrypt-only-target\",\"operation\":\"decrypt\"}"));
+        using HttpResponseMessage response = await httpClient.PostAsync(
+            "/api/v1/operations/authorize",
+            CreateJsonContent("{\"keyAlias\":\"decrypt-only-target\",\"operation\":\"decrypt\"}"));
 
-            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-            string content = await response.Content.ReadAsStringAsync();
-            Assert.Contains("The caller is not allowed to use the requested key alias or operation.", content, StringComparison.Ordinal);
-            Assert.DoesNotContain("Requested operation is not allowed for this key alias.", content, StringComparison.Ordinal);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        string content = await response.Content.ReadAsStringAsync();
+        Assert.Contains("The caller is not allowed to use the requested key alias or operation.", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("Requested operation is not allowed for this key alias.", content, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task RandomEndpointReturnsBadRequestWhenLengthIsInvalid()
     {
-        string databasePath = CreateDatabasePath();
-        await using WebApplicationFactory<Program> factory = CreateFactory(databasePath);
-        try
-        {
-            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["random"], "rng-primary");
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(scope.Options);
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["random"], "rng-primary");
 
-            HttpClient httpClient = factory.CreateClient();
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+        HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
 
-            using HttpResponseMessage response = await httpClient.PostAsync(
-                "/api/v1/operations/random",
-                CreateJsonContent("{\"keyAlias\":\"rng-primary\",\"length\":0}"));
+        using HttpResponseMessage response = await httpClient.PostAsync(
+            "/api/v1/operations/random",
+            CreateJsonContent("{\"keyAlias\":\"rng-primary\",\"length\":0}"));
 
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            string content = await response.Content.ReadAsStringAsync();
-            Assert.Contains("Random request failed.", content, StringComparison.Ordinal);
-            Assert.Contains("400", content, StringComparison.Ordinal);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        string content = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Random request failed.", content, StringComparison.Ordinal);
+        Assert.Contains("400", content, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task SharedStateEndpointHidesConnectionTargetAndCountsByDefault()
     {
-        string databasePath = CreateDatabasePath();
-        await using WebApplicationFactory<Program> factory = CreateFactory(databasePath);
-        try
-        {
-            using HttpClient httpClient = factory.CreateClient();
-            using HttpResponseMessage response = await httpClient.GetAsync("/api/v1/shared-state");
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(scope.Options);
+        using HttpClient httpClient = factory.CreateClient();
+        using HttpResponseMessage response = await httpClient.GetAsync("/api/v1/shared-state");
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            JsonElement root = json.RootElement;
-            Assert.True(root.GetProperty("configured").GetBoolean());
-            Assert.Equal("Sqlite", root.GetProperty("provider").GetString());
-            Assert.True(root.TryGetProperty("schemaVersion", out _));
-            Assert.True(root.TryGetProperty("sharedReadyAreas", out _));
-            Assert.False(root.TryGetProperty("connectionTarget", out _));
-            Assert.False(root.TryGetProperty("apiClientCount", out _));
-            Assert.False(root.TryGetProperty("apiClientKeyCount", out _));
-            Assert.False(root.TryGetProperty("keyAliasCount", out _));
-            Assert.False(root.TryGetProperty("policyCount", out _));
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement root = json.RootElement;
+        Assert.True(root.GetProperty("configured").GetBoolean());
+        Assert.Equal("Postgres", root.GetProperty("provider").GetString());
+        Assert.True(root.TryGetProperty("schemaVersion", out _));
+        Assert.True(root.TryGetProperty("sharedReadyAreas", out _));
+        Assert.False(root.TryGetProperty("connectionTarget", out _));
+        Assert.False(root.TryGetProperty("apiClientCount", out _));
+        Assert.False(root.TryGetProperty("apiClientKeyCount", out _));
+        Assert.False(root.TryGetProperty("keyAliasCount", out _));
+        Assert.False(root.TryGetProperty("policyCount", out _));
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task AuthEndpointsUseGenericFailureDetailsByDefault()
     {
-        string databasePath = CreateDatabasePath();
-        await using WebApplicationFactory<Program> factory = CreateFactory(databasePath);
-        try
-        {
-            using HttpClient httpClient = factory.CreateClient();
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(scope.Options);
+        using HttpClient httpClient = factory.CreateClient();
 
-            using HttpResponseMessage authResponse = await httpClient.GetAsync("/api/v1/auth/self");
-            string authContent = await authResponse.Content.ReadAsStringAsync();
-            Assert.Equal(HttpStatusCode.Unauthorized, authResponse.StatusCode);
-            Assert.Contains("The provided API credentials were rejected.", authContent, StringComparison.Ordinal);
-            Assert.DoesNotContain("API key id and secret are required.", authContent, StringComparison.Ordinal);
+        using HttpResponseMessage authResponse = await httpClient.GetAsync("/api/v1/auth/self");
+        string authContent = await authResponse.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.Unauthorized, authResponse.StatusCode);
+        Assert.Contains("The provided API credentials were rejected.", authContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("API key id and secret are required.", authContent, StringComparison.Ordinal);
 
-            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
 
-            using HttpResponseMessage authorizationResponse = await httpClient.PostAsync(
-                "/api/v1/operations/authorize",
-                CreateJsonContent("{\"keyAlias\":\"missing-alias\",\"operation\":\"sign\"}"));
+        using HttpResponseMessage authorizationResponse = await httpClient.PostAsync(
+            "/api/v1/operations/authorize",
+            CreateJsonContent("{\"keyAlias\":\"missing-alias\",\"operation\":\"sign\"}"));
 
-            string authorizationContent = await authorizationResponse.Content.ReadAsStringAsync();
-            Assert.Equal(HttpStatusCode.Forbidden, authorizationResponse.StatusCode);
-            Assert.Contains("The caller is not allowed to use the requested key alias or operation.", authorizationContent, StringComparison.Ordinal);
-            Assert.DoesNotContain("Requested key alias was not found.", authorizationContent, StringComparison.Ordinal);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        string authorizationContent = await authorizationResponse.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.Forbidden, authorizationResponse.StatusCode);
+        Assert.Contains("The caller is not allowed to use the requested key alias or operation.", authorizationContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("Requested key alias was not found.", authorizationContent, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task SecurityOptionsCanRestoreDetailedDiagnosticsForPrivateDeployments()
     {
-        string databasePath = CreateDatabasePath();
+        await using PostgresTestScope scope = await CreateScopeAsync();
         await using WebApplicationFactory<Program> factory = CreateFactory(
-            databasePath,
+            scope.Options,
             null,
             new Dictionary<string, string?>
             {
@@ -226,33 +185,26 @@ public sealed class CryptoApiRoutesTests
                 ["CryptoApiSecurity:ExposeSharedStateDetails"] = "true"
             });
 
-        try
-        {
-            using HttpClient httpClient = factory.CreateClient();
+        using HttpClient httpClient = factory.CreateClient();
 
-            using HttpResponseMessage sharedStateResponse = await httpClient.GetAsync("/api/v1/shared-state");
-            string sharedStateContent = await sharedStateResponse.Content.ReadAsStringAsync();
-            Assert.Equal(HttpStatusCode.OK, sharedStateResponse.StatusCode);
-            Assert.Contains("connectionTarget", sharedStateContent, StringComparison.Ordinal);
-            Assert.Contains("apiClientCount", sharedStateContent, StringComparison.Ordinal);
+        using HttpResponseMessage sharedStateResponse = await httpClient.GetAsync("/api/v1/shared-state");
+        string sharedStateContent = await sharedStateResponse.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, sharedStateResponse.StatusCode);
+        Assert.Contains("connectionTarget", sharedStateContent, StringComparison.Ordinal);
+        Assert.Contains("apiClientCount", sharedStateContent, StringComparison.Ordinal);
 
-            using HttpResponseMessage authResponse = await httpClient.GetAsync("/api/v1/auth/self");
-            string authContent = await authResponse.Content.ReadAsStringAsync();
-            Assert.Equal(HttpStatusCode.Unauthorized, authResponse.StatusCode);
-            Assert.Contains("API key id and secret are required.", authContent, StringComparison.Ordinal);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        using HttpResponseMessage authResponse = await httpClient.GetAsync("/api/v1/auth/self");
+        string authContent = await authResponse.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.Unauthorized, authResponse.StatusCode);
+        Assert.Contains("API key id and secret are required.", authContent, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task AuthEndpointReturnsRateLimitProblemDetailsAndRetryAfterHeader()
     {
-        string databasePath = CreateDatabasePath();
+        await using PostgresTestScope scope = await CreateScopeAsync();
         await using WebApplicationFactory<Program> factory = CreateFactory(
-            databasePath,
+            scope.Options,
             null,
             new Dictionary<string, string?>
             {
@@ -262,38 +214,31 @@ public sealed class CryptoApiRoutesTests
                 ["CryptoApiRateLimiting:Authentication:QueueLimit"] = "0"
             });
 
-        try
-        {
-            using HttpClient httpClient = factory.CreateClient();
+        using HttpClient httpClient = factory.CreateClient();
 
-            using HttpResponseMessage firstResponse = await httpClient.GetAsync("/api/v1/auth/self");
-            Assert.Equal(HttpStatusCode.Unauthorized, firstResponse.StatusCode);
+        using HttpResponseMessage firstResponse = await httpClient.GetAsync("/api/v1/auth/self");
+        Assert.Equal(HttpStatusCode.Unauthorized, firstResponse.StatusCode);
 
-            using HttpResponseMessage secondResponse = await httpClient.GetAsync("/api/v1/auth/self");
-            string content = await secondResponse.Content.ReadAsStringAsync();
+        using HttpResponseMessage secondResponse = await httpClient.GetAsync("/api/v1/auth/self");
+        string content = await secondResponse.Content.ReadAsStringAsync();
 
-            Assert.Equal(HttpStatusCode.TooManyRequests, secondResponse.StatusCode);
-            Assert.Equal("application/problem+json", secondResponse.Content.Headers.ContentType?.MediaType);
-            Assert.True(secondResponse.Headers.TryGetValues("Retry-After", out IEnumerable<string>? retryAfterValues));
-            Assert.NotEmpty(retryAfterValues);
-            Assert.Contains("Rate limit exceeded.", content, StringComparison.Ordinal);
-            Assert.Contains("customer-authentication", content, StringComparison.Ordinal);
-            Assert.Contains("instance-local", content, StringComparison.Ordinal);
-            Assert.Contains("retryAfterSeconds", content, StringComparison.Ordinal);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.Equal(HttpStatusCode.TooManyRequests, secondResponse.StatusCode);
+        Assert.Equal("application/problem+json", secondResponse.Content.Headers.ContentType?.MediaType);
+        Assert.True(secondResponse.Headers.TryGetValues("Retry-After", out IEnumerable<string>? retryAfterValues));
+        Assert.NotEmpty(retryAfterValues);
+        Assert.Contains("Rate limit exceeded.", content, StringComparison.Ordinal);
+        Assert.Contains("customer-authentication", content, StringComparison.Ordinal);
+        Assert.Contains("instance-local", content, StringComparison.Ordinal);
+        Assert.Contains("retryAfterSeconds", content, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task OperationRateLimitsArePartitionedByPresentedApiKeyId()
     {
-        string databasePath = CreateDatabasePath();
+        await using PostgresTestScope scope = await CreateScopeAsync();
         FakeCustomerOperationService fakeOperations = new();
         await using WebApplicationFactory<Program> factory = CreateFactory(
-            databasePath,
+            scope.Options,
             services => services.AddSingleton<ICryptoApiCustomerOperationService>(fakeOperations),
             new Dictionary<string, string?>
             {
@@ -303,53 +248,46 @@ public sealed class CryptoApiRoutesTests
                 ["CryptoApiRateLimiting:Operations:QueueLimit"] = "0"
             });
 
-        try
-        {
-            SeededAccess firstAccess = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer", policyName: $"gateway-sign-{Guid.NewGuid():N}");
-            SeededAccess secondAccess = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer-2", policyName: $"gateway-sign-{Guid.NewGuid():N}");
+        SeededAccess firstAccess = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer", policyName: $"gateway-sign-{Guid.NewGuid():N}");
+        SeededAccess secondAccess = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer-2", policyName: $"gateway-sign-{Guid.NewGuid():N}");
 
-            using HttpClient firstClient = factory.CreateClient();
-            firstClient.DefaultRequestHeaders.Add("X-Api-Key-Id", firstAccess.Key.KeyIdentifier);
-            firstClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", firstAccess.Key.Secret);
+        using HttpClient firstClient = factory.CreateClient();
+        firstClient.DefaultRequestHeaders.Add("X-Api-Key-Id", firstAccess.Key.KeyIdentifier);
+        firstClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", firstAccess.Key.Secret);
 
-            using HttpResponseMessage firstAllowed = await firstClient.PostAsync(
-                "/api/v1/operations/sign",
-                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
-            Assert.Equal(HttpStatusCode.OK, firstAllowed.StatusCode);
+        using HttpResponseMessage firstAllowed = await firstClient.PostAsync(
+            "/api/v1/operations/sign",
+            CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+        Assert.Equal(HttpStatusCode.OK, firstAllowed.StatusCode);
 
-            using HttpResponseMessage firstRejected = await firstClient.PostAsync(
-                "/api/v1/operations/sign",
-                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
-            string rejectedContent = await firstRejected.Content.ReadAsStringAsync();
-            Assert.Equal(HttpStatusCode.TooManyRequests, firstRejected.StatusCode);
-            Assert.Contains("customer-operations", rejectedContent, StringComparison.Ordinal);
+        using HttpResponseMessage firstRejected = await firstClient.PostAsync(
+            "/api/v1/operations/sign",
+            CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+        string rejectedContent = await firstRejected.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.TooManyRequests, firstRejected.StatusCode);
+        Assert.Contains("customer-operations", rejectedContent, StringComparison.Ordinal);
 
-            using HttpClient secondClient = factory.CreateClient();
-            secondClient.DefaultRequestHeaders.Add("X-Api-Key-Id", secondAccess.Key.KeyIdentifier);
-            secondClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", secondAccess.Key.Secret);
+        using HttpClient secondClient = factory.CreateClient();
+        secondClient.DefaultRequestHeaders.Add("X-Api-Key-Id", secondAccess.Key.KeyIdentifier);
+        secondClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", secondAccess.Key.Secret);
 
-            using HttpResponseMessage secondAllowed = await secondClient.PostAsync(
-                "/api/v1/operations/sign",
-                CreateJsonContent("{\"keyAlias\":\"payments-signer-2\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+        using HttpResponseMessage secondAllowed = await secondClient.PostAsync(
+            "/api/v1/operations/sign",
+            CreateJsonContent("{\"keyAlias\":\"payments-signer-2\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
 
-            Assert.Equal(HttpStatusCode.OK, secondAllowed.StatusCode);
-            Assert.Equal(2, fakeOperations.Calls.Count);
-            Assert.Equal("payments-signer", fakeOperations.Calls[0].AliasName);
-            Assert.Equal("payments-signer-2", fakeOperations.Calls[1].AliasName);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.Equal(HttpStatusCode.OK, secondAllowed.StatusCode);
+        Assert.Equal(2, fakeOperations.Calls.Count);
+        Assert.Equal("payments-signer", fakeOperations.Calls[0].AliasName);
+        Assert.Equal("payments-signer-2", fakeOperations.Calls[1].AliasName);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task AuthSelfWarmPathReusesCachedAuthenticationAndThrottlesLastUsedWrites()
     {
-        string databasePath = CreateDatabasePath();
+        await using PostgresTestScope scope = await CreateScopeAsync();
         MutableTimeProvider timeProvider = new(DateTimeOffset.Parse("2026-04-04T10:00:00Z"));
         await using WebApplicationFactory<Program> factory = CreateFactory(
-            databasePath,
+            scope.Options,
             services => ConfigureCountingSharedState(services, timeProvider),
             new Dictionary<string, string?>
             {
@@ -357,51 +295,44 @@ public sealed class CryptoApiRoutesTests
                 ["CryptoApiRequestPathCaching:LastUsedWriteIntervalSeconds"] = "30"
             });
 
-        try
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+        CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
+        int baselineSnapshotReads = store.SnapshotReads;
+        int baselineAuthenticationStateReads = store.AuthenticationStateReads;
+        int baselineLastUsedTouches = store.LastUsedTouches;
+
+        using HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+        for (int i = 0; i < 3; i++)
         {
-            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
-            CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
-            int baselineSnapshotReads = store.SnapshotReads;
-            int baselineAuthenticationStateReads = store.AuthenticationStateReads;
-            int baselineLastUsedTouches = store.LastUsedTouches;
-
-            using HttpClient httpClient = factory.CreateClient();
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
-
-            for (int i = 0; i < 3; i++)
-            {
-                using HttpResponseMessage response = await httpClient.GetAsync("/api/v1/auth/self");
-                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-                timeProvider.Advance(TimeSpan.FromSeconds(10));
-            }
-
-            Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
-            Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
-            Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
-
-            timeProvider.Advance(TimeSpan.FromSeconds(15));
-            using HttpResponseMessage afterInterval = await httpClient.GetAsync("/api/v1/auth/self");
-            Assert.Equal(HttpStatusCode.OK, afterInterval.StatusCode);
-
-            Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
-            Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
-            Assert.Equal(2, store.LastUsedTouches - baselineLastUsedTouches);
+            using HttpResponseMessage response = await httpClient.GetAsync("/api/v1/auth/self");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            timeProvider.Advance(TimeSpan.FromSeconds(10));
         }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+
+        Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
+        Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
+        Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
+
+        timeProvider.Advance(TimeSpan.FromSeconds(15));
+        using HttpResponseMessage afterInterval = await httpClient.GetAsync("/api/v1/auth/self");
+        Assert.Equal(HttpStatusCode.OK, afterInterval.StatusCode);
+
+        Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
+        Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
+        Assert.Equal(2, store.LastUsedTouches - baselineLastUsedTouches);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task OperationWarmPathReusesAuthenticationAndAuthorizationCaches()
     {
-        string databasePath = CreateDatabasePath();
+        await using PostgresTestScope scope = await CreateScopeAsync();
         MutableTimeProvider timeProvider = new(DateTimeOffset.Parse("2026-04-04T10:00:00Z"));
         FakeCustomerOperationService fakeOperations = new();
         await using WebApplicationFactory<Program> factory = CreateFactory(
-            databasePath,
+            scope.Options,
             services =>
             {
                 ConfigureCountingSharedState(services, timeProvider);
@@ -413,48 +344,41 @@ public sealed class CryptoApiRoutesTests
                 ["CryptoApiRequestPathCaching:LastUsedWriteIntervalSeconds"] = "30"
             });
 
-        try
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+        CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
+        int baselineSnapshotReads = store.SnapshotReads;
+        int baselineAuthenticationStateReads = store.AuthenticationStateReads;
+        int baselineAuthorizationStateReads = store.AuthorizationStateReads;
+        int baselineLastUsedTouches = store.LastUsedTouches;
+
+        using HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+        for (int i = 0; i < 3; i++)
         {
-            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
-            CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
-            int baselineSnapshotReads = store.SnapshotReads;
-            int baselineAuthenticationStateReads = store.AuthenticationStateReads;
-            int baselineAuthorizationStateReads = store.AuthorizationStateReads;
-            int baselineLastUsedTouches = store.LastUsedTouches;
-
-            using HttpClient httpClient = factory.CreateClient();
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
-
-            for (int i = 0; i < 3; i++)
-            {
-                using HttpResponseMessage response = await httpClient.PostAsync(
-                    "/api/v1/operations/sign",
-                    CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
-                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-                timeProvider.Advance(TimeSpan.FromSeconds(5));
-            }
-
-            Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
-            Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
-            Assert.Equal(1, store.AuthorizationStateReads - baselineAuthorizationStateReads);
-            Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
-            Assert.Equal(3, fakeOperations.Calls.Count);
+            using HttpResponseMessage response = await httpClient.PostAsync(
+                "/api/v1/operations/sign",
+                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            timeProvider.Advance(TimeSpan.FromSeconds(5));
         }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+
+        Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
+        Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
+        Assert.Equal(1, store.AuthorizationStateReads - baselineAuthorizationStateReads);
+        Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
+        Assert.Equal(3, fakeOperations.Calls.Count);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task OperationAuthorizationCacheInvalidatesWhenKeyIsRevoked()
     {
-        string databasePath = CreateDatabasePath();
+        await using PostgresTestScope scope = await CreateScopeAsync();
         MutableTimeProvider timeProvider = new(DateTimeOffset.Parse("2026-04-04T10:00:00Z"));
         FakeCustomerOperationService fakeOperations = new();
         await using WebApplicationFactory<Program> factory = CreateFactory(
-            databasePath,
+            scope.Options,
             services =>
             {
                 ConfigureCountingSharedState(services, timeProvider);
@@ -466,38 +390,31 @@ public sealed class CryptoApiRoutesTests
                 ["CryptoApiRequestPathCaching:LastUsedWriteIntervalSeconds"] = "30"
             });
 
-        try
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+
+        using HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+        using HttpResponseMessage firstResponse = await httpClient.PostAsync(
+            "/api/v1/operations/sign",
+            CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+
+        using (IServiceScope requestScope = factory.Services.CreateScope())
         {
-            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
-
-            using HttpClient httpClient = factory.CreateClient();
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
-            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
-
-            using HttpResponseMessage firstResponse = await httpClient.PostAsync(
-                "/api/v1/operations/sign",
-                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
-            Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
-
-            using (IServiceScope scope = factory.Services.CreateScope())
-            {
-                CryptoApiClientManagementService clientManagement = scope.ServiceProvider.GetRequiredService<CryptoApiClientManagementService>();
-                await clientManagement.RevokeClientKeyAsync(access.Key.ClientKeyId, "rotation");
-            }
-
-            using HttpResponseMessage secondResponse = await httpClient.PostAsync(
-                "/api/v1/operations/sign",
-                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
-            string content = await secondResponse.Content.ReadAsStringAsync();
-
-            Assert.Equal(HttpStatusCode.Unauthorized, secondResponse.StatusCode);
-            Assert.Contains("The provided API credentials were rejected.", content, StringComparison.Ordinal);
-            Assert.Single(fakeOperations.Calls);
+            CryptoApiClientManagementService clientManagement = requestScope.ServiceProvider.GetRequiredService<CryptoApiClientManagementService>();
+            await clientManagement.RevokeClientKeyAsync(access.Key.ClientKeyId, "rotation");
         }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+
+        using HttpResponseMessage secondResponse = await httpClient.PostAsync(
+            "/api/v1/operations/sign",
+            CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+        string content = await secondResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, secondResponse.StatusCode);
+        Assert.Contains("The provided API credentials were rejected.", content, StringComparison.Ordinal);
+        Assert.Single(fakeOperations.Calls);
     }
 
     private static void ConfigureCountingSharedState(IServiceCollection services, TimeProvider timeProvider)
@@ -505,7 +422,7 @@ public sealed class CryptoApiRoutesTests
         services.RemoveAll<TimeProvider>();
         services.AddSingleton<TimeProvider>(timeProvider);
         services.RemoveAll<ICryptoApiSharedStateStore>();
-        services.AddSingleton(sp => new SqliteCryptoApiSharedStateStore(sp.GetRequiredService<IOptions<CryptoApiSharedPersistenceOptions>>()));
+        services.AddSingleton(sp => new PostgresCryptoApiSharedStateStore(sp.GetRequiredService<IOptions<CryptoApiSharedPersistenceOptions>>()));
         services.AddSingleton<CountingSharedStateStore>();
         services.AddSingleton<ICryptoApiSharedStateStore>(sp => sp.GetRequiredService<CountingSharedStateStore>());
     }
@@ -538,7 +455,7 @@ public sealed class CryptoApiRoutesTests
         return new SeededAccess(client, key, alias, policy);
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(string databasePath, Action<IServiceCollection>? configureServices = null, IReadOnlyDictionary<string, string?>? additionalConfiguration = null)
+    private static WebApplicationFactory<Program> CreateFactory(CryptoApiSharedPersistenceOptions sharedPersistenceOptions, Action<IServiceCollection>? configureServices = null, IReadOnlyDictionary<string, string?>? additionalConfiguration = null)
         => new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
@@ -550,9 +467,9 @@ public sealed class CryptoApiRoutesTests
                         ["CryptoApiHost:ServiceName"] = "Pkcs11Wrapper.CryptoApi.Tests",
                         ["CryptoApiHost:ApiBasePath"] = "/api/v1",
                         ["CryptoApiRuntime:DisableHttpsRedirection"] = "true",
-                        ["CryptoApiSharedPersistence:Provider"] = "Sqlite",
-                        ["CryptoApiSharedPersistence:ConnectionString"] = $"Data Source={databasePath}",
-                        ["CryptoApiSharedPersistence:AutoInitialize"] = "true"
+                        ["CryptoApiSharedPersistence:Provider"] = sharedPersistenceOptions.Provider,
+                        ["CryptoApiSharedPersistence:ConnectionString"] = sharedPersistenceOptions.ConnectionString,
+                        ["CryptoApiSharedPersistence:AutoInitialize"] = sharedPersistenceOptions.AutoInitialize ? "true" : "false"
                     };
 
                     if (additionalConfiguration is not null)
@@ -574,19 +491,6 @@ public sealed class CryptoApiRoutesTests
 
     private static StringContent CreateJsonContent(string json)
         => new(json, Encoding.UTF8, "application/json");
-
-    private static string CreateDatabasePath()
-        => Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-routes-{Guid.NewGuid():N}.db");
-
-    private static void DeleteDatabaseArtifacts(string databasePath)
-    {
-        string walPath = databasePath + "-wal";
-        string shmPath = databasePath + "-shm";
-
-        if (File.Exists(databasePath)) File.Delete(databasePath);
-        if (File.Exists(walPath)) File.Delete(walPath);
-        if (File.Exists(shmPath)) File.Delete(shmPath);
-    }
 
     private sealed record SeededAccess(
         CryptoApiManagedClient Client,
@@ -624,7 +528,7 @@ public sealed class CryptoApiRoutesTests
 
     private sealed record FakeOperationCall(string Operation, string AliasName, string Algorithm);
 
-    private sealed class CountingSharedStateStore(SqliteCryptoApiSharedStateStore inner) : ICryptoApiSharedStateStore
+    private sealed class CountingSharedStateStore(PostgresCryptoApiSharedStateStore inner) : ICryptoApiSharedStateStore
     {
         public int SnapshotReads { get; private set; }
 
