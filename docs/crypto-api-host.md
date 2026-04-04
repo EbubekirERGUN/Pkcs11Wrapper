@@ -46,7 +46,7 @@ The current slice is still deliberately small, but now includes the first practi
 - liveness endpoint at `/health/live`
 - readiness endpoint at `/health/ready`
 - readiness check that attempts to load the configured PKCS#11 module via `Pkcs11Module.Load(...)`
-- shared SQLite-backed persistence for:
+- shared persistence for:
   - API clients / applications
   - API client keys / key identifiers
   - key aliases
@@ -76,21 +76,21 @@ Steady-state request execution is now intentionally **two-tiered**:
 - cache entries are keyed by a lightweight shared-state auth revision so admin changes still invalidate warm entries across nodes without forcing full snapshot reloads on every request
 - `last_used_at_utc` updates are throttled to a short interval per key instead of writing synchronously on every successful request
 
-This keeps the instance stateless in the deployment sense while removing avoidable per-request PBKDF2, full-snapshot, and SQLite write overhead from the hot path.
+This keeps the instance stateless in the deployment sense while removing avoidable per-request PBKDF2, full-snapshot, and shared-store write overhead from the hot path.
 
 ## Shared persistence approach
 
-The first persistence provider is intentionally pragmatic: **SQLite via a shared database file**.
+The host now supports two shared persistence providers without changing the control-plane model:
 
-Why this first:
+- **SQLite** via a shared database file for local/dev/lab and smaller bounded deployments
+- **PostgreSQL** for server-grade shared deployments where API instances need a real multi-process database backend instead of shared filesystem/WAL semantics
 
-- it is real and immediately usable
-- it keeps the initial auth/policy state model simple
-- it avoids inventing a full control-plane or migration system before the public crypto contract exists
-- it is enough for small-to-medium deployments where API instances share a mounted volume or otherwise coordinate through the same SQLite file
+Why keep both:
 
-This is **not** claiming SQLite is the final answer for every distributed deployment.
-For larger/server-grade topologies, the stored concepts can move to another relational backend later without changing the basic state model introduced here.
+- SQLite remains friction-free for local onboarding, labs, and small deployments
+- PostgreSQL provides a better default for production-oriented multi-instance topologies
+- both providers store the same core concepts: clients, keys, aliases, policies, bindings, last-used metadata, and auth-state revision
+- higher layers keep the same `ICryptoApiSharedStateStore` contract so the admin dashboard and Crypto API host do not need a different control-plane model per backend
 
 ### Shared-ready state
 
@@ -146,15 +146,29 @@ Current settings live under three sections:
 }
 ```
 
+PostgreSQL example:
+
+```json
+{
+  "CryptoApiSharedPersistence": {
+    "Provider": "Postgres",
+    "ConnectionString": "Host=db.internal;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=cryptoapi;Password=change-me;SSL Mode=Require",
+    "AutoInitialize": true
+  }
+}
+```
+
 Notes:
 
 - `CryptoApiHost:ApiBasePath` defines where machine-facing routes live.
 - `CryptoApiRuntime:ModulePath` is required for readiness because the host is not actually ready to serve crypto traffic until it can load a PKCS#11 module.
 - `CryptoApiRuntime:UserPin` is optional but practically required for many sign / HMAC / private-object flows. Treat it as deployment secret material, not as checked-in config.
 - `CryptoApiRuntime:DisableHttpsRedirection=true` is useful for local/container smoke flows behind a trusted reverse proxy or local HTTP test loop.
-- `CryptoApiSharedPersistence:Provider` currently supports only `Sqlite`.
+- `CryptoApiSharedPersistence:Provider` supports `Sqlite` and `Postgres`.
 - `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
 - `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
+- With `Provider=Sqlite`, the connection string is a SQLite file path such as `Data Source=/srv/pkcs11wrapper-cryptoapi/shared-state.db`.
+- With `Provider=Postgres`, use a standard Npgsql/PostgreSQL connection string and prefer a dedicated database/role for the Crypto API control plane.
 - `CryptoApiRateLimiting` adds built-in limits for `/api/v1/auth/self` and the customer-facing `/api/v1/operations/*` POST routes.
 - The first slice is intentionally **instance-local**, not shared across the fleet. A caller can consume up to the configured budget on each Crypto API instance behind the load balancer.
 - Partitioning is keyed by the presented `X-Api-Key-Id` header when present, with remote-IP fallback when no key id is available.
@@ -171,6 +185,7 @@ cd src/Pkcs11Wrapper.CryptoApi
 export CryptoApiRuntime__ModulePath=/usr/lib/libsofthsm2.so
 export CryptoApiRuntime__UserPin=98765432
 export CryptoApiRuntime__DisableHttpsRedirection=true
+export CryptoApiSharedPersistence__Provider=Sqlite
 export CryptoApiSharedPersistence__ConnectionString='Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db'
 dotnet run
 ```
@@ -209,7 +224,7 @@ The host now ships a practical first built-in rate-limiting slice for customer-f
 
 Why this shape:
 
-- it protects the public Crypto API surface without introducing shared counter writes into the SQLite control-plane path
+- it protects the public Crypto API surface without introducing shared counter writes into the control-plane data store
 - it keeps the API instances stateless and horizontally replaceable
 - it gives machine callers deterministic backoff behavior instead of silent slowdowns or long server-side queues
 
@@ -240,7 +255,7 @@ That means:
 
 - auth failures return generic rejection text by default
 - alias/policy authorization failures return generic access-denied text by default
-- `/api/v1/shared-state` omits the SQLite path/connection target and record counts by default
+- `/api/v1/shared-state` omits the shared-store connection target and record counts by default
 
 For private/internal troubleshooting, operators can opt back into the verbose behavior with:
 

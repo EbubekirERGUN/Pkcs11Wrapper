@@ -21,7 +21,7 @@ For the standalone admin image contract, see [docs/admin-container.md](docs/admi
 flowchart LR
     O[Operators] --> A[Pkcs11Wrapper.Admin.Web\nsingle admin dashboard]
     A --> AR[(AdminStorage__DataRoot\nusers, audit log, telemetry,\ndevice profiles, protected pins,\nData Protection keys)]
-    A -->|CryptoApiSharedPersistence| S[(Shared Crypto API state\nSQLite database)]
+    A -->|CryptoApiSharedPersistence| S[(Shared Crypto API state\nSQLite or PostgreSQL database)]
 
     G[Gateway / load balancer] --> C1[Crypto API instance A]
     G --> C2[Crypto API instance B]
@@ -42,6 +42,21 @@ Operationally:
 - run **one or more** `Pkcs11Wrapper.CryptoApi` instances behind your gateway/load balancer
 - point the admin dashboard and every Crypto API instance at the **same** `CryptoApiSharedPersistence:ConnectionString`
 - keep the admin dashboard's own storage root **separate** from the shared Crypto API state database
+
+## Choosing a shared persistence provider
+
+The repo now supports two shared persistence backends for the same control-plane model:
+
+- **SQLite**
+  - best for local/dev/lab, demos, bounded single-host deployments, and small shared-volume setups you already trust
+  - simplest operational footprint
+  - still the default in checked-in appsettings and the SoftHSM lab compose stack
+- **Postgres**
+  - best for production-oriented multi-instance deployments, especially when you do not want correctness to depend on shared filesystem locking/WAL behavior
+  - recommended starting point for server-grade scale-out
+  - uses the same admin workflow and the same runtime control-plane concepts as SQLite
+
+Provider choice changes the database target, not the higher-level model. The admin dashboard and every Crypto API instance still need to point at the **same** shared control-plane store.
 
 ## Responsibilities by component
 
@@ -137,20 +152,22 @@ That separation is deliberate: the admin dashboard remains an operator console, 
 
 ### Why the shared store is safe enough for the current model
 
-The current store implementation prepares every SQLite connection with:
+Both supported backends keep the control-plane schema normalized into separate client, key, alias, policy, and binding tables, and binding replacement flows run transactionally.
 
-- `PRAGMA foreign_keys = ON`
-- `PRAGMA busy_timeout = 5000`
-- `PRAGMA journal_mode = WAL`
+Provider-specific notes:
 
-And it keeps the control-plane schema normalized into separate client, key, alias, policy, and binding tables.
-Binding replacement flows run transactionally.
+- **SQLite** connections are prepared with:
+  - `PRAGMA foreign_keys = ON`
+  - `PRAGMA busy_timeout = 5000`
+  - `PRAGMA journal_mode = WAL`
+- **Postgres** uses the server database engine for concurrency, transactions, and locking instead of shared-file coordination
 
 Operator implications:
 
-- multiple independent processes can coordinate through the same database file when the underlying storage really supports SQLite locking/WAL semantics
 - API secrets are **not** stored in plaintext; the repo persists hashed secret material and only reveals the generated secret once at creation time
 - the admin dashboard can manage the same shared client/key state without becoming the runtime for machine traffic
+- SQLite remains practical when the underlying storage truly supports its locking/WAL model
+- Postgres is the safer default when you need a shared backend across multiple workers or hosts without filesystem caveats
 
 ## Recommended filesystem and state layout
 
@@ -159,14 +176,19 @@ Even on a single host, keep these storage concerns distinct:
 ```text
 /srv/pkcs11wrapper/
   admin-data/              # AdminStorage__DataRoot
-  cryptoapi-shared/
-    shared-state.db        # CryptoApiSharedPersistence database
+  cryptoapi-shared/        # SQLite: shared-state.db lives here
   pkcs11-client/           # mounted vendor PKCS#11 libraries / client bundle
   vendor-state/            # only if the vendor client truly requires writable side files
 ```
 
-Prefer this separation over dropping the shared SQLite file inside the admin storage root.
+Prefer this separation over dropping the shared control-plane database inside the admin storage root.
 It makes backup, restore, and responsibility boundaries much clearer.
+
+For Postgres deployments, the equivalent separation is:
+
+- admin local files under `AdminStorage__DataRoot`
+- a dedicated Postgres database/schema/role for `CryptoApiSharedPersistence`
+- PKCS#11 libraries and any vendor-writable state mounted separately from both of those
 
 ## Configuration recipe
 
@@ -181,6 +203,15 @@ CryptoApiSharedPersistence__ConnectionString=Data Source=/srv/pkcs11wrapper/cryp
 CryptoApiSharedPersistence__AutoInitialize=true
 ```
 
+Postgres variant:
+
+```text
+AdminStorage__DataRoot=/srv/pkcs11wrapper/admin-data
+CryptoApiSharedPersistence__Provider=Postgres
+CryptoApiSharedPersistence__ConnectionString=Host=db.internal;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=adminpanel;Password=<secret>;SSL Mode=Require
+CryptoApiSharedPersistence__AutoInitialize=true
+```
+
 ### Every Crypto API instance
 
 Point every instance at the **same** shared persistence target and the same PKCS#11 client layout:
@@ -192,6 +223,18 @@ CryptoApiRuntime__UserPin=<secret>
 CryptoApiRuntime__DisableHttpsRedirection=true
 CryptoApiSharedPersistence__Provider=Sqlite
 CryptoApiSharedPersistence__ConnectionString=Data Source=/srv/pkcs11wrapper/cryptoapi-shared/shared-state.db
+CryptoApiSharedPersistence__AutoInitialize=true
+```
+
+Postgres variant:
+
+```text
+CryptoApiHost__ApiBasePath=/api/v1
+CryptoApiRuntime__ModulePath=/srv/pkcs11wrapper/pkcs11-client/libvendorpkcs11.so
+CryptoApiRuntime__UserPin=<secret>
+CryptoApiRuntime__DisableHttpsRedirection=true
+CryptoApiSharedPersistence__Provider=Postgres
+CryptoApiSharedPersistence__ConnectionString=Host=db.internal;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=cryptoapi;Password=<secret>;SSL Mode=Require
 CryptoApiSharedPersistence__AutoInitialize=true
 ```
 
@@ -267,14 +310,14 @@ What that means operationally:
 
 - if you run one API instance, the built-in limiter gives a real local abuse-control baseline
 - if you run many API instances behind a load balancer, the effective fleet-wide budget is roughly the per-instance budget multiplied by the number of healthy instances that can receive the caller's traffic
-- if you need strict tenant/global quotas, keep enforcing them at the ingress/gateway layer rather than trying to treat the current SQLite control-plane store as a hot-path distributed counter system
+- if you need strict tenant/global quotas, keep enforcing them at the ingress/gateway layer rather than trying to treat the shared control-plane store as a hot-path distributed counter system
 
 This is a deliberate trade-off for the current product shape:
 
 - it protects the machine-facing API immediately
 - it does not add shared-state writes on every request
 - it keeps the stateless-HTTP-worker architecture honest
-- it avoids overselling SQLite as a distributed rate-limit backend
+- it avoids overselling the shared control-plane database as a distributed rate-limit backend
 
 ## Current routing/alias expectations
 
@@ -328,7 +371,7 @@ Today the repository does **not** ship:
 
 - a supported `Pkcs11Wrapper.CryptoApi` Dockerfile
 - a production compose/Kubernetes manifest for the multi-instance Crypto API service
-- a non-SQLite shared persistence provider
+- a production-owned Postgres image/compose/Kubernetes bundle for the shared control plane
 
 So for Crypto API containers, the image/wrapper is currently **operator-owned**.
 Base it on `src/Pkcs11Wrapper.CryptoApi`, but preserve the runtime contract described here.
@@ -359,7 +402,8 @@ For every Crypto API container you build around the host project:
 A practical split is:
 
 - one persistent volume for the admin dashboard data root
-- one persistent/shared volume for the Crypto API SQLite database file
+- for SQLite: one persistent/shared volume for the Crypto API database file
+- for Postgres: a managed database instance plus credentials/CA material supplied through your secret manager/orchestrator
 - one read-only mount for PKCS#11 client libraries
 - one separate writable vendor-state mount only if the vendor client requires it
 
@@ -367,13 +411,12 @@ Do **not** collapse everything into one writable directory just because containe
 
 ### Multi-host caution with SQLite
 
-The current shared-state provider is SQLite.
-That works well for small-to-medium deployments **only when** every process sees storage with correct SQLite file-locking and WAL behavior.
+SQLite remains supported, but it works well for shared scale-out **only when** every process sees storage with correct SQLite file-locking and WAL behavior.
 
 If you cannot guarantee that for your shared volume/filesystem:
 
-- keep the admin dashboard and Crypto API instances on a topology with trustworthy shared storage semantics
-- or keep Crypto API scale-out on a single host until a server-grade shared backend lands
+- prefer `CryptoApiSharedPersistence__Provider=Postgres`
+- or keep Crypto API scale-out on a topology where the SQLite storage semantics are trustworthy
 
 Do not assume every network filesystem is automatically safe for SQLite WAL.
 
@@ -393,9 +436,9 @@ The current deployment model is intentionally conservative.
 Plan around these present-day constraints:
 
 - one admin dashboard is the documented operating model
-- Crypto API instances are stateless, but the shared control-plane state currently depends on SQLite
+- Crypto API instances are stateless, but they still depend on a reachable shared control-plane database
 - the repository does not yet provide a first-class Crypto API container image
 - the current admin UI now covers the practical shared-store workflow for clients, keys, aliases, policies, and bindings, but the overall control plane is still intentionally conservative
 - current request execution depends on the locally configured PKCS#11 module path and HSM reachability on every API instance
 
-If you need a larger multi-host topology with stronger shared-state guarantees, treat that as a future backend/infrastructure step rather than forcing the current SQLite-based control plane into a shape it does not yet claim to support.
+If you need a larger multi-host topology with stronger shared-state guarantees, start with Postgres rather than forcing SQLite onto storage semantics it does not claim to support.

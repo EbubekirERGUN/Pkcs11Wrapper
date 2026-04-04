@@ -49,7 +49,7 @@ docker compose ps
 
 Then open <http://localhost:8080> and sign in with the bootstrap admin credential from `.env`.
 
-The **Crypto API Access** page should be usable immediately after sign-in; this compose bundle now preconfigures the admin service with a local shared SQLite database and auto-initializes its schema on first use.
+The **Crypto API Access** page should be usable immediately after sign-in; this compose bundle intentionally stays on a local shared SQLite database for lab use and auto-initializes its schema on first use.
 
 Default values from `.env.example`:
 
@@ -115,6 +115,6 @@ docker compose down -v
 - The admin service now reports healthy only after its storage-backed readiness probe succeeds, which makes startup status easier to understand from `docker compose ps`.
 - Rotate the bootstrap admin password from the `Users` page after first sign-in if the stack will live longer than a quick demo.
 - The `admin-data` volume includes the bootstrap notice, local users, Data Protection keys, device profiles, telemetry retention files, audit log, lab templates, and protected PIN cache.
-- The `cryptoapi-shared-state` volume contains the local/dev shared SQLite database that powers the admin panel's Crypto API Access control-plane workflow.
+- The `cryptoapi-shared-state` volume contains the local/dev shared SQLite database that powers the admin panel's Crypto API Access control-plane workflow. Production-oriented multi-instance deployments can switch the same control plane to `Provider=Postgres` instead.
 - The SoftHSM lab state lives entirely in the `softhsm-state` named volume; deleting that volume resets the token/config.
 - For persistent non-lab container deployments, back up and preserve the admin data volume intentionally rather than treating this compose bundle as the long-term deployment model.
