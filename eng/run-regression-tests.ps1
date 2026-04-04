@@ -39,9 +39,14 @@ if (-not $NoBuild.IsPresent) {
 }
 
 if ($IsWindows) {
-    Write-Host 'Windows regression lane: excluding SoftHsmCryptRegressionTests from dotnet test because SoftHSM-for-Windows can crash the native test host; runtime validation continues via smoke steps.'
+    $nativeTestFilter = @(
+        'FullyQualifiedName!~SoftHsmCryptRegressionTests'
+        'FullyQualifiedName!~TelemetryRegressionTests'
+    ) -join '&'
 
-    dotnet test (Join-Path $repoRoot 'tests/Pkcs11Wrapper.Native.Tests/Pkcs11Wrapper.Native.Tests.csproj') -c Release --no-build --nologo --filter "FullyQualifiedName!~SoftHsmCryptRegressionTests"
+    Write-Host 'Windows regression lane: excluding SoftHsmCryptRegressionTests and TelemetryRegressionTests from dotnet test because the current SoftHSM-for-Windows fixture can crash the native test host during C_Initialize; fixture provisioning plus managed/admin regression coverage still run.'
+
+    dotnet test (Join-Path $repoRoot 'tests/Pkcs11Wrapper.Native.Tests/Pkcs11Wrapper.Native.Tests.csproj') -c Release --no-build --nologo --filter $nativeTestFilter
     dotnet test (Join-Path $repoRoot 'tests/Pkcs11Wrapper.ThalesLuna.Tests/Pkcs11Wrapper.ThalesLuna.Tests.csproj') -c Release --no-build --nologo
     dotnet test (Join-Path $repoRoot 'tests/Pkcs11Wrapper.Admin.Tests/Pkcs11Wrapper.Admin.Tests.csproj') -c Release --no-build --nologo
 }
