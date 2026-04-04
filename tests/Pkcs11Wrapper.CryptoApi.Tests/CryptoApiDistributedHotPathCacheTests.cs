@@ -4,109 +4,89 @@ using Pkcs11Wrapper.CryptoApi.Caching;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.SharedState;
+using static Pkcs11Wrapper.CryptoApi.Tests.PostgresTestEnvironment;
 
 namespace Pkcs11Wrapper.CryptoApi.Tests;
 
 public sealed class CryptoApiDistributedHotPathCacheTests
 {
-    [Fact]
+    [PostgresFact]
     public async Task DistributedHotCacheSharesWarmAuthorizationAcrossInstances()
     {
-        string databasePath = CreateDatabasePath();
-        try
-        {
-            FakeDistributedHotPathCache distributedCache = new();
-            ServiceSet instanceA = CreateServiceSet(databasePath, distributedCache, DateTimeOffset.Parse("2026-04-04T12:00:00Z"));
-            ServiceSet instanceB = CreateServiceSet(databasePath, distributedCache, DateTimeOffset.Parse("2026-04-04T12:00:05Z"));
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        FakeDistributedHotPathCache distributedCache = new();
+        ServiceSet instanceA = CreateServiceSet(scope.Options, distributedCache, DateTimeOffset.Parse("2026-04-04T12:00:00Z"));
+        ServiceSet instanceB = CreateServiceSet(scope.Options, distributedCache, DateTimeOffset.Parse("2026-04-04T12:00:05Z"));
 
-            SeededAccess access = await SeedAuthorizedAccessAsync(instanceA);
-            instanceA.Store.ResetCounters();
-            instanceB.Store.ResetCounters();
+        SeededAccess access = await SeedAuthorizedAccessAsync(instanceA);
+        instanceA.Store.ResetCounters();
+        instanceB.Store.ResetCounters();
 
-            CryptoApiRequestAuthorizationResult first = await instanceA.Authorization.AuthorizeRequestAsync(
-                access.Key.KeyIdentifier,
-                access.Key.Secret,
-                access.Alias.AliasName,
-                "sign");
+        CryptoApiRequestAuthorizationResult first = await instanceA.Authorization.AuthorizeRequestAsync(
+            access.Key.KeyIdentifier,
+            access.Key.Secret,
+            access.Alias.AliasName,
+            "sign");
 
-            Assert.True(first.Succeeded, first.FailureReason);
-            Assert.Equal(1, instanceA.Store.AuthenticationStateReads);
-            Assert.Equal(1, instanceA.Store.AuthorizationStateReads);
-            Assert.Equal(1, instanceA.Store.LastUsedTouches);
-            Assert.Equal(0, instanceA.Store.AuthStateRevisionReads);
+        Assert.True(first.Succeeded, first.FailureReason);
+        Assert.Equal(1, instanceA.Store.AuthenticationStateReads);
+        Assert.Equal(1, instanceA.Store.AuthorizationStateReads);
+        Assert.Equal(1, instanceA.Store.LastUsedTouches);
+        Assert.Equal(0, instanceA.Store.AuthStateRevisionReads);
 
-            CryptoApiRequestAuthorizationResult second = await instanceB.Authorization.AuthorizeRequestAsync(
-                access.Key.KeyIdentifier,
-                access.Key.Secret,
-                access.Alias.AliasName,
-                "sign");
+        CryptoApiRequestAuthorizationResult second = await instanceB.Authorization.AuthorizeRequestAsync(
+            access.Key.KeyIdentifier,
+            access.Key.Secret,
+            access.Alias.AliasName,
+            "sign");
 
-            Assert.True(second.Succeeded, second.FailureReason);
-            Assert.Equal(0, instanceB.Store.AuthStateRevisionReads);
-            Assert.Equal(0, instanceB.Store.AuthenticationStateReads);
-            Assert.Equal(0, instanceB.Store.AuthorizationStateReads);
-            Assert.Equal(0, instanceB.Store.LastUsedTouches);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.True(second.Succeeded, second.FailureReason);
+        Assert.Equal(0, instanceB.Store.AuthStateRevisionReads);
+        Assert.Equal(0, instanceB.Store.AuthenticationStateReads);
+        Assert.Equal(0, instanceB.Store.AuthorizationStateReads);
+        Assert.Equal(0, instanceB.Store.LastUsedTouches);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task DistributedHotCacheInvalidatesAcrossInstancesWhenKeyIsRevoked()
     {
-        string databasePath = CreateDatabasePath();
-        try
-        {
-            FakeDistributedHotPathCache distributedCache = new();
-            ServiceSet instanceA = CreateServiceSet(databasePath, distributedCache, DateTimeOffset.Parse("2026-04-04T12:00:00Z"));
-            ServiceSet instanceB = CreateServiceSet(databasePath, distributedCache, DateTimeOffset.Parse("2026-04-04T12:00:05Z"));
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        FakeDistributedHotPathCache distributedCache = new();
+        ServiceSet instanceA = CreateServiceSet(scope.Options, distributedCache, DateTimeOffset.Parse("2026-04-04T12:00:00Z"));
+        ServiceSet instanceB = CreateServiceSet(scope.Options, distributedCache, DateTimeOffset.Parse("2026-04-04T12:00:05Z"));
 
-            SeededAccess access = await SeedAuthorizedAccessAsync(instanceA);
-            CryptoApiRequestAuthorizationResult warm = await instanceA.Authorization.AuthorizeRequestAsync(
-                access.Key.KeyIdentifier,
-                access.Key.Secret,
-                access.Alias.AliasName,
-                "sign");
-            Assert.True(warm.Succeeded, warm.FailureReason);
+        SeededAccess access = await SeedAuthorizedAccessAsync(instanceA);
+        CryptoApiRequestAuthorizationResult warm = await instanceA.Authorization.AuthorizeRequestAsync(
+            access.Key.KeyIdentifier,
+            access.Key.Secret,
+            access.Alias.AliasName,
+            "sign");
+        Assert.True(warm.Succeeded, warm.FailureReason);
 
-            instanceB.Store.ResetCounters();
-            await instanceA.ClientManagement.RevokeClientKeyAsync(access.Key.ClientKeyId, "rotation");
+        instanceB.Store.ResetCounters();
+        await instanceA.ClientManagement.RevokeClientKeyAsync(access.Key.ClientKeyId, "rotation");
 
-            CryptoApiRequestAuthorizationResult afterRevocation = await instanceB.Authorization.AuthorizeRequestAsync(
-                access.Key.KeyIdentifier,
-                access.Key.Secret,
-                access.Alias.AliasName,
-                "sign");
+        CryptoApiRequestAuthorizationResult afterRevocation = await instanceB.Authorization.AuthorizeRequestAsync(
+            access.Key.KeyIdentifier,
+            access.Key.Secret,
+            access.Alias.AliasName,
+            "sign");
 
-            Assert.False(afterRevocation.Succeeded);
-            Assert.Equal(401, afterRevocation.FailureStatusCode);
-            Assert.Equal("API key has been revoked.", afterRevocation.FailureReason);
-            Assert.Equal(0, instanceB.Store.AuthStateRevisionReads);
-            Assert.Equal(1, instanceB.Store.AuthenticationStateReads);
-            Assert.Equal(0, instanceB.Store.AuthorizationStateReads);
-            Assert.Equal(0, instanceB.Store.LastUsedTouches);
-        }
-        finally
-        {
-            DeleteDatabaseArtifacts(databasePath);
-        }
+        Assert.False(afterRevocation.Succeeded);
+        Assert.Equal(401, afterRevocation.FailureStatusCode);
+        Assert.Equal("API key has been revoked.", afterRevocation.FailureReason);
+        Assert.Equal(0, instanceB.Store.AuthStateRevisionReads);
+        Assert.Equal(1, instanceB.Store.AuthenticationStateReads);
+        Assert.Equal(0, instanceB.Store.AuthorizationStateReads);
+        Assert.Equal(0, instanceB.Store.LastUsedTouches);
     }
 
     private static ServiceSet CreateServiceSet(
-        string databasePath,
+        CryptoApiSharedPersistenceOptions sharedStateOptions,
         ICryptoApiDistributedHotPathCache distributedCache,
         DateTimeOffset utcNow)
     {
-        CryptoApiSharedPersistenceOptions sharedStateOptions = new()
-        {
-            Provider = CryptoApiSharedPersistenceDefaults.SqliteProvider,
-            ConnectionString = $"Data Source={databasePath}",
-            AutoInitialize = true
-        };
-
-        CountingAuthoritativeSharedStateStore authoritativeStore = new(new SqliteCryptoApiSharedStateStore(Options.Create(sharedStateOptions)));
+        CountingAuthoritativeSharedStateStore authoritativeStore = new(new PostgresCryptoApiSharedStateStore(Options.Create(sharedStateOptions)));
         ICryptoApiSharedStateStore sharedStateStore = new CryptoApiHotPathSharedStateStore(authoritativeStore, distributedCache);
         MutableTimeProvider timeProvider = new(utcNow);
         CryptoApiRequestPathCache requestPathCache = new(timeProvider, new CryptoApiRequestPathCachingOptions
@@ -151,19 +131,6 @@ public sealed class CryptoApiDistributedHotPathCacheTests
         return new SeededAccess(client, key, alias, policy);
     }
 
-    private static string CreateDatabasePath()
-        => Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-redis-hot-path-{Guid.NewGuid():N}.db");
-
-    private static void DeleteDatabaseArtifacts(string databasePath)
-    {
-        string walPath = databasePath + "-wal";
-        string shmPath = databasePath + "-shm";
-
-        if (File.Exists(databasePath)) File.Delete(databasePath);
-        if (File.Exists(walPath)) File.Delete(walPath);
-        if (File.Exists(shmPath)) File.Delete(shmPath);
-    }
-
     private sealed record ServiceSet(
         CountingAuthoritativeSharedStateStore Store,
         CryptoApiClientManagementService ClientManagement,
@@ -177,7 +144,7 @@ public sealed class CryptoApiDistributedHotPathCacheTests
         CryptoApiManagedKeyAlias Alias,
         CryptoApiManagedPolicy Policy);
 
-    private sealed class CountingAuthoritativeSharedStateStore(SqliteCryptoApiSharedStateStore inner) : ICryptoApiAuthoritativeSharedStateStore
+    private sealed class CountingAuthoritativeSharedStateStore(PostgresCryptoApiSharedStateStore inner) : ICryptoApiAuthoritativeSharedStateStore
     {
         public int AuthStateRevisionReads { get; private set; }
 

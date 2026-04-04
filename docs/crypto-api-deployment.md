@@ -21,7 +21,7 @@ For the standalone admin image contract, see [docs/admin-container.md](docs/admi
 flowchart LR
     O[Operators] --> A[Pkcs11Wrapper.Admin.Web\nsingle admin dashboard]
     A --> AR[(AdminStorage__DataRoot\nusers, audit log, telemetry,\ndevice profiles, protected pins,\nData Protection keys)]
-    A -->|CryptoApiSharedPersistence| S[(Shared Crypto API state\nSQLite or PostgreSQL database)]
+    A -->|CryptoApiSharedPersistence| S[(Shared Crypto API state\nPostgreSQL database)]
 
     G[Gateway / load balancer] --> C1[Crypto API instance A]
     G --> C2[Crypto API instance B]
@@ -43,20 +43,16 @@ Operationally:
 - point the admin dashboard and every Crypto API instance at the **same** `CryptoApiSharedPersistence:ConnectionString`
 - keep the admin dashboard's own storage root **separate** from the shared Crypto API state database
 
-## Choosing a shared persistence provider
+## Shared persistence baseline
 
-The repo now supports two shared persistence backends for the same control-plane model:
+The repo now standardizes on **Postgres** for the Crypto API shared control plane.
 
-- **SQLite**
-  - best for local/dev/lab, demos, bounded single-host deployments, and small shared-volume setups you already trust
-  - simplest operational footprint
-  - still the default in checked-in appsettings and the SoftHSM lab compose stack
-- **Postgres**
-  - best for production-oriented multi-instance deployments, especially when you do not want correctness to depend on shared filesystem locking/WAL behavior
-  - recommended starting point for server-grade scale-out
-  - uses the same admin workflow and the same runtime control-plane concepts as SQLite
+That means:
 
-Provider choice changes the database target, not the higher-level model. The admin dashboard and every Crypto API instance still need to point at the **same** shared control-plane store.
+- the admin dashboard and every Crypto API instance should point at the **same** PostgreSQL database when they share one control plane
+- local/dev/lab flows use the same backend family as production-oriented deployments
+- Redis remains optional acceleration only; it never replaces the relational source of truth
+- operators no longer need to evaluate SQLite shared-volume semantics before deciding whether a topology is supported
 
 ## Responsibilities by component
 
@@ -155,20 +151,15 @@ That separation is deliberate: the admin dashboard remains an operator console, 
 
 Both supported backends keep the control-plane schema normalized into separate client, key, alias, policy, and binding tables, and binding replacement flows run transactionally.
 
-Provider-specific notes:
+Provider-specific note:
 
-- **SQLite** connections are prepared with:
-  - `PRAGMA foreign_keys = ON`
-  - `PRAGMA busy_timeout = 5000`
-  - `PRAGMA journal_mode = WAL`
-- **Postgres** uses the server database engine for concurrency, transactions, and locking instead of shared-file coordination
+- **Postgres** uses the server database engine for concurrency, transactions, and locking, which keeps shared-state correctness independent of shared-file coordination.
 
 Operator implications:
 
 - API secrets are **not** stored in plaintext; the repo persists hashed secret material and only reveals the generated secret once at creation time
 - the admin dashboard can manage the same shared client/key state without becoming the runtime for machine traffic
-- SQLite remains practical when the underlying storage truly supports its locking/WAL model
-- Postgres is the safer default when you need a shared backend across multiple workers or hosts without filesystem caveats
+- Postgres is the supported backend when you need a shared control plane across multiple workers or hosts
 
 ## Recommended filesystem and state layout
 
@@ -177,12 +168,11 @@ Even on a single host, keep these storage concerns distinct:
 ```text
 /srv/pkcs11wrapper/
   admin-data/              # AdminStorage__DataRoot
-  cryptoapi-shared/        # SQLite: shared-state.db lives here
   pkcs11-client/           # mounted vendor PKCS#11 libraries / client bundle
   vendor-state/            # only if the vendor client truly requires writable side files
 ```
 
-Prefer this separation over dropping the shared control-plane database inside the admin storage root.
+Prefer this separation over dropping unrelated runtime files inside the admin storage root.
 It makes backup, restore, and responsibility boundaries much clearer.
 
 For Postgres deployments, the equivalent separation is:
@@ -199,15 +189,6 @@ Keep the admin dashboard's own storage root, and add the shared Crypto API conne
 
 ```text
 AdminStorage__DataRoot=/srv/pkcs11wrapper/admin-data
-CryptoApiSharedPersistence__Provider=Sqlite
-CryptoApiSharedPersistence__ConnectionString=Data Source=/srv/pkcs11wrapper/cryptoapi-shared/shared-state.db
-CryptoApiSharedPersistence__AutoInitialize=true
-```
-
-Postgres variant:
-
-```text
-AdminStorage__DataRoot=/srv/pkcs11wrapper/admin-data
 CryptoApiSharedPersistence__Provider=Postgres
 CryptoApiSharedPersistence__ConnectionString=Host=db.internal;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=adminpanel;Password=<secret>;SSL Mode=Require
 CryptoApiSharedPersistence__AutoInitialize=true
@@ -216,19 +197,6 @@ CryptoApiSharedPersistence__AutoInitialize=true
 ### Every Crypto API instance
 
 Point every instance at the **same** shared persistence target and the same PKCS#11 client layout:
-
-```text
-CryptoApiHost__ApiBasePath=/api/v1
-CryptoApiRuntime__ModulePath=/srv/pkcs11wrapper/pkcs11-client/libvendorpkcs11.so
-CryptoApiRuntime__UserPin=<secret>
-CryptoApiRuntime__DisableHttpsRedirection=true
-CryptoApiSharedPersistence__Provider=Sqlite
-CryptoApiSharedPersistence__ConnectionString=Data Source=/srv/pkcs11wrapper/cryptoapi-shared/shared-state.db
-CryptoApiSharedPersistence__AutoInitialize=true
-CryptoApiRequestPathCaching__Redis__Enabled=false
-```
-
-Postgres variant:
 
 ```text
 CryptoApiHost__ApiBasePath=/api/v1
@@ -410,23 +378,16 @@ For every Crypto API container you build around the host project:
 A practical split is:
 
 - one persistent volume for the admin dashboard data root
-- for SQLite: one persistent/shared volume for the Crypto API database file
 - for Postgres: a managed database instance plus credentials/CA material supplied through your secret manager/orchestrator
 - one read-only mount for PKCS#11 client libraries
 - one separate writable vendor-state mount only if the vendor client requires it
 
 Do **not** collapse everything into one writable directory just because containers make that easy.
 
-### Multi-host caution with SQLite
+### Shared-state support boundary
 
-SQLite remains supported, but it works well for shared scale-out **only when** every process sees storage with correct SQLite file-locking and WAL behavior.
-
-If you cannot guarantee that for your shared volume/filesystem:
-
-- prefer `CryptoApiSharedPersistence__Provider=Postgres`
-- or keep Crypto API scale-out on a topology where the SQLite storage semantics are trustworthy
-
-Do not assume every network filesystem is automatically safe for SQLite WAL.
+Postgres is the supported shared persistence backend for the Crypto API control plane.
+If your deployment cannot provide a reachable PostgreSQL database, the supported multi-instance/shared-state topology is not in place yet.
 
 ## Safe rollout pattern
 
@@ -449,4 +410,4 @@ Plan around these present-day constraints:
 - the current admin UI now covers the practical shared-store workflow for clients, keys, aliases, policies, and bindings, but the overall control plane is still intentionally conservative
 - current request execution depends on the locally configured PKCS#11 module path and HSM reachability on every API instance
 
-If you need a larger multi-host topology with stronger shared-state guarantees, start with Postgres rather than forcing SQLite onto storage semantics it does not claim to support.
+If you need a larger multi-host topology with stronger shared-state guarantees, stay on Postgres and treat Redis only as optional performance infrastructure.

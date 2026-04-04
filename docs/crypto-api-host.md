@@ -82,17 +82,14 @@ Redis does **not** become a second control plane; if Redis is unavailable or col
 
 ## Shared persistence approach
 
-The host now supports two shared persistence providers without changing the control-plane model:
+The host now standardizes on **PostgreSQL** for shared persistence across local/dev/lab and production-oriented deployments.
 
-- **SQLite** via a shared database file for local/dev/lab and smaller bounded deployments
-- **PostgreSQL** for server-grade shared deployments where API instances need a real multi-process database backend instead of shared filesystem/WAL semantics
+That keeps the control-plane model simple:
 
-Why keep both:
-
-- SQLite remains friction-free for local onboarding, labs, and small deployments
-- PostgreSQL provides a better default for production-oriented multi-instance topologies
-- both providers store the same core concepts: clients, keys, aliases, policies, bindings, last-used metadata, and auth-state revision
-- higher layers keep the same `ICryptoApiSharedStateStore` contract so the admin dashboard and Crypto API host do not need a different control-plane model per backend
+- every Crypto API instance and the admin dashboard point at the same PostgreSQL database when they share one control plane
+- PostgreSQL remains the authoritative source of truth for clients, keys, aliases, policies, bindings, last-used metadata, and auth-state revision
+- Redis can still be layered on as optional hot-path acceleration, but it does not become a second control plane
+- higher layers keep the same `ICryptoApiSharedStateStore` contract, just without a SQLite branch to document, validate, and support
 
 ### Shared-ready state
 
@@ -141,8 +138,8 @@ Current settings live under three sections:
     "UserPin": "98765432"
   },
   "CryptoApiSharedPersistence": {
-    "Provider": "Sqlite",
-    "ConnectionString": "Data Source=/srv/pkcs11wrapper-cryptoapi/shared-state.db",
+    "Provider": "Postgres",
+    "ConnectionString": "Host=db.internal;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=cryptoapi;Password=change-me;SSL Mode=Require",
     "AutoInitialize": true
   },
   "CryptoApiRequestPathCaching": {
@@ -158,28 +155,15 @@ Current settings live under three sections:
 }
 ```
 
-PostgreSQL example:
-
-```json
-{
-  "CryptoApiSharedPersistence": {
-    "Provider": "Postgres",
-    "ConnectionString": "Host=db.internal;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=cryptoapi;Password=change-me;SSL Mode=Require",
-    "AutoInitialize": true
-  }
-}
-```
-
 Notes:
 
 - `CryptoApiHost:ApiBasePath` defines where machine-facing routes live.
 - `CryptoApiRuntime:ModulePath` is required for readiness because the host is not actually ready to serve crypto traffic until it can load a PKCS#11 module.
 - `CryptoApiRuntime:UserPin` is optional but practically required for many sign / HMAC / private-object flows. Treat it as deployment secret material, not as checked-in config.
 - `CryptoApiRuntime:DisableHttpsRedirection=true` is useful for local/container smoke flows behind a trusted reverse proxy or local HTTP test loop.
-- `CryptoApiSharedPersistence:Provider` supports `Sqlite` and `Postgres`.
+- `CryptoApiSharedPersistence:Provider` supports `Postgres`.
 - `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
 - `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
-- With `Provider=Sqlite`, the connection string is a SQLite file path such as `Data Source=/srv/pkcs11wrapper-cryptoapi/shared-state.db`.
 - With `Provider=Postgres`, use a standard Npgsql/PostgreSQL connection string and prefer a dedicated database/role for the Crypto API control plane.
 - `CryptoApiRequestPathCaching:Redis:Enabled=true` turns on the optional Redis-backed hot-path accelerator.
 - `CryptoApiRequestPathCaching:Redis:Configuration` is a standard StackExchange.Redis configuration string.
@@ -203,8 +187,8 @@ cd src/Pkcs11Wrapper.CryptoApi
 export CryptoApiRuntime__ModulePath=/usr/lib/libsofthsm2.so
 export CryptoApiRuntime__UserPin=98765432
 export CryptoApiRuntime__DisableHttpsRedirection=true
-export CryptoApiSharedPersistence__Provider=Sqlite
-export CryptoApiSharedPersistence__ConnectionString='Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db'
+export CryptoApiSharedPersistence__Provider=Postgres
+export CryptoApiSharedPersistence__ConnectionString='Host=127.0.0.1;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=cryptoapi;Password=ChangeMe;SSL Mode=Disable'
 dotnet run
 ```
 

@@ -87,7 +87,7 @@ PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanım
 - servis kimliği, API base path, PKCS#11 runtime ve shared persistence için DI/config binding
 - `/health/live` + `/health/ready` endpoint'leri; readiness, yapılandırılan PKCS#11 modülü ile varsa shared persistence sınırını doğrular
 - gelişen machine-facing sözleşme için `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, `POST /api/v1/operations/authorize`, `/api/v1/shared-state` ve `/api/v1/auth/self` route alanı
-- çoklu instance senaryoları için API client/anahtarları, key alias'ları, policy'ler ve policy binding'leri taşıyan pragmatik shared SQLite persistence
+- local/dev/lab ve production odaklı kurulumlarda desteklenen ortak backend olarak PostgreSQL kullanan çoklu instance API client/anahtar, key alias, policy ve binding persistence modeli
 - üretilen API anahtarı secret'larının yalnızca bir kez gösterildiği, hash olarak saklandığı ve admin panelinden alias/policy/binding yönetimiyle eşleşebildiği access-control dilimi
 - machine-facing host'u tenant portalına çevirmeden uygulamalar, alias'lar, policy'ler ve binding'ler için admin-panel/shared-store control-plane modeli
 - hedef dağıtım modeli: **bir admin dashboard + çok sayıda stateless Crypto API instance'ı**
@@ -101,7 +101,7 @@ PKCS#11 entegrasyonları güçlüdür ama modern .NET uygulamalarında kullanım
 | PKCS#11 v3 interface discovery | ✅ | modül export etmiyorsa capability-gated davranış |
 | PKCS#11 v3 message API'leri | ✅ | managed/API desteği var; runtime modül desteğine bağlı |
 | Admin panel | ✅ | auth, local users, config transfer, audit integrity, PKCS#11 Lab, telemetry ve Crypto API Access control-plane akışları içeren işlevsel Blazor Server yönetim yüzeyi |
-| Crypto API host iskeleti | ✅ | DI/config, servis dokümanları, health/readiness, shared SQLite tabanlı auth/policy persistence ve ilk alias-routing/policy-enforcement dilimini içeren stateless ASP.NET Core host |
+| Crypto API host iskeleti | ✅ | DI/config, servis dokümanları, health/readiness, PostgreSQL tabanlı shared auth/policy persistence, opsiyonel Redis hot-path hızlandırması ve ilk alias-routing/policy-enforcement dilimini içeren stateless ASP.NET Core host |
 | Vendor regression lane | ✅ | opsiyonel non-SoftHSM doğrulama yolu |
 
 ## Depo mimarisi
@@ -111,7 +111,7 @@ flowchart LR
     A[Pkcs11Wrapper.Admin.Web\nBlazor Server Admin Panel] --> B[Pkcs11Wrapper.Admin.Application]
     B --> C[Pkcs11Wrapper.Admin.Infrastructure]
     B --> D[Pkcs11Wrapper]
-    A --> S[(Paylaşılan Crypto API durumu\nSQLite control-plane DB)]
+    A --> S[(Paylaşılan Crypto API durumu\nPostgreSQL control-plane DB)]
     H[Pkcs11Wrapper.CryptoApi\nStateless ASP.NET Core Host] --> D
     H --> S
     D --> E[Pkcs11Wrapper.Native]
@@ -165,7 +165,8 @@ export AdminRuntime__DisableHttpsRedirection=true
 cd src/Pkcs11Wrapper.CryptoApi
 export CryptoApiRuntime__ModulePath=/usr/lib/libsofthsm2.so
 export CryptoApiRuntime__DisableHttpsRedirection=true
-export CryptoApiSharedPersistence__ConnectionString='Data Source=/tmp/pkcs11wrapper-cryptoapi-shared.db'
+export CryptoApiSharedPersistence__Provider=Postgres
+export CryptoApiSharedPersistence__ConnectionString='Host=127.0.0.1;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=cryptoapi;Password=ChangeMe;SSL Mode=Disable'
 dotnet run
 ```
 

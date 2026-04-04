@@ -56,7 +56,7 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
     })
     .Validate(
         static options => CryptoApiSharedPersistenceDefaults.IsSupportedProvider(options.Provider),
-        $"Crypto API shared persistence supports '{CryptoApiSharedPersistenceDefaults.SqliteProvider}' and '{CryptoApiSharedPersistenceDefaults.PostgresProvider}'.")
+        $"Crypto API shared persistence supports '{CryptoApiSharedPersistenceDefaults.PostgresProvider}' only.")
     .ValidateOnStart();
 
 AdminStorageOptions adminStorage = builder.Configuration.GetSection("AdminStorage").Get<AdminStorageOptions>() ?? new();

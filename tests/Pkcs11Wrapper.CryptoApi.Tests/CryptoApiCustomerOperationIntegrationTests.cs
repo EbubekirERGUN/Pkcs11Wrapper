@@ -10,15 +10,17 @@ using Microsoft.Extensions.DependencyInjection;
 using Pkcs11Wrapper;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
+using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.Native;
+using static Pkcs11Wrapper.CryptoApi.Tests.PostgresTestEnvironment;
 
 namespace Pkcs11Wrapper.CryptoApi.Tests;
 
 [Collection(CryptoApiSoftHsmCollection.Name)]
 public sealed class CryptoApiCustomerOperationIntegrationTests
 {
-    [Fact]
+    [PostgresFact]
     public async Task SignVerifyAndRandomEndpointsExecuteAgainstSoftHsm()
     {
         if (!SoftHsmTestContext.IsSupported())
@@ -32,7 +34,8 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
             return;
         }
 
-        await using WebApplicationFactory<Program> factory = CreateFactory(context);
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(context, scope.Options);
 
         SeededAccess access = await SeedAuthorizedAccessAsync(factory, context);
 
@@ -75,7 +78,7 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         Assert.Contains(random, static value => value != 0);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task ConcurrentSignAndRandomRequestsRemainStableAgainstSoftHsm()
     {
         if (!SoftHsmTestContext.IsSupported())
@@ -89,7 +92,8 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
             return;
         }
 
-        await using WebApplicationFactory<Program> factory = CreateFactory(context);
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(context, scope.Options);
 
         SeededAccess access = await SeedAuthorizedAccessAsync(factory, context);
 
@@ -120,7 +124,7 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         Assert.Contains(responses, response => string.Equals(response.Path, "/api/v1/operations/random", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task SequentialRequestsReuseSessionLoginAndKeyLookupAgainstSoftHsm()
     {
         if (!SoftHsmTestContext.IsSupported())
@@ -134,12 +138,13 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
             return;
         }
 
-        await using WebApplicationFactory<Program> factory = CreateFactory(context);
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(context, scope.Options);
 
         SeededAccess access = await SeedAuthorizedAccessAsync(factory, context);
 
-        using IServiceScope scope = factory.Services.CreateScope();
-        CryptoApiPkcs11Runtime runtime = scope.ServiceProvider.GetRequiredService<CryptoApiPkcs11Runtime>();
+        using IServiceScope requestScope = factory.Services.CreateScope();
+        CryptoApiPkcs11Runtime runtime = requestScope.ServiceProvider.GetRequiredService<CryptoApiPkcs11Runtime>();
         CountingTelemetryListener telemetry = new();
         runtime.GetInitializedModule().TelemetryListener = telemetry;
 
@@ -172,9 +177,9 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
 
     private static async Task<SeededAccess> SeedAuthorizedAccessAsync(WebApplicationFactory<Program> factory, SoftHsmTestContext context)
     {
-        using IServiceScope scope = factory.Services.CreateScope();
-        CryptoApiClientManagementService clientManagement = scope.ServiceProvider.GetRequiredService<CryptoApiClientManagementService>();
-        CryptoApiKeyAccessManagementService accessManagement = scope.ServiceProvider.GetRequiredService<CryptoApiKeyAccessManagementService>();
+        using IServiceScope serviceScope = factory.Services.CreateScope();
+        CryptoApiClientManagementService clientManagement = serviceScope.ServiceProvider.GetRequiredService<CryptoApiClientManagementService>();
+        CryptoApiKeyAccessManagementService accessManagement = serviceScope.ServiceProvider.GetRequiredService<CryptoApiKeyAccessManagementService>();
 
         CryptoApiManagedClient client = await clientManagement.CreateClientAsync(new CreateCryptoApiClientRequest(
             ClientName: $"integration-{Guid.NewGuid():N}",
@@ -198,7 +203,7 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         return new SeededAccess(client, key, alias, policy);
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(SoftHsmTestContext context)
+    private static WebApplicationFactory<Program> CreateFactory(SoftHsmTestContext context, CryptoApiSharedPersistenceOptions sharedPersistenceOptions)
         => new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
@@ -212,9 +217,9 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
                         ["CryptoApiRuntime:DisableHttpsRedirection"] = "true",
                         ["CryptoApiRuntime:ModulePath"] = context.ModulePath,
                         ["CryptoApiRuntime:UserPin"] = context.UserPin,
-                        ["CryptoApiSharedPersistence:Provider"] = "Sqlite",
-                        ["CryptoApiSharedPersistence:ConnectionString"] = $"Data Source={context.DatabasePath}",
-                        ["CryptoApiSharedPersistence:AutoInitialize"] = "true"
+                        ["CryptoApiSharedPersistence:Provider"] = sharedPersistenceOptions.Provider,
+                        ["CryptoApiSharedPersistence:ConnectionString"] = sharedPersistenceOptions.ConnectionString,
+                        ["CryptoApiSharedPersistence:AutoInitialize"] = sharedPersistenceOptions.AutoInitialize ? "true" : "false"
                     });
                 });
             });
@@ -229,15 +234,6 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         return new OperationResponse(path, response.StatusCode, body);
     }
 
-    private static void DeleteDatabaseArtifacts(string databasePath)
-    {
-        string walPath = databasePath + "-wal";
-        string shmPath = databasePath + "-shm";
-
-        if (File.Exists(databasePath)) File.Delete(databasePath);
-        if (File.Exists(walPath)) File.Delete(walPath);
-        if (File.Exists(shmPath)) File.Delete(shmPath);
-    }
 
     private sealed record SeededAccess(
         CryptoApiManagedClient Client,
@@ -276,8 +272,7 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
             bool canExecuteInProcess,
             string aliasName,
             string objectLabel,
-            string objectIdHex,
-            string databasePath)
+            string objectIdHex)
         {
             RootPath = rootPath;
             ModulePath = modulePath;
@@ -290,7 +285,6 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
             AliasName = aliasName;
             ObjectLabel = objectLabel;
             ObjectIdHex = objectIdHex;
-            DatabasePath = databasePath;
         }
 
         public string RootPath { get; }
@@ -315,7 +309,6 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
 
         public string ObjectIdHex { get; }
 
-        public string DatabasePath { get; }
 
         public static bool IsSupported()
             => FindModulePath() is not null && CommandExists("softhsm2-util");
@@ -360,21 +353,13 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
                 configPath);
 
             bool canExecuteInProcess = TryResolveSlotIdFromModule(modulePath, tokenLabel, out Pkcs11SlotId slotId);
-            string databasePath = Path.Combine(rootPath, "crypto-api.db");
-            return new SoftHsmTestContext(rootPath, modulePath, previousConfigPath, tokenLabel, soPin, userPin, slotId, canExecuteInProcess, "payments-signer", objectLabel, objectIdHex, databasePath);
+            return new SoftHsmTestContext(rootPath, modulePath, previousConfigPath, tokenLabel, soPin, userPin, slotId, canExecuteInProcess, "payments-signer", objectLabel, objectIdHex);
         }
 
         public ValueTask DisposeAsync()
         {
             Environment.SetEnvironmentVariable(SoftHsmConfEnvironmentVariable, PreviousConfigPath);
 
-            try
-            {
-                DeleteDatabaseArtifacts(DatabasePath);
-            }
-            catch
-            {
-            }
 
             try
             {

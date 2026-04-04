@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Caching;
 using Pkcs11Wrapper.CryptoApi.Configuration;
@@ -11,14 +12,13 @@ public static class CryptoApiSharedStateServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddSingleton<SqliteCryptoApiSharedStateStore>();
+        services.TryAddSingleton<ICryptoApiDistributedHotPathCache, NoOpCryptoApiDistributedHotPathCache>();
         services.AddSingleton<PostgresCryptoApiSharedStateStore>();
         services.AddSingleton<ICryptoApiAuthoritativeSharedStateStore>(static serviceProvider =>
         {
             CryptoApiSharedPersistenceOptions options = serviceProvider.GetRequiredService<IOptions<CryptoApiSharedPersistenceOptions>>().Value;
             return CryptoApiSharedPersistenceDefaults.NormalizeProvider(options.Provider) switch
             {
-                CryptoApiSharedPersistenceDefaults.SqliteProvider => serviceProvider.GetRequiredService<SqliteCryptoApiSharedStateStore>(),
                 CryptoApiSharedPersistenceDefaults.PostgresProvider => serviceProvider.GetRequiredService<PostgresCryptoApiSharedStateStore>(),
                 _ => throw new InvalidOperationException($"Unsupported Crypto API shared persistence provider '{options.Provider}'.")
             };

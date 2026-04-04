@@ -37,7 +37,7 @@ public sealed class CryptoApiHealthCheckTests
     [Fact]
     public async Task SharedStateHealthCheckReportsHealthyWhenPersistenceIsOptionalAndUnconfigured()
     {
-        ICryptoApiSharedStateStore store = new SqliteCryptoApiSharedStateStore(Options.Create(new CryptoApiSharedPersistenceOptions()));
+        ICryptoApiSharedStateStore store = new PostgresCryptoApiSharedStateStore(Options.Create(new CryptoApiSharedPersistenceOptions()));
         CryptoApiSharedStateHealthCheck healthCheck = new(store);
 
         HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
