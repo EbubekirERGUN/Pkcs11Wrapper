@@ -130,7 +130,9 @@ When both point at the same `CryptoApiSharedPersistence:ConnectionString`, they 
 
 Each API node may still keep a **small local request-path cache** for successful auth + authorization decisions.
 Operators can also layer in an optional **Redis-backed hot-path accelerator** so instances can share warm auth/authz decisions, reuse a shared auth-state revision hint, and coordinate `last_used_at_utc` throttling across the fleet.
+Even without Redis, Postgres-backed instances now keep a local auth-state revision hint synchronized through Postgres `LISTEN` / `NOTIFY`, so warm request paths do not have to re-read the revision row on every request.
 Those caches remain disposable; correctness still comes from the shared database because cache keys are tied to a shared auth-state revision that advances when clients, keys, aliases, policies, or bindings change.
+If the Postgres connection string does not set `Maximum Pool Size` / `Max Pool Size`, the host applies a conservative default of `32` pooled database connections per Crypto API instance; set an explicit value in the connection string if your environment needs a different cap.
 `last_used_at_utc` remains shared metadata, but the host now writes it on a short throttled interval instead of once per successful request, and Redis can reduce duplicate cross-node touches within that interval.
 
 ### Not shared

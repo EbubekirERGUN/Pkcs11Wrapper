@@ -11,6 +11,47 @@ namespace Pkcs11Wrapper.CryptoApi.Tests;
 public sealed class CryptoApiDistributedHotPathCacheTests
 {
     [PostgresFact]
+    public async Task PostgresOnlyWarmInstanceInvalidatesRevokedKeyAcrossInstancesWithoutRevisionDatabaseChurn()
+    {
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        ServiceSet instanceA = CreateServiceSet(scope.Options, new NoOpCryptoApiDistributedHotPathCache(), DateTimeOffset.Parse("2026-04-04T12:00:00Z"));
+        ServiceSet instanceB = CreateServiceSet(scope.Options, new NoOpCryptoApiDistributedHotPathCache(), DateTimeOffset.Parse("2026-04-04T12:00:05Z"));
+
+        SeededAccess access = await SeedAuthorizedAccessAsync(instanceA);
+        instanceA.Store.ResetCounters();
+        instanceB.Store.ResetCounters();
+
+        CryptoApiRequestAuthorizationResult warm = await instanceB.Authorization.AuthorizeRequestAsync(
+            access.Key.KeyIdentifier,
+            access.Key.Secret,
+            access.Alias.AliasName,
+            "sign");
+
+        Assert.True(warm.Succeeded, warm.FailureReason);
+        Assert.Equal(1, instanceB.Store.AuthStateRevisionDatabaseReadCount);
+        Assert.Equal(1, instanceB.Store.AuthenticationStateReads);
+        Assert.Equal(1, instanceB.Store.AuthorizationStateReads);
+
+        await instanceA.ClientManagement.RevokeClientKeyAsync(access.Key.ClientKeyId, "rotation");
+
+        CryptoApiRequestAuthorizationResult afterRevocation = await WaitForAuthorizationResultAsync(
+            () => instanceB.Authorization.AuthorizeRequestAsync(
+                access.Key.KeyIdentifier,
+                access.Key.Secret,
+                access.Alias.AliasName,
+                "sign"),
+            result => !result.Succeeded,
+            TimeSpan.FromSeconds(5));
+
+        Assert.False(afterRevocation.Succeeded);
+        Assert.Equal(401, afterRevocation.FailureStatusCode);
+        Assert.Equal("API key has been revoked.", afterRevocation.FailureReason);
+        Assert.Equal(1, instanceB.Store.AuthStateRevisionDatabaseReadCount);
+        Assert.Equal(2, instanceB.Store.AuthenticationStateReads);
+        Assert.Equal(1, instanceB.Store.AuthorizationStateReads);
+    }
+
+    [PostgresFact]
     public async Task DistributedHotCacheSharesWarmAuthorizationAcrossInstances()
     {
         await using PostgresTestScope scope = await CreateScopeAsync();
@@ -131,6 +172,28 @@ public sealed class CryptoApiDistributedHotPathCacheTests
         return new SeededAccess(client, key, alias, policy);
     }
 
+    private static async Task<CryptoApiRequestAuthorizationResult> WaitForAuthorizationResultAsync(
+        Func<Task<CryptoApiRequestAuthorizationResult>> action,
+        Func<CryptoApiRequestAuthorizationResult, bool> predicate,
+        TimeSpan timeout)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.Add(timeout);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            CryptoApiRequestAuthorizationResult result = await action();
+            if (predicate(result))
+            {
+                return result;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        CryptoApiRequestAuthorizationResult finalResult = await action();
+        Assert.True(predicate(finalResult));
+        return finalResult;
+    }
+
     private sealed record ServiceSet(
         CountingAuthoritativeSharedStateStore Store,
         CryptoApiClientManagementService ClientManagement,
@@ -146,6 +209,8 @@ public sealed class CryptoApiDistributedHotPathCacheTests
 
     private sealed class CountingAuthoritativeSharedStateStore(PostgresCryptoApiSharedStateStore inner) : ICryptoApiAuthoritativeSharedStateStore
     {
+        public long AuthStateRevisionDatabaseReadCount => inner.AuthStateRevisionDatabaseReadCount;
+
         public int AuthStateRevisionReads { get; private set; }
 
         public int AuthenticationStateReads { get; private set; }
