@@ -10,6 +10,11 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
     private const string AuthStateRevisionMetadataKey = "auth_state_revision";
 
     private readonly CryptoApiSharedPersistenceOptions _options = options.Value;
+    private readonly SemaphoreSlim _initializationGate = new(1, 1);
+    private volatile bool _databaseInitialized;
+    private long _databaseInitializationCount;
+
+    internal long DatabaseInitializationCount => Interlocked.Read(ref _databaseInitializationCount);
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -18,16 +23,36 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             return;
         }
 
-        await using SqliteConnection connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await PrepareConnectionAsync(connection, cancellationToken);
-
-        if (!_options.AutoInitialize)
+        if (_databaseInitialized)
         {
             return;
         }
 
-        await EnsureSchemaAsync(connection, cancellationToken);
+        await _initializationGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_databaseInitialized)
+            {
+                return;
+            }
+
+            await using SqliteConnection connection = CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+            await PrepareConnectionAsync(connection, cancellationToken);
+            await ConfigureDatabaseAsync(connection, cancellationToken);
+
+            if (_options.AutoInitialize)
+            {
+                await EnsureSchemaAsync(connection, cancellationToken);
+            }
+
+            _databaseInitialized = true;
+            Interlocked.Increment(ref _databaseInitializationCount);
+        }
+        finally
+        {
+            _initializationGate.Release();
+        }
     }
 
     public async Task<CryptoApiSharedStateStatus> GetStatusAsync(CancellationToken cancellationToken = default)
@@ -70,7 +95,6 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         await using SqliteConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await PrepareConnectionAsync(connection, cancellationToken);
-        await EnsureSchemaAsync(connection, cancellationToken);
         return await GetAuthStateRevisionCoreAsync(connection, cancellationToken);
     }
 
@@ -451,6 +475,10 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
     {
         await ExecutePragmaAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken);
         await ExecutePragmaAsync(connection, "PRAGMA busy_timeout = 5000;", cancellationToken);
+    }
+
+    private static async Task ConfigureDatabaseAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
         await ExecutePragmaAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
     }
 

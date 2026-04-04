@@ -195,6 +195,79 @@ public sealed class CryptoApiSharedStateStoreTests
         }
     }
 
+    [Fact]
+    public async Task GetAuthStateRevisionInitializesDatabaseOnlyOncePerProcess()
+    {
+        string databasePath = Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-init-once-{Guid.NewGuid():N}.db");
+        try
+        {
+            CryptoApiSharedPersistenceOptions options = new()
+            {
+                Provider = "Sqlite",
+                ConnectionString = $"Data Source={databasePath}",
+                AutoInitialize = true
+            };
+
+            SqliteCryptoApiSharedStateStore store = new(Options.Create(options));
+
+            await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => store.GetAuthStateRevisionAsync()));
+            await store.GetAuthStateRevisionAsync();
+            await store.GetSnapshotAsync();
+
+            Assert.Equal(1, store.DatabaseInitializationCount);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task SnapshotReadsDoNotReinitializeDatabaseAfterWarmUp()
+    {
+        string databasePath = Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-snapshot-warm-{Guid.NewGuid():N}.db");
+        try
+        {
+            CryptoApiSharedPersistenceOptions options = new()
+            {
+                Provider = "Sqlite",
+                ConnectionString = $"Data Source={databasePath}",
+                AutoInitialize = true
+            };
+
+            SqliteCryptoApiSharedStateStore writer = new(Options.Create(options));
+            Guid clientId = Guid.NewGuid();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            await writer.UpsertClientAsync(new CryptoApiClientRecord(
+                clientId,
+                "warm-client",
+                "Warm Client",
+                "service",
+                "api-key",
+                true,
+                null,
+                now,
+                now));
+
+            SqliteCryptoApiSharedStateStore reader = new(Options.Create(options));
+
+            await reader.GetSnapshotAsync();
+            long afterWarmUp = reader.DatabaseInitializationCount;
+
+            await reader.GetAuthStateRevisionAsync();
+            await reader.GetSnapshotAsync();
+            await reader.GetSnapshotAsync();
+
+            Assert.Equal(1, afterWarmUp);
+            Assert.Equal(afterWarmUp, reader.DatabaseInitializationCount);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
     private static void DeleteDatabaseArtifacts(string databasePath)
     {
         string walPath = databasePath + "-wal";
