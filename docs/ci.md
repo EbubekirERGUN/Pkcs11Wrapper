@@ -134,8 +134,8 @@ Windows runtime coverage from `build-test-windows` guarantees that:
 
 - the solution still restores/builds on `windows-latest`
 - a real SoftHSM-for-Windows fixture can be provisioned in CI
-- the Windows lane still runs managed/admin regression coverage, while the crash-prone `SoftHsmCryptRegressionTests` native stress suite remains Linux-only
-- GitHub-hosted Windows CI currently skips smoke and `win-x64` NativeAOT smoke because SoftHSM-for-Windows can crash during native `C_Initialize`; those remain local/manual Windows validation paths for now
+- the Windows lane still runs managed/admin regression coverage, while the crash-prone SoftHSM fixture native suites (`SoftHsmCryptRegressionTests` and `TelemetryRegressionTests`) are excluded from hosted Windows CI
+- GitHub-hosted Windows CI currently skips those native fixture suites plus smoke and `win-x64` NativeAOT smoke because SoftHSM-for-Windows can crash during native `C_Initialize`; those remain local/manual Windows validation paths for now
 - fixture/regression/smoke console logs are captured as downloadable Actions artifacts
 
 Benchmark coverage from `benchmarks.yml` guarantees that, whenever the workflow runs:
