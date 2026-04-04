@@ -43,9 +43,13 @@ services:
       AdminBootstrapDevice__ModulePath: /opt/pkcs11/lib/libsofthsm2.so
       AdminBootstrapDevice__DefaultTokenLabel: ${SOFTHSM_TOKEN_LABEL:-Pkcs11Wrapper CI Token}
       AdminBootstrapDevice__Notes: ${PKCS11WRAPPER_ADMIN_DEVICE_NOTES:-Local/dev/lab SoftHSM compose stack. Not production orchestrated.}
+      CryptoApiSharedPersistence__Provider: Sqlite
+      CryptoApiSharedPersistence__ConnectionString: Data Source=/var/lib/pkcs11wrapper-cryptoapi/shared-state.db
+      CryptoApiSharedPersistence__AutoInitialize: "true"
       SOFTHSM2_CONF: /opt/pkcs11/softhsm/softhsm2.conf
     volumes:
       - admin-data:/var/lib/pkcs11wrapper-admin
+      - cryptoapi-shared-state:/var/lib/pkcs11wrapper-cryptoapi
       - softhsm-state:/opt/pkcs11/softhsm
     healthcheck:
       test: ["CMD", "dotnet", "Pkcs11Wrapper.Admin.Web.dll", "--container-healthcheck", "http://127.0.0.1:8080/health/ready"]
@@ -56,4 +60,5 @@ services:
 
 volumes:
   admin-data:
+  cryptoapi-shared-state:
   softhsm-state:
