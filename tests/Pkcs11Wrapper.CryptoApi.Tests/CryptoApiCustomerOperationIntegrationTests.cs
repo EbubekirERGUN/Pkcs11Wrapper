@@ -229,6 +229,16 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         return new OperationResponse(path, response.StatusCode, body);
     }
 
+    private static void DeleteDatabaseArtifacts(string databasePath)
+    {
+        string walPath = databasePath + "-wal";
+        string shmPath = databasePath + "-shm";
+
+        if (File.Exists(databasePath)) File.Delete(databasePath);
+        if (File.Exists(walPath)) File.Delete(walPath);
+        if (File.Exists(shmPath)) File.Delete(shmPath);
+    }
+
     private sealed record SeededAccess(
         CryptoApiManagedClient Client,
         CryptoApiCreatedClientKey Key,
@@ -439,4 +449,43 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
             return false;
         }
 
-        private static async Task<ProcessResult> RunP
+        private static async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments, string softHsmConfigPath)
+        {
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = fileName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+
+            foreach (string argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            startInfo.Environment[SoftHsmConfEnvironmentVariable] = softHsmConfigPath;
+
+            using Process process = new() { StartInfo = startInfo };
+            if (!process.Start())
+            {
+                throw new InvalidOperationException($"Process '{fileName}' could not be started.");
+            }
+
+            string standardOutput = await process.StandardOutput.ReadToEndAsync();
+            string standardError = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            ProcessResult result = new(process.ExitCode, standardOutput, standardError);
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Process '{fileName}' exited with code {result.ExitCode}.{Environment.NewLine}stdout:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}stderr:{Environment.NewLine}{result.StandardError}");
+            }
+
+            return result;
+        }
+
+        private sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
+    }
+}

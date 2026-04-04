@@ -117,6 +117,10 @@ When both point at the same `CryptoApiSharedPersistence:ConnectionString`, they 
 - binding relationships
 - usage metadata such as `last_used_at_utc`
 
+Each API node may still keep a **small local request-path cache** for successful auth + authorization decisions.
+That cache is intentionally node-local and disposable; correctness still comes from the shared database because cache keys are tied to a shared auth-state revision that advances when clients, keys, aliases, policies, or bindings change.
+`last_used_at_utc` remains shared metadata, but the host now writes it on a short throttled interval instead of once per successful request.
+
 ### Not shared
 
 The following stay admin-local and should **not** be treated as Crypto API shared state:

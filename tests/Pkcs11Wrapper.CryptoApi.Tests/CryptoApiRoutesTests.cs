@@ -5,9 +5,13 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
+using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Operations;
+using Pkcs11Wrapper.CryptoApi.SharedState;
 
 namespace Pkcs11Wrapper.CryptoApi.Tests;
 
@@ -339,6 +343,166 @@ public sealed class CryptoApiRoutesTests
         }
     }
 
+    [Fact]
+    public async Task AuthSelfWarmPathReusesCachedAuthenticationAndThrottlesLastUsedWrites()
+    {
+        string databasePath = CreateDatabasePath();
+        MutableTimeProvider timeProvider = new(DateTimeOffset.Parse("2026-04-04T10:00:00Z"));
+        await using WebApplicationFactory<Program> factory = CreateFactory(
+            databasePath,
+            services => ConfigureCountingSharedState(services, timeProvider),
+            new Dictionary<string, string?>
+            {
+                ["CryptoApiRequestPathCaching:EntryTtlSeconds"] = "300",
+                ["CryptoApiRequestPathCaching:LastUsedWriteIntervalSeconds"] = "30"
+            });
+
+        try
+        {
+            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+            CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
+            int baselineSnapshotReads = store.SnapshotReads;
+            int baselineLastUsedTouches = store.LastUsedTouches;
+
+            using HttpClient httpClient = factory.CreateClient();
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+            for (int i = 0; i < 3; i++)
+            {
+                using HttpResponseMessage response = await httpClient.GetAsync("/api/v1/auth/self");
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                timeProvider.Advance(TimeSpan.FromSeconds(10));
+            }
+
+            Assert.Equal(1, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
+
+            timeProvider.Advance(TimeSpan.FromSeconds(15));
+            using HttpResponseMessage afterInterval = await httpClient.GetAsync("/api/v1/auth/self");
+            Assert.Equal(HttpStatusCode.OK, afterInterval.StatusCode);
+
+            Assert.Equal(1, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(2, store.LastUsedTouches - baselineLastUsedTouches);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task OperationWarmPathReusesAuthenticationAndAuthorizationCaches()
+    {
+        string databasePath = CreateDatabasePath();
+        MutableTimeProvider timeProvider = new(DateTimeOffset.Parse("2026-04-04T10:00:00Z"));
+        FakeCustomerOperationService fakeOperations = new();
+        await using WebApplicationFactory<Program> factory = CreateFactory(
+            databasePath,
+            services =>
+            {
+                ConfigureCountingSharedState(services, timeProvider);
+                services.AddSingleton<ICryptoApiCustomerOperationService>(fakeOperations);
+            },
+            new Dictionary<string, string?>
+            {
+                ["CryptoApiRequestPathCaching:EntryTtlSeconds"] = "300",
+                ["CryptoApiRequestPathCaching:LastUsedWriteIntervalSeconds"] = "30"
+            });
+
+        try
+        {
+            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+            CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
+            int baselineSnapshotReads = store.SnapshotReads;
+            int baselineLastUsedTouches = store.LastUsedTouches;
+
+            using HttpClient httpClient = factory.CreateClient();
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+            for (int i = 0; i < 3; i++)
+            {
+                using HttpResponseMessage response = await httpClient.PostAsync(
+                    "/api/v1/operations/sign",
+                    CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                timeProvider.Advance(TimeSpan.FromSeconds(5));
+            }
+
+            Assert.Equal(1, store.SnapshotReads - baselineSnapshotReads);
+            Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
+            Assert.Equal(3, fakeOperations.Calls.Count);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task OperationAuthorizationCacheInvalidatesWhenKeyIsRevoked()
+    {
+        string databasePath = CreateDatabasePath();
+        MutableTimeProvider timeProvider = new(DateTimeOffset.Parse("2026-04-04T10:00:00Z"));
+        FakeCustomerOperationService fakeOperations = new();
+        await using WebApplicationFactory<Program> factory = CreateFactory(
+            databasePath,
+            services =>
+            {
+                ConfigureCountingSharedState(services, timeProvider);
+                services.AddSingleton<ICryptoApiCustomerOperationService>(fakeOperations);
+            },
+            new Dictionary<string, string?>
+            {
+                ["CryptoApiRequestPathCaching:EntryTtlSeconds"] = "300",
+                ["CryptoApiRequestPathCaching:LastUsedWriteIntervalSeconds"] = "30"
+            });
+
+        try
+        {
+            SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+
+            using HttpClient httpClient = factory.CreateClient();
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+            using HttpResponseMessage firstResponse = await httpClient.PostAsync(
+                "/api/v1/operations/sign",
+                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+            Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+
+            using (IServiceScope scope = factory.Services.CreateScope())
+            {
+                CryptoApiClientManagementService clientManagement = scope.ServiceProvider.GetRequiredService<CryptoApiClientManagementService>();
+                await clientManagement.RevokeClientKeyAsync(access.Key.ClientKeyId, "rotation");
+            }
+
+            using HttpResponseMessage secondResponse = await httpClient.PostAsync(
+                "/api/v1/operations/sign",
+                CreateJsonContent("{\"keyAlias\":\"payments-signer\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
+            string content = await secondResponse.Content.ReadAsStringAsync();
+
+            Assert.Equal(HttpStatusCode.Unauthorized, secondResponse.StatusCode);
+            Assert.Contains("The provided API credentials were rejected.", content, StringComparison.Ordinal);
+            Assert.Single(fakeOperations.Calls);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
+    private static void ConfigureCountingSharedState(IServiceCollection services, TimeProvider timeProvider)
+    {
+        services.RemoveAll<TimeProvider>();
+        services.AddSingleton<TimeProvider>(timeProvider);
+        services.RemoveAll<ICryptoApiSharedStateStore>();
+        services.AddSingleton(sp => new SqliteCryptoApiSharedStateStore(sp.GetRequiredService<IOptions<CryptoApiSharedPersistenceOptions>>()));
+        services.AddSingleton<CountingSharedStateStore>();
+        services.AddSingleton<ICryptoApiSharedStateStore>(sp => sp.GetRequiredService<CountingSharedStateStore>());
+    }
+
     private static async Task<SeededAccess> SeedAuthorizedAccessAsync(WebApplicationFactory<Program> factory, IReadOnlyCollection<string> allowedOperations, string aliasName, string? policyName = null)
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -452,4 +616,61 @@ public sealed class CryptoApiRoutesTests
     }
 
     private sealed record FakeOperationCall(string Operation, string AliasName, string Algorithm);
+
+    private sealed class CountingSharedStateStore(SqliteCryptoApiSharedStateStore inner) : ICryptoApiSharedStateStore
+    {
+        public int SnapshotReads { get; private set; }
+
+        public int LastUsedTouches { get; private set; }
+
+        public Task InitializeAsync(CancellationToken cancellationToken = default)
+            => inner.InitializeAsync(cancellationToken);
+
+        public Task<CryptoApiSharedStateStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+            => inner.GetStatusAsync(cancellationToken);
+
+        public Task<long> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default)
+            => inner.GetAuthStateRevisionAsync(cancellationToken);
+
+        public Task UpsertClientAsync(CryptoApiClientRecord client, CancellationToken cancellationToken = default)
+            => inner.UpsertClientAsync(client, cancellationToken);
+
+        public Task UpsertClientKeyAsync(CryptoApiClientKeyRecord clientKey, CancellationToken cancellationToken = default)
+            => inner.UpsertClientKeyAsync(clientKey, cancellationToken);
+
+        public async Task<bool> TryTouchClientKeyLastUsedAsync(Guid clientKeyId, DateTimeOffset lastUsedAtUtc, TimeSpan minimumInterval, CancellationToken cancellationToken = default)
+        {
+            LastUsedTouches++;
+            return await inner.TryTouchClientKeyLastUsedAsync(clientKeyId, lastUsedAtUtc, minimumInterval, cancellationToken);
+        }
+
+        public Task UpsertKeyAliasAsync(CryptoApiKeyAliasRecord keyAlias, CancellationToken cancellationToken = default)
+            => inner.UpsertKeyAliasAsync(keyAlias, cancellationToken);
+
+        public Task UpsertPolicyAsync(CryptoApiPolicyRecord policy, CancellationToken cancellationToken = default)
+            => inner.UpsertPolicyAsync(policy, cancellationToken);
+
+        public Task ReplaceClientPolicyBindingsAsync(Guid clientId, IReadOnlyCollection<Guid> policyIds, CancellationToken cancellationToken = default)
+            => inner.ReplaceClientPolicyBindingsAsync(clientId, policyIds, cancellationToken);
+
+        public Task ReplaceKeyAliasPolicyBindingsAsync(Guid aliasId, IReadOnlyCollection<Guid> policyIds, CancellationToken cancellationToken = default)
+            => inner.ReplaceKeyAliasPolicyBindingsAsync(aliasId, policyIds, cancellationToken);
+
+        public async Task<CryptoApiSharedStateSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+        {
+            SnapshotReads++;
+            return await inner.GetSnapshotAsync(cancellationToken);
+        }
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset initialUtcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = initialUtcNow;
+
+        public override DateTimeOffset GetUtcNow()
+            => _utcNow;
+
+        public void Advance(TimeSpan delta)
+            => _utcNow = _utcNow.Add(delta);
+    }
 }

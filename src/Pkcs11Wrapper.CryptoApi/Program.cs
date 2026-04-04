@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Access;
+using Pkcs11Wrapper.CryptoApi.Caching;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Endpoints;
@@ -38,6 +39,16 @@ builder.Services.AddOptions<CryptoApiRuntimeOptions>()
 builder.Services.AddOptions<CryptoApiSecurityOptions>()
     .Bind(builder.Configuration.GetSection(CryptoApiSecurityOptions.SectionName));
 
+builder.Services.AddOptions<CryptoApiRequestPathCachingOptions>()
+    .Bind(builder.Configuration.GetSection(CryptoApiRequestPathCachingOptions.SectionName))
+    .Validate(
+        static options => options.AuthenticationEntryLimit > 0
+            && options.AuthorizationEntryLimit > 0
+            && options.EntryTtlSeconds > 0
+            && options.LastUsedWriteIntervalSeconds > 0,
+        "Crypto API request-path caching must define positive cache limits, TTL, and last-used write interval values.")
+    .ValidateOnStart();
+
 builder.Services.AddOptions<CryptoApiRateLimitingOptions>()
     .Bind(builder.Configuration.GetSection(CryptoApiRateLimitingOptions.SectionName))
     .Validate(
@@ -61,6 +72,9 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
     .ValidateOnStart();
 
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(sp => new CryptoApiRequestPathCache(
+    sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<IOptions<CryptoApiRequestPathCachingOptions>>().Value));
 builder.Services.AddSingleton<CryptoApiRuntimeDescriptorProvider>();
 builder.Services.AddSingleton<CryptoApiPkcs11Runtime>();
 builder.Services.AddSingleton<CryptoApiClientSecretGenerator>();
