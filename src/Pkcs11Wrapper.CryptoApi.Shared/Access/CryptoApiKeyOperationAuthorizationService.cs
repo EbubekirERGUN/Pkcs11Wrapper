@@ -49,7 +49,6 @@ public sealed class CryptoApiKeyOperationAuthorizationService
 
         DateTimeOffset now = _timeProvider.GetUtcNow();
         string secretFingerprint = _requestPathCache.CreateSecretFingerprint(normalizedSecret);
-        CryptoApiSharedStateSnapshot? snapshot = null;
         CryptoApiAuthenticatedClient authenticatedClient;
 
         if (_requestPathCache.TryGetAuthenticatedClient(authStateRevision, normalizedKeyIdentifier, secretFingerprint, now, out CryptoApiAuthenticatedClient cachedClient))
@@ -58,8 +57,8 @@ public sealed class CryptoApiKeyOperationAuthorizationService
         }
         else
         {
-            snapshot = await _sharedStateStore.GetSnapshotAsync(cancellationToken);
-            AuthenticatedClientAuthenticationResult authentication = AuthenticateClientFromSnapshot(snapshot, normalizedKeyIdentifier, normalizedSecret, now);
+            CryptoApiClientAuthenticationState? authenticationState = await _sharedStateStore.GetClientAuthenticationStateAsync(normalizedKeyIdentifier, cancellationToken);
+            AuthenticatedClientAuthenticationResult authentication = AuthenticateClient(authenticationState, normalizedSecret, now);
             if (!authentication.Succeeded || authentication.Template is null)
             {
                 return AuthenticationFailed(authentication.FailureReason ?? "The provided API credentials were rejected.");
@@ -78,11 +77,11 @@ public sealed class CryptoApiKeyOperationAuthorizationService
                 Succeeded: true,
                 FailureStatusCode: null,
                 FailureReason: null,
-                Authorization: cachedAuthorization);
+            Authorization: cachedAuthorization);
         }
 
-        snapshot ??= await _sharedStateStore.GetSnapshotAsync(cancellationToken);
-        CryptoApiKeyOperationAuthorizationResult authorization = AuthorizeFromSnapshot(snapshot, authenticatedClient, normalizedAliasName, normalizedOperation);
+        CryptoApiKeyAuthorizationState authorizationState = await _sharedStateStore.GetKeyAuthorizationStateAsync(authenticatedClient.ClientId, normalizedAliasName, cancellationToken);
+        CryptoApiKeyOperationAuthorizationResult authorization = Authorize(authorizationState, authenticatedClient, normalizedOperation);
         if (!authorization.Succeeded || authorization.Authorization is null)
         {
             return AuthorizationFailed(authorization.FailureReason ?? "The caller is not allowed to use the requested key alias or operation.");
@@ -119,11 +118,11 @@ public sealed class CryptoApiKeyOperationAuthorizationService
             return new CryptoApiKeyOperationAuthorizationResult(
                 Succeeded: true,
                 FailureReason: null,
-                Authorization: cachedAuthorization);
+            Authorization: cachedAuthorization);
         }
 
-        CryptoApiSharedStateSnapshot snapshot = await _sharedStateStore.GetSnapshotAsync(cancellationToken);
-        CryptoApiKeyOperationAuthorizationResult authorization = AuthorizeFromSnapshot(snapshot, authenticatedClient, normalizedAliasName, normalizedOperation);
+        CryptoApiKeyAuthorizationState authorizationState = await _sharedStateStore.GetKeyAuthorizationStateAsync(authenticatedClient.ClientId, normalizedAliasName, cancellationToken);
+        CryptoApiKeyOperationAuthorizationResult authorization = Authorize(authorizationState, authenticatedClient, normalizedOperation);
         if (authorization.Succeeded && authorization.Authorization is not null)
         {
             _requestPathCache.SetAuthorizedOperation(authStateRevision, authenticatedClient.ClientId, authorization.Authorization);
@@ -131,23 +130,19 @@ public sealed class CryptoApiKeyOperationAuthorizationService
 
         return authorization;
     }
-    private AuthenticatedClientAuthenticationResult AuthenticateClientFromSnapshot(
-        CryptoApiSharedStateSnapshot snapshot,
-        string normalizedKeyIdentifier,
+
+    private AuthenticatedClientAuthenticationResult AuthenticateClient(
+        CryptoApiClientAuthenticationState? authenticationState,
         string normalizedSecret,
         DateTimeOffset now)
     {
-        CryptoApiClientKeyRecord? key = snapshot.ClientKeys.FirstOrDefault(candidate => string.Equals(candidate.KeyIdentifier, normalizedKeyIdentifier, StringComparison.Ordinal));
-        if (key is null)
+        if (authenticationState is null)
         {
             return new AuthenticatedClientAuthenticationResult(false, "API key was not found.", null);
         }
 
-        CryptoApiClientRecord? client = snapshot.Clients.FirstOrDefault(candidate => candidate.ClientId == key.ClientId);
-        if (client is null)
-        {
-            return new AuthenticatedClientAuthenticationResult(false, "Owning API client was not found.", null);
-        }
+        CryptoApiClientRecord client = authenticationState.Client;
+        CryptoApiClientKeyRecord key = authenticationState.Key;
 
         if (!client.IsEnabled)
         {
@@ -174,13 +169,6 @@ public sealed class CryptoApiKeyOperationAuthorizationService
             return new AuthenticatedClientAuthenticationResult(false, "API key secret is invalid.", null);
         }
 
-        Guid[] boundPolicyIds = snapshot.ClientPolicyBindings
-            .Where(binding => binding.ClientId == client.ClientId)
-            .Select(binding => binding.PolicyId)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToArray();
-
         return new AuthenticatedClientAuthenticationResult(
             true,
             null,
@@ -196,7 +184,7 @@ public sealed class CryptoApiKeyOperationAuthorizationService
                 CredentialType: key.CredentialType,
                 AuthenticatedAtUtc: now,
                 ExpiresAtUtc: key.ExpiresAtUtc,
-                BoundPolicyIds: boundPolicyIds),
+                BoundPolicyIds: authenticationState.BoundPolicyIds),
                 key));
     }
 
@@ -233,19 +221,18 @@ public sealed class CryptoApiKeyOperationAuthorizationService
         _requestPathCache.RecordLastUsedRefresh(authStateRevision, normalizedKeyIdentifier, secretFingerprint, now);
     }
 
-    private CryptoApiKeyOperationAuthorizationResult AuthorizeFromSnapshot(
-        CryptoApiSharedStateSnapshot snapshot,
+    private CryptoApiKeyOperationAuthorizationResult Authorize(
+        CryptoApiKeyAuthorizationState authorizationState,
         CryptoApiAuthenticatedClient authenticatedClient,
-        string normalizedAliasName,
         string normalizedOperation)
     {
-        CryptoApiClientRecord? client = snapshot.Clients.FirstOrDefault(candidate => candidate.ClientId == authenticatedClient.ClientId);
+        CryptoApiClientRecord? client = authorizationState.Client;
         if (client is null || !client.IsEnabled)
         {
             return Failed("Authenticated Crypto API client is no longer enabled.");
         }
 
-        CryptoApiKeyAliasRecord? alias = snapshot.KeyAliases.FirstOrDefault(candidate => string.Equals(candidate.AliasName, normalizedAliasName, StringComparison.OrdinalIgnoreCase));
+        CryptoApiKeyAliasRecord? alias = authorizationState.Alias;
         if (alias is null)
         {
             return Failed("Requested key alias was not found.");
@@ -256,24 +243,13 @@ public sealed class CryptoApiKeyOperationAuthorizationService
             return Failed("Requested key alias is disabled.");
         }
 
-        HashSet<Guid> clientPolicyIds = snapshot.ClientPolicyBindings
-            .Where(binding => binding.ClientId == authenticatedClient.ClientId)
-            .Select(binding => binding.PolicyId)
-            .ToHashSet();
-
-        HashSet<Guid> aliasPolicyIds = snapshot.KeyAliasPolicyBindings
-            .Where(binding => binding.AliasId == alias.AliasId)
-            .Select(binding => binding.PolicyId)
-            .ToHashSet();
-
-        Guid[] sharedPolicyIds = clientPolicyIds.Intersect(aliasPolicyIds).ToArray();
-        if (sharedPolicyIds.Length == 0)
+        if (authorizationState.SharedPolicies.Count == 0)
         {
             return Failed("No shared policy grants this client access to the requested key alias.");
         }
 
         List<CryptoApiMatchedPolicy> matchedPolicies = [];
-        foreach (CryptoApiPolicyRecord policy in snapshot.Policies.Where(candidate => sharedPolicyIds.Contains(candidate.PolicyId) && candidate.IsEnabled))
+        foreach (CryptoApiPolicyRecord policy in authorizationState.SharedPolicies)
         {
             CryptoApiOperationPolicyDocument document;
             try

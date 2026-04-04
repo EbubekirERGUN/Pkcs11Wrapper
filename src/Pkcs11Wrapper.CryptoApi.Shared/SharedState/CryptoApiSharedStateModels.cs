@@ -21,6 +21,16 @@ public sealed record CryptoApiSharedStateSnapshot(
     IReadOnlyList<CryptoApiClientPolicyBinding> ClientPolicyBindings,
     IReadOnlyList<CryptoApiKeyAliasPolicyBinding> KeyAliasPolicyBindings);
 
+public sealed record CryptoApiClientAuthenticationState(
+    CryptoApiClientRecord Client,
+    CryptoApiClientKeyRecord Key,
+    IReadOnlyList<Guid> BoundPolicyIds);
+
+public sealed record CryptoApiKeyAuthorizationState(
+    CryptoApiClientRecord? Client,
+    CryptoApiKeyAliasRecord? Alias,
+    IReadOnlyList<CryptoApiPolicyRecord> SharedPolicies);
+
 public sealed record CryptoApiClientRecord(
     Guid ClientId,
     string ClientName,
