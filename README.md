@@ -87,7 +87,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - DI/config binding for service identity, API base path, PKCS#11 runtime, and shared persistence
 - `/health/live` + `/health/ready` endpoints, with readiness validating the configured PKCS#11 module and shared persistence when configured
 - `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, `POST /api/v1/operations/authorize`, `/api/v1/shared-state`, and `/api/v1/auth/self` route space for the emerging machine-facing contract
-- pragmatic shared SQLite-backed persistence for multi-instance API clients/keys, key aliases, policies, and policy bindings
+- shared persistence for multi-instance API clients/keys, key aliases, policies, and policy bindings, with SQLite for local/dev/lab and PostgreSQL for server-grade shared deployments
 - practical access-control slice: generated API-key secrets are shown once, stored only as hashes, and can now be paired end-to-end with alias routing, policy definitions, and binding management from the admin dashboard without exposing raw PKCS#11 locator details to callers
 - admin-panel/shared-store control-plane model for Crypto API applications, aliases, policies, and bindings without turning the machine-facing host into a tenant portal
 - intended deployment model: **one admin dashboard + many stateless crypto API instances**
@@ -101,7 +101,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 | PKCS#11 v3 interface discovery | ✅ | capability-gated when not exported by the module |
 | PKCS#11 v3 message APIs | ✅ | managed/API support implemented; runtime depends on module support |
 | Admin panel | ✅ | functional Blazor Server management surface with auth, local users, config transfer, audit integrity, PKCS#11 Lab, telemetry, and Crypto API Access control-plane flows |
-| Crypto API host scaffold | ✅ | stateless ASP.NET Core host with DI/config, service documents, health/readiness, shared SQLite-backed auth/policy persistence, hashed API-key lifecycle controls, and the first alias-routing/policy-enforcement slice |
+| Crypto API host scaffold | ✅ | stateless ASP.NET Core host with DI/config, service documents, health/readiness, SQLite/PostgreSQL shared auth/policy persistence, hashed API-key lifecycle controls, and the first alias-routing/policy-enforcement slice |
 | Vendor regression lane | ✅ | optional non-SoftHSM validation path |
 
 ## Repository architecture
@@ -111,7 +111,7 @@ flowchart LR
     A[Pkcs11Wrapper.Admin.Web\nBlazor Server Admin Panel] --> B[Pkcs11Wrapper.Admin.Application]
     B --> C[Pkcs11Wrapper.Admin.Infrastructure]
     B --> D[Pkcs11Wrapper]
-    A --> S[(Shared Crypto API state\nSQLite control-plane DB)]
+    A --> S[(Shared Crypto API state\nSQLite or PostgreSQL control-plane DB)]
     H[Pkcs11Wrapper.CryptoApi\nStateless ASP.NET Core Host] --> D
     H --> S
     D --> E[Pkcs11Wrapper.Native]

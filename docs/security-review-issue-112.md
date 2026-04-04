@@ -10,7 +10,7 @@ Reviewed surfaces:
 - admin dashboard authentication and session handling
 - customer-facing Crypto API authentication and alias/policy authorization
 - API key handling and public error behavior
-- shared SQLite-backed control-plane persistence exposure
+- shared control-plane persistence exposure
 - exposed HTTP endpoints and container/operator-facing defaults
 - operator-facing docs for the above behavior
 
@@ -22,7 +22,7 @@ The customer-facing host exposed:
 
 - detailed API-key authentication failure reasons (`not found`, `revoked`, `expired`, etc.)
 - detailed key-alias authorization failure reasons (`alias not found`, policy mismatch, invalid stored policy document)
-- shared-state metadata including SQLite connection target/path and record counts
+- shared-state metadata including connection target/path and record counts
 
 That was useful for private debugging, but too chatty as a default internet-facing or semi-exposed API surface.
 It increased enumeration and deployment-fingerprint leakage without being required for normal clients.
@@ -100,8 +100,8 @@ These are **not** fixed by this issue and should remain explicit in docs/roadmap
 3. **Crypto API rate limiting is now built in, but it is intentionally instance-local.**
    The host now enforces per-instance customer-endpoint rate limits keyed by presented API key id (with remote-IP fallback when no key id is present), and 429 responses include `Retry-After` plus problem-details metadata. Upstream gateways/load balancers should still enforce fleet-wide request-rate, body-size, and abuse controls.
 
-4. **SQLite is still the shared control-plane backend.**
-   That remains acceptable only for the documented conservative deployment model with trustworthy file-locking/WAL semantics.
+4. **Provider choice still matters operationally.**
+   SQLite remains acceptable for local/dev/lab and conservative shared-volume deployments with trustworthy file-locking/WAL semantics, while production-oriented multi-instance deployments should prefer Postgres.
 
 5. **Security headers are intentionally conservative.**
    A strict CSP was not added in this pass because the current interactive admin UI would need CSP-specific tuning/testing rather than a guessy header that could break the product.

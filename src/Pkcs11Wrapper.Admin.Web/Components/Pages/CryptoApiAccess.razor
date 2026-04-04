@@ -30,7 +30,7 @@
         <div class="hero-panel">
             <div class="hero-panel-title">Operator model</div>
             <div class="hero-panel-value">End-to-end</div>
-            <div class="hero-panel-copy">Applications, aliases, policies, and bindings now live on one admin workflow so operators can finish a usable route without hand-editing SQLite or local files.</div>
+            <div class="hero-panel-copy">Applications, aliases, policies, and bindings now live on one admin workflow so operators can finish a usable route without hand-editing shared-state tables or local files.</div>
         </div>
     </div>
 </section>
@@ -60,7 +60,7 @@ else if (!SharedPersistenceConfigured)
 {
     <div class="alert alert-warning">
         <div class="fw-semibold">Crypto API shared persistence is not configured for the admin app.</div>
-        <div class="small mt-2">Set <code>CryptoApiSharedPersistence:ConnectionString</code> to the same shared SQLite database used by the Crypto API host, then reopen this page.</div>
+        <div class="small mt-2">Set <code>CryptoApiSharedPersistence:Provider</code> and <code>CryptoApiSharedPersistence:ConnectionString</code> to the same shared persistence target used by the Crypto API host, then reopen this page.</div>
     </div>
 }
 else

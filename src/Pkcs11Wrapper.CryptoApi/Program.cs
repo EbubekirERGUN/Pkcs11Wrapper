@@ -67,8 +67,8 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
         options.ConnectionString = options.ConnectionString?.Trim();
     })
     .Validate(
-        static options => string.Equals(options.Provider, CryptoApiSharedPersistenceDefaults.SqliteProvider, StringComparison.OrdinalIgnoreCase),
-        $"Crypto API shared persistence currently supports only '{CryptoApiSharedPersistenceDefaults.SqliteProvider}'.")
+        static options => CryptoApiSharedPersistenceDefaults.IsSupportedProvider(options.Provider),
+        $"Crypto API shared persistence supports '{CryptoApiSharedPersistenceDefaults.SqliteProvider}' and '{CryptoApiSharedPersistenceDefaults.PostgresProvider}'.")
     .ValidateOnStart();
 
 builder.Services.AddSingleton(TimeProvider.System);
@@ -84,7 +84,7 @@ builder.Services.AddSingleton<CryptoApiClientAuthenticationService>();
 builder.Services.AddSingleton<CryptoApiKeyAccessManagementService>();
 builder.Services.AddSingleton<CryptoApiKeyOperationAuthorizationService>();
 builder.Services.AddSingleton<ICryptoApiCustomerOperationService, CryptoApiPkcs11CustomerOperationService>();
-builder.Services.AddSingleton<ICryptoApiSharedStateStore, SqliteCryptoApiSharedStateStore>();
+builder.Services.AddCryptoApiSharedStateStore();
 
 builder.Services.AddSingleton<IConfigureOptions<RateLimiterOptions>, ConfigureCryptoApiRateLimiterOptions>();
 builder.Services.AddRateLimiter(_ => { });

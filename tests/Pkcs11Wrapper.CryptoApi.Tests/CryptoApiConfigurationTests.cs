@@ -7,6 +7,20 @@ namespace Pkcs11Wrapper.CryptoApi.Tests;
 public sealed class CryptoApiConfigurationTests
 {
     [Theory]
+    [InlineData(null, "Sqlite")]
+    [InlineData("", "Sqlite")]
+    [InlineData("sqlite", "Sqlite")]
+    [InlineData(" Postgres ", "Postgres")]
+    [InlineData("postgresql", "Postgres")]
+    [InlineData("Npgsql", "Postgres")]
+    public void NormalizeProviderReturnsExpectedValue(string? configuredProvider, string expected)
+    {
+        string actual = CryptoApiSharedPersistenceDefaults.NormalizeProvider(configuredProvider);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Theory]
     [InlineData(null, "/api/v1")]
     [InlineData("", "/api/v1")]
     [InlineData("api/v1", "/api/v1")]
@@ -57,5 +71,28 @@ public sealed class CryptoApiConfigurationTests
         Assert.Contains("POST /api/crypto/operations/random", descriptor.CurrentSurface);
         Assert.NotEqual(default, descriptor.StartedAtUtc);
         Assert.False(string.IsNullOrWhiteSpace(descriptor.InstanceId));
+    }
+
+    [Fact]
+    public void RuntimeDescriptorProviderReportsPostgresWhenConfigured()
+    {
+        CryptoApiRuntimeDescriptorProvider provider = new(
+            Options.Create(new CryptoApiHostOptions
+            {
+                ServiceName = "Pkcs11Wrapper.CryptoApi",
+                ApiBasePath = "/api/v1"
+            }),
+            Options.Create(new CryptoApiRuntimeOptions()),
+            Options.Create(new CryptoApiSharedPersistenceOptions
+            {
+                Provider = "postgresql",
+                ConnectionString = "Host=localhost;Port=5432;Database=pkcs11wrapper;Username=tester;Password=secret"
+            }),
+            TimeProvider.System);
+
+        CryptoApiRuntimeDescriptor descriptor = provider.Describe();
+
+        Assert.True(descriptor.SharedPersistenceConfigured);
+        Assert.Equal("Postgres", descriptor.SharedPersistenceProvider);
     }
 }

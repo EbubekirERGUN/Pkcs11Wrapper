@@ -55,8 +55,8 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
         options.ConnectionString = options.ConnectionString?.Trim();
     })
     .Validate(
-        static options => string.Equals(options.Provider, CryptoApiSharedPersistenceDefaults.SqliteProvider, StringComparison.OrdinalIgnoreCase),
-        $"Crypto API shared persistence currently supports only '{CryptoApiSharedPersistenceDefaults.SqliteProvider}'.")
+        static options => CryptoApiSharedPersistenceDefaults.IsSupportedProvider(options.Provider),
+        $"Crypto API shared persistence supports '{CryptoApiSharedPersistenceDefaults.SqliteProvider}' and '{CryptoApiSharedPersistenceDefaults.PostgresProvider}'.")
     .ValidateOnStart();
 
 AdminStorageOptions adminStorage = builder.Configuration.GetSection("AdminStorage").Get<AdminStorageOptions>() ?? new();
@@ -90,7 +90,7 @@ builder.Services.AddDataProtection()
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<CryptoApiClientSecretGenerator>();
 builder.Services.AddSingleton<CryptoApiClientSecretHasher>();
-builder.Services.AddSingleton<ICryptoApiSharedStateStore, SqliteCryptoApiSharedStateStore>();
+builder.Services.AddCryptoApiSharedStateStore();
 builder.Services.AddScoped<CryptoApiClientManagementService>();
 builder.Services.AddScoped<CryptoApiClientAuthenticationService>();
 builder.Services.AddScoped<CryptoApiKeyAccessManagementService>();
