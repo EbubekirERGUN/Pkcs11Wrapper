@@ -4,6 +4,8 @@ public sealed class CryptoApiRequestPathCachingOptions
 {
     public const string SectionName = "CryptoApiRequestPathCaching";
 
+    public CryptoApiRequestPathRedisOptions Redis { get; set; } = new();
+
     public bool Enabled { get; set; } = true;
 
     public int AuthenticationEntryLimit { get; set; } = 512;

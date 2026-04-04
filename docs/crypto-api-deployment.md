@@ -133,8 +133,9 @@ When both point at the same `CryptoApiSharedPersistence:ConnectionString`, they 
 - usage metadata such as `last_used_at_utc`
 
 Each API node may still keep a **small local request-path cache** for successful auth + authorization decisions.
-That cache is intentionally node-local and disposable; correctness still comes from the shared database because cache keys are tied to a shared auth-state revision that advances when clients, keys, aliases, policies, or bindings change.
-`last_used_at_utc` remains shared metadata, but the host now writes it on a short throttled interval instead of once per successful request.
+Operators can also layer in an optional **Redis-backed hot-path accelerator** so instances can share warm auth/authz decisions, reuse a shared auth-state revision hint, and coordinate `last_used_at_utc` throttling across the fleet.
+Those caches remain disposable; correctness still comes from the shared database because cache keys are tied to a shared auth-state revision that advances when clients, keys, aliases, policies, or bindings change.
+`last_used_at_utc` remains shared metadata, but the host now writes it on a short throttled interval instead of once per successful request, and Redis can reduce duplicate cross-node touches within that interval.
 
 ### Not shared
 
@@ -224,6 +225,7 @@ CryptoApiRuntime__DisableHttpsRedirection=true
 CryptoApiSharedPersistence__Provider=Sqlite
 CryptoApiSharedPersistence__ConnectionString=Data Source=/srv/pkcs11wrapper/cryptoapi-shared/shared-state.db
 CryptoApiSharedPersistence__AutoInitialize=true
+CryptoApiRequestPathCaching__Redis__Enabled=false
 ```
 
 Postgres variant:
@@ -236,6 +238,9 @@ CryptoApiRuntime__DisableHttpsRedirection=true
 CryptoApiSharedPersistence__Provider=Postgres
 CryptoApiSharedPersistence__ConnectionString=Host=db.internal;Port=5432;Database=pkcs11wrapper_cryptoapi;Username=cryptoapi;Password=<secret>;SSL Mode=Require
 CryptoApiSharedPersistence__AutoInitialize=true
+CryptoApiRequestPathCaching__Redis__Enabled=true
+CryptoApiRequestPathCaching__Redis__Configuration=redis.internal:6379,password=<secret>,ssl=false
+CryptoApiRequestPathCaching__Redis__InstanceName=pkcs11wrapper:cryptoapi:
 ```
 
 Important:
@@ -243,6 +248,8 @@ Important:
 - `ModulePath` must be the path the process/container can actually open
 - `UserPin` is deployment secret material; do not hard-code it in checked-in config
 - `AutoInitialize=true` is fine for first-run convenience; the schema creation path is designed to be idempotent
+- Redis acceleration is optional and should be treated as a performance layer only; the relational shared persistence backend remains authoritative
+- if Redis is unavailable, the request path falls back to the relational/shared-store behavior rather than rejecting healthy traffic
 
 ## Scaling expectations for the stateless Crypto API service
 
@@ -255,6 +262,7 @@ Adding more API instances helps with:
 - HTTP connection handling
 - request parsing/serialization
 - concurrent authentication and authorization work
+- sharing warm auth/authz state across nodes when the optional Redis accelerator is enabled
 - reducing the blast radius of a single process crash or restart
 - rolling upgrades behind a gateway/load balancer
 

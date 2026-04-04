@@ -47,6 +47,15 @@ builder.Services.AddOptions<CryptoApiRequestPathCachingOptions>()
             && options.EntryTtlSeconds > 0
             && options.LastUsedWriteIntervalSeconds > 0,
         "Crypto API request-path caching must define positive cache limits, TTL, and last-used write interval values.")
+    .Validate(
+        static options => !options.Redis.Enabled || !string.IsNullOrWhiteSpace(options.Redis.Configuration),
+        "Crypto API Redis hot-path acceleration requires CryptoApiRequestPathCaching:Redis:Configuration when enabled.")
+    .Validate(
+        static options => !options.Redis.Enabled
+            || (options.Redis.ConnectTimeoutMilliseconds > 0
+                && options.Redis.OperationTimeoutMilliseconds > 0
+                && options.Redis.AuthStateRevisionTtlSeconds > 0),
+        "Crypto API Redis hot-path acceleration must define positive Redis timeout and auth-state revision TTL values.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<CryptoApiRateLimitingOptions>()
@@ -75,6 +84,16 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(sp => new CryptoApiRequestPathCache(
     sp.GetRequiredService<TimeProvider>(),
     sp.GetRequiredService<IOptions<CryptoApiRequestPathCachingOptions>>().Value));
+builder.Services.AddSingleton<ICryptoApiDistributedHotPathCache>(sp =>
+{
+    CryptoApiRequestPathCachingOptions options = sp.GetRequiredService<IOptions<CryptoApiRequestPathCachingOptions>>().Value;
+    return options.Redis.Enabled && !string.IsNullOrWhiteSpace(options.Redis.Configuration)
+        ? new RedisCryptoApiDistributedHotPathCache(
+            sp.GetRequiredService<IOptions<CryptoApiRequestPathCachingOptions>>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<RedisCryptoApiDistributedHotPathCache>>())
+        : new NoOpCryptoApiDistributedHotPathCache();
+});
 builder.Services.AddSingleton<CryptoApiRuntimeDescriptorProvider>();
 builder.Services.AddSingleton<CryptoApiPkcs11Runtime>();
 builder.Services.AddSingleton<CryptoApiClientSecretGenerator>();
