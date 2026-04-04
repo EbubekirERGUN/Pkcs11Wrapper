@@ -89,15 +89,13 @@ public static class CryptoApiRouteBuilderExtensions
         operationExecutionGroup.MapPost("/authorize", async Task<IResult> (
             HttpContext httpContext,
             CryptoApiAuthorizeKeyOperationRequest request,
-            CryptoApiClientAuthenticationService authenticationService,
             CryptoApiKeyOperationAuthorizationService authorizationService,
             CancellationToken cancellationToken) =>
         {
-            AuthorizationAttempt authorization = await AuthenticateAndAuthorizeAsync(
+            AuthorizationAttempt authorization = await AuthorizeRequestAsync(
                 httpContext,
                 request.KeyAlias,
                 request.Operation,
-                authenticationService,
                 authorizationService,
                 securityOptions,
                 cancellationToken);
@@ -123,16 +121,14 @@ public static class CryptoApiRouteBuilderExtensions
         operationExecutionGroup.MapPost("/sign", async Task<IResult> (
             HttpContext httpContext,
             CryptoApiSignRequest request,
-            CryptoApiClientAuthenticationService authenticationService,
             CryptoApiKeyOperationAuthorizationService authorizationService,
             ICryptoApiCustomerOperationService operationService,
             CancellationToken cancellationToken) =>
         {
-            AuthorizationAttempt authorization = await AuthenticateAndAuthorizeAsync(
+            AuthorizationAttempt authorization = await AuthorizeRequestAsync(
                 httpContext,
                 request.KeyAlias,
                 "sign",
-                authenticationService,
                 authorizationService,
                 securityOptions,
                 cancellationToken);
@@ -163,16 +159,14 @@ public static class CryptoApiRouteBuilderExtensions
         operationExecutionGroup.MapPost("/verify", async Task<IResult> (
             HttpContext httpContext,
             CryptoApiVerifyRequest request,
-            CryptoApiClientAuthenticationService authenticationService,
             CryptoApiKeyOperationAuthorizationService authorizationService,
             ICryptoApiCustomerOperationService operationService,
             CancellationToken cancellationToken) =>
         {
-            AuthorizationAttempt authorization = await AuthenticateAndAuthorizeAsync(
+            AuthorizationAttempt authorization = await AuthorizeRequestAsync(
                 httpContext,
                 request.KeyAlias,
                 "verify",
-                authenticationService,
                 authorizationService,
                 securityOptions,
                 cancellationToken);
@@ -202,16 +196,14 @@ public static class CryptoApiRouteBuilderExtensions
         operationExecutionGroup.MapPost("/random", async Task<IResult> (
             HttpContext httpContext,
             CryptoApiRandomRequest request,
-            CryptoApiClientAuthenticationService authenticationService,
             CryptoApiKeyOperationAuthorizationService authorizationService,
             ICryptoApiCustomerOperationService operationService,
             CancellationToken cancellationToken) =>
         {
-            AuthorizationAttempt authorization = await AuthenticateAndAuthorizeAsync(
+            AuthorizationAttempt authorization = await AuthorizeRequestAsync(
                 httpContext,
                 request.KeyAlias,
                 "random",
-                authenticationService,
                 authorizationService,
                 securityOptions,
                 cancellationToken);
@@ -265,39 +257,45 @@ public static class CryptoApiRouteBuilderExtensions
         return new AuthenticationAttempt(result.Client, null);
     }
 
-    private static async Task<AuthorizationAttempt> AuthenticateAndAuthorizeAsync(
+    private static async Task<AuthorizationAttempt> AuthorizeRequestAsync(
         HttpContext httpContext,
         string? keyAlias,
         string? operation,
-        CryptoApiClientAuthenticationService authenticationService,
         CryptoApiKeyOperationAuthorizationService authorizationService,
         CryptoApiSecurityOptions securityOptions,
         CancellationToken cancellationToken)
     {
-        AuthenticationAttempt authentication = await AuthenticateAsync(httpContext, authenticationService, securityOptions, cancellationToken);
-        if (authentication.Error is not null)
-        {
-            return new AuthorizationAttempt(null, authentication.Error);
-        }
-
         try
         {
-            CryptoApiKeyOperationAuthorizationResult authorization = await authorizationService.AuthorizeAsync(
-                authentication.Client!,
+            string? keyIdentifier = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeyIdHeaderName].ToString();
+            string? secret = httpContext.Request.Headers[CryptoApiAuthenticationDefaults.ApiKeySecretHeaderName].ToString();
+            CryptoApiRequestAuthorizationResult authorization = await authorizationService.AuthorizeRequestAsync(
+                keyIdentifier,
+                secret,
                 keyAlias,
                 operation,
                 cancellationToken);
 
             if (!authorization.Succeeded || authorization.Authorization is null)
             {
+                int statusCode = authorization.FailureStatusCode ?? StatusCodes.Status403Forbidden;
+                string title = statusCode == StatusCodes.Status401Unauthorized
+                    ? "API key authentication failed."
+                    : "Key alias authorization failed.";
+                string detail = statusCode == StatusCodes.Status401Unauthorized
+                    ? (securityOptions.ExposeDetailedErrors
+                        ? authorization.FailureReason ?? "The provided API credentials were rejected."
+                        : "The provided API credentials were rejected.")
+                    : (securityOptions.ExposeDetailedErrors
+                        ? authorization.FailureReason ?? "The caller is not allowed to use the requested key alias or operation."
+                        : "The caller is not allowed to use the requested key alias or operation.");
+
                 return new AuthorizationAttempt(
                     null,
                     Results.Problem(
-                        title: "Key alias authorization failed.",
-                        detail: securityOptions.ExposeDetailedErrors
-                            ? authorization.FailureReason
-                            : "The caller is not allowed to use the requested key alias or operation.",
-                        statusCode: StatusCodes.Status403Forbidden));
+                        title: title,
+                        detail: detail,
+                        statusCode: statusCode));
             }
 
             return new AuthorizationAttempt(authorization.Authorization, null);

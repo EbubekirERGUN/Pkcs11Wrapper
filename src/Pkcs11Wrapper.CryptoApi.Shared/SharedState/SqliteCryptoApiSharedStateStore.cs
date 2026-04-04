@@ -7,6 +7,8 @@ namespace Pkcs11Wrapper.CryptoApi.SharedState;
 
 public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPersistenceOptions> options) : ICryptoApiSharedStateStore
 {
+    private const string AuthStateRevisionMetadataKey = "auth_state_revision";
+
     private readonly CryptoApiSharedPersistenceOptions _options = options.Value;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -56,6 +58,22 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             SharedReadyAreas: CryptoApiSharedStateConstants.SharedReadyAreas);
     }
 
+    public async Task<long> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsConfigured())
+        {
+            return 0;
+        }
+
+        await InitializeAsync(cancellationToken);
+
+        await using SqliteConnection connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await PrepareConnectionAsync(connection, cancellationToken);
+        await EnsureSchemaAsync(connection, cancellationToken);
+        return await GetAuthStateRevisionCoreAsync(connection, cancellationToken);
+    }
+
     public async Task UpsertClientAsync(CryptoApiClientRecord client, CancellationToken cancellationToken = default)
     {
         await EnsureConfiguredAndInitializedAsync(cancellationToken);
@@ -63,8 +81,10 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         await using SqliteConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await PrepareConnectionAsync(connection, cancellationToken);
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO crypto_api_clients (
                 client_id,
@@ -106,6 +126,8 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         AddText(command, "$updatedAtUtc", FormatTimestamp(client.UpdatedAtUtc));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task UpsertClientKeyAsync(CryptoApiClientKeyRecord clientKey, CancellationToken cancellationToken = default)
@@ -115,8 +137,10 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         await using SqliteConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await PrepareConnectionAsync(connection, cancellationToken);
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO crypto_api_client_keys (
                 client_key_id,
@@ -182,6 +206,30 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         AddNullableText(command, "$lastUsedAtUtc", clientKey.LastUsedAtUtc is null ? null : FormatTimestamp(clientKey.LastUsedAtUtc.Value));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<bool> TryTouchClientKeyLastUsedAsync(Guid clientKeyId, DateTimeOffset lastUsedAtUtc, TimeSpan minimumInterval, CancellationToken cancellationToken = default)
+    {
+        await EnsureConfiguredAndInitializedAsync(cancellationToken);
+
+        await using SqliteConnection connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await PrepareConnectionAsync(connection, cancellationToken);
+
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE crypto_api_client_keys
+            SET last_used_at_utc = $lastUsedAtUtc
+            WHERE client_key_id = $clientKeyId
+              AND (last_used_at_utc IS NULL OR last_used_at_utc < $minimumLastUsedAtUtc);
+            """;
+        AddText(command, "$clientKeyId", clientKeyId.ToString("D", CultureInfo.InvariantCulture));
+        AddText(command, "$lastUsedAtUtc", FormatTimestamp(lastUsedAtUtc));
+        AddText(command, "$minimumLastUsedAtUtc", FormatTimestamp(lastUsedAtUtc - minimumInterval));
+
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
     public async Task UpsertKeyAliasAsync(CryptoApiKeyAliasRecord keyAlias, CancellationToken cancellationToken = default)
@@ -191,8 +239,10 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         await using SqliteConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await PrepareConnectionAsync(connection, cancellationToken);
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO crypto_api_key_aliases (
                 alias_id,
@@ -238,6 +288,8 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         AddText(command, "$updatedAtUtc", FormatTimestamp(keyAlias.UpdatedAtUtc));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task UpsertPolicyAsync(CryptoApiPolicyRecord policy, CancellationToken cancellationToken = default)
@@ -247,8 +299,10 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         await using SqliteConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await PrepareConnectionAsync(connection, cancellationToken);
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO crypto_api_policies (
                 policy_id,
@@ -286,6 +340,8 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         AddText(command, "$updatedAtUtc", FormatTimestamp(policy.UpdatedAtUtc));
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task ReplaceClientPolicyBindingsAsync(Guid clientId, IReadOnlyCollection<Guid> policyIds, CancellationToken cancellationToken = default)
@@ -312,6 +368,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -339,6 +396,7 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -480,6 +538,11 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
                 FOREIGN KEY(policy_id) REFERENCES crypto_api_policies(policy_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS crypto_api_metadata (
+                metadata_key TEXT PRIMARY KEY,
+                metadata_value TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS ix_crypto_api_client_keys_client_id
                 ON crypto_api_client_keys(client_id);
 
@@ -491,6 +554,9 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
 
             CREATE INDEX IF NOT EXISTS ix_crypto_api_key_alias_policy_bindings_policy_id
                 ON crypto_api_key_alias_policy_bindings(policy_id);
+
+            INSERT OR IGNORE INTO crypto_api_metadata (metadata_key, metadata_value)
+            VALUES ('auth_state_revision', '1');
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
 
@@ -538,6 +604,30 @@ public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPers
         command.CommandText = "PRAGMA user_version;";
         object? value = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt32(value, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<long> GetAuthStateRevisionCoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT metadata_value FROM crypto_api_metadata WHERE metadata_key = $metadataKey;";
+        AddText(command, "$metadataKey", AuthStateRevisionMetadataKey);
+        object? value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null
+            ? 1
+            : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task IncrementAuthStateRevisionAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE crypto_api_metadata
+            SET metadata_value = CAST(CAST(metadata_value AS INTEGER) + 1 AS TEXT)
+            WHERE metadata_key = $metadataKey;
+            """;
+        AddText(command, "$metadataKey", AuthStateRevisionMetadataKey);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private string? GetConnectionTarget()

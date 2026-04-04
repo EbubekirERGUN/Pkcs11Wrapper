@@ -125,6 +125,76 @@ public sealed class CryptoApiSharedStateStoreTests
         }
     }
 
+    [Fact]
+    public async Task AuthStateRevisionTracksSemanticChangesButNotLastUsedTouches()
+    {
+        string databasePath = Path.Combine(Path.GetTempPath(), $"pkcs11wrapper-cryptoapi-revision-{Guid.NewGuid():N}.db");
+        try
+        {
+            CryptoApiSharedPersistenceOptions options = new()
+            {
+                Provider = "Sqlite",
+                ConnectionString = $"Data Source={databasePath}",
+                AutoInitialize = true
+            };
+
+            ICryptoApiSharedStateStore store = new SqliteCryptoApiSharedStateStore(Options.Create(options));
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid clientId = Guid.NewGuid();
+            Guid clientKeyId = Guid.NewGuid();
+
+            long initialRevision = await store.GetAuthStateRevisionAsync();
+            await store.UpsertClientAsync(new CryptoApiClientRecord(
+                clientId,
+                "throughput-client",
+                "Throughput Client",
+                "gateway",
+                "api-key",
+                true,
+                null,
+                now,
+                now));
+            long afterClientUpsert = await store.GetAuthStateRevisionAsync();
+
+            await store.UpsertClientKeyAsync(new CryptoApiClientKeyRecord(
+                clientKeyId,
+                clientId,
+                "primary",
+                "kid-throughput-primary",
+                "api-key-secret",
+                "pbkdf2-sha256-v1",
+                "pbkdf2-sha256-v1$100000$salt$hash",
+                "thr...ary",
+                true,
+                now,
+                now,
+                null,
+                null,
+                null,
+                null));
+            long afterKeyUpsert = await store.GetAuthStateRevisionAsync();
+
+            bool firstTouchUpdated = await store.TryTouchClientKeyLastUsedAsync(clientKeyId, now.AddSeconds(5), TimeSpan.FromSeconds(30));
+            long afterFirstTouch = await store.GetAuthStateRevisionAsync();
+            bool secondTouchUpdated = await store.TryTouchClientKeyLastUsedAsync(clientKeyId, now.AddSeconds(10), TimeSpan.FromSeconds(30));
+            long afterSecondTouch = await store.GetAuthStateRevisionAsync();
+
+            Assert.True(afterClientUpsert > initialRevision);
+            Assert.True(afterKeyUpsert > afterClientUpsert);
+            Assert.True(firstTouchUpdated);
+            Assert.False(secondTouchUpdated);
+            Assert.Equal(afterKeyUpsert, afterFirstTouch);
+            Assert.Equal(afterFirstTouch, afterSecondTouch);
+
+            CryptoApiClientKeyRecord key = Assert.Single((await store.GetSnapshotAsync()).ClientKeys);
+            Assert.Equal(now.AddSeconds(5).UtcDateTime, key.LastUsedAtUtc!.Value.UtcDateTime);
+        }
+        finally
+        {
+            DeleteDatabaseArtifacts(databasePath);
+        }
+    }
+
     private static void DeleteDatabaseArtifacts(string databasePath)
     {
         string walPath = databasePath + "-wal";

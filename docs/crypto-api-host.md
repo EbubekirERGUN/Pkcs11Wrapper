@@ -69,6 +69,15 @@ The host is still designed around a **stateless request pipeline**:
 
 That means the API host stays stateless from the instance point of view even though shared durable data now exists for the state that would otherwise break under scale-out.
 
+Steady-state request execution is now intentionally **two-tiered**:
+
+- the source of truth for auth, alias, and policy state remains the shared persistence store
+- each API node keeps a small bounded in-memory cache for successful auth and authorization decisions
+- cache entries are keyed by a lightweight shared-state auth revision so admin changes still invalidate warm entries across nodes without forcing full snapshot reloads on every request
+- `last_used_at_utc` updates are throttled to a short interval per key instead of writing synchronously on every successful request
+
+This keeps the instance stateless in the deployment sense while removing avoidable per-request PBKDF2, full-snapshot, and SQLite write overhead from the hot path.
+
 ## Shared persistence approach
 
 The first persistence provider is intentionally pragmatic: **SQLite via a shared database file**.

@@ -93,6 +93,12 @@ public sealed record CryptoApiKeyOperationAuthorizationResult(
     string? FailureReason,
     CryptoApiAuthorizedKeyOperation? Authorization);
 
+public sealed record CryptoApiRequestAuthorizationResult(
+    bool Succeeded,
+    int? FailureStatusCode,
+    string? FailureReason,
+    CryptoApiAuthorizedKeyOperation? Authorization);
+
 internal static class CryptoApiOperationPolicyDocumentCodec
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
