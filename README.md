@@ -294,6 +294,8 @@ Linux:
 ./eng/run-benchmarks.sh
 ```
 
+`./eng/run-admin-e2e.sh` now expects the Postgres-backed shared persistence model used by the current Crypto API Access surface. By default it will auto-start a temporary local PostgreSQL container with Docker for the E2E run; if you want to point it at an existing instance instead, export `PKCS11WRAPPER_ADMIN_E2E_POSTGRES_CONNECTION_STRING` first.
+
 Windows PowerShell:
 
 ```powershell
