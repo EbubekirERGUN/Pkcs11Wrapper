@@ -60,6 +60,31 @@ public sealed class JsonStoresTests
     }
 
     [Fact]
+    public void CrashSafeFileStorePromoteTempFileFallsBackToReplaceWhenDestinationAppearsBeforeMove()
+    {
+        string root = CreateTempDirectory();
+        try
+        {
+            string path = Path.Combine(root, "race.json");
+            string tempPath = $"{path}.tmp-{Guid.NewGuid():N}";
+            File.WriteAllText(tempPath, "new");
+
+            CrashSafeFileStore.PromoteTempFile(
+                path,
+                tempPath,
+                onBeforeMove: () => File.WriteAllText(path, "old"));
+
+            Assert.Equal("new", File.ReadAllText(path));
+            Assert.Equal("old", File.ReadAllText(CrashSafeFileStore.GetBackupPath(path)));
+            Assert.False(File.Exists(tempPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task JsonDeviceProfileStoreReportsCorruptionWithBackupPath()
     {
         string root = CreateTempDirectory();
