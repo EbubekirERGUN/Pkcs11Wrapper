@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Access;
+using Pkcs11Wrapper.CryptoApi.Caching;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.SharedState;
@@ -223,15 +224,16 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
         };
 
         ICryptoApiSharedStateStore store = new SqliteCryptoApiSharedStateStore(Options.Create(options));
+        ICryptoApiDistributedHotPathCache distributedHotPathCache = new NoOpCryptoApiDistributedHotPathCache();
         CryptoApiClientSecretGenerator generator = new();
         CryptoApiClientSecretHasher hasher = new();
         TimeProvider timeProvider = TimeProvider.System;
         return (
             Store: store,
             ClientManagement: new CryptoApiClientManagementService(store, generator, hasher, timeProvider),
-            Authentication: new CryptoApiClientAuthenticationService(store, hasher, timeProvider),
+            Authentication: new CryptoApiClientAuthenticationService(store, distributedHotPathCache, hasher, timeProvider),
             AccessManagement: new CryptoApiKeyAccessManagementService(store, timeProvider),
-            Authorization: new CryptoApiKeyOperationAuthorizationService(store, timeProvider));
+            Authorization: new CryptoApiKeyOperationAuthorizationService(store, distributedHotPathCache, timeProvider));
     }
 
     private static string CreateDatabasePath()

@@ -73,10 +73,12 @@ Steady-state request execution is now intentionally **two-tiered**:
 
 - the source of truth for auth, alias, and policy state remains the shared persistence store
 - each API node keeps a small bounded in-memory cache for successful auth and authorization decisions
+- operators can optionally add Redis as a **shared hot-path accelerator** for auth revision lookups, successful auth/authz cache reuse across nodes, and fleet-wide `last_used_at_utc` write throttling
 - cache entries are keyed by a lightweight shared-state auth revision so admin changes still invalidate warm entries across nodes without forcing full snapshot reloads on every request
 - `last_used_at_utc` updates are throttled to a short interval per key instead of writing synchronously on every successful request
 
 This keeps the instance stateless in the deployment sense while removing avoidable per-request PBKDF2, full-snapshot, and shared-store write overhead from the hot path.
+Redis does **not** become a second control plane; if Redis is unavailable or cold, the host falls back to the relational/shared store path.
 
 ## Shared persistence approach
 
@@ -142,6 +144,16 @@ Current settings live under three sections:
     "Provider": "Sqlite",
     "ConnectionString": "Data Source=/srv/pkcs11wrapper-cryptoapi/shared-state.db",
     "AutoInitialize": true
+  },
+  "CryptoApiRequestPathCaching": {
+    "Redis": {
+      "Enabled": true,
+      "Configuration": "redis.internal:6379,password=change-me,ssl=false",
+      "InstanceName": "pkcs11wrapper:cryptoapi:",
+      "ConnectTimeoutMilliseconds": 5000,
+      "OperationTimeoutMilliseconds": 1000,
+      "AuthStateRevisionTtlSeconds": 30
+    }
   }
 }
 ```
@@ -169,6 +181,12 @@ Notes:
 - `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
 - With `Provider=Sqlite`, the connection string is a SQLite file path such as `Data Source=/srv/pkcs11wrapper-cryptoapi/shared-state.db`.
 - With `Provider=Postgres`, use a standard Npgsql/PostgreSQL connection string and prefer a dedicated database/role for the Crypto API control plane.
+- `CryptoApiRequestPathCaching:Redis:Enabled=true` turns on the optional Redis-backed hot-path accelerator.
+- `CryptoApiRequestPathCaching:Redis:Configuration` is a standard StackExchange.Redis configuration string.
+- `CryptoApiRequestPathCaching:Redis:InstanceName` prefixes cache/lease keys so multiple environments can share one Redis fleet safely.
+- `CryptoApiRequestPathCaching:Redis:AuthStateRevisionTtlSeconds` bounds how long the shared auth-revision hint lives in Redis before the service refreshes it from the relational source of truth.
+- When Redis acceleration is enabled, warm instances can reuse successful auth/authz decisions across the fleet and coordinate `last_used_at_utc` throttling, but correctness still comes from the shared persistence store plus the auth-state revision.
+- Repo-managed client/key/alias/policy/binding writes refresh the shared auth-state revision in Redis immediately after commit. If some external actor changes the database behind the repo's back, Redis does not become authoritative; the revision hint simply ages out and is re-read from the source of truth on the configured TTL.
 - `CryptoApiRateLimiting` adds built-in limits for `/api/v1/auth/self` and the customer-facing `/api/v1/operations/*` POST routes.
 - The first slice is intentionally **instance-local**, not shared across the fleet. A caller can consume up to the configured budget on each Crypto API instance behind the load balancer.
 - Partitioning is keyed by the presented `X-Api-Key-Id` header when present, with remote-IP fallback when no key id is available.

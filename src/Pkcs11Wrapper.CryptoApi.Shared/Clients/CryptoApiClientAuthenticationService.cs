@@ -6,17 +6,20 @@ namespace Pkcs11Wrapper.CryptoApi.Clients;
 public sealed class CryptoApiClientAuthenticationService
 {
     private readonly ICryptoApiSharedStateStore _sharedStateStore;
+    private readonly ICryptoApiDistributedHotPathCache _distributedHotPathCache;
     private readonly CryptoApiClientSecretHasher _secretHasher;
     private readonly TimeProvider _timeProvider;
     private readonly CryptoApiRequestPathCache _requestPathCache;
 
     public CryptoApiClientAuthenticationService(
         ICryptoApiSharedStateStore sharedStateStore,
+        ICryptoApiDistributedHotPathCache distributedHotPathCache,
         CryptoApiClientSecretHasher secretHasher,
         TimeProvider timeProvider,
         CryptoApiRequestPathCache? requestPathCache = null)
     {
         _sharedStateStore = sharedStateStore;
+        _distributedHotPathCache = distributedHotPathCache;
         _secretHasher = secretHasher;
         _timeProvider = timeProvider;
         _requestPathCache = requestPathCache ?? new CryptoApiRequestPathCache(timeProvider);
@@ -47,6 +50,22 @@ public sealed class CryptoApiClientAuthenticationService
                 Succeeded: true,
                 FailureReason: null,
                 Client: cachedClient);
+        }
+
+        CryptoApiAuthenticatedClient? distributedClient = await _distributedHotPathCache.GetAuthenticatedClientAsync(
+            authStateRevision,
+            normalizedKeyIdentifier,
+            secretFingerprint,
+            now,
+            cancellationToken);
+        if (distributedClient is not null)
+        {
+            _requestPathCache.SetAuthenticatedClient(authStateRevision, normalizedKeyIdentifier, secretFingerprint, distributedClient, now);
+            await RefreshLastUsedIfNeededAsync(authStateRevision, distributedClient.ClientKeyId, normalizedKeyIdentifier, secretFingerprint, now, cancellationToken);
+            return new CryptoApiClientAuthenticationResult(
+                Succeeded: true,
+                FailureReason: null,
+                Client: distributedClient);
         }
 
         CryptoApiClientAuthenticationState? authenticationState = await _sharedStateStore.GetClientAuthenticationStateAsync(normalizedKeyIdentifier, cancellationToken);
@@ -99,6 +118,7 @@ public sealed class CryptoApiClientAuthenticationService
             BoundPolicyIds: authenticationState.BoundPolicyIds);
 
         _requestPathCache.SetAuthenticatedClient(authStateRevision, normalizedKeyIdentifier, secretFingerprint, authenticatedClient, now);
+        await _distributedHotPathCache.SetAuthenticatedClientAsync(authStateRevision, normalizedKeyIdentifier, secretFingerprint, authenticatedClient, cancellationToken);
 
         return new CryptoApiClientAuthenticationResult(
             Succeeded: true,
@@ -132,6 +152,16 @@ public sealed class CryptoApiClientAuthenticationService
         if (!shouldRefresh)
         {
             return;
+        }
+
+        if (_distributedHotPathCache.Enabled)
+        {
+            bool? leaseAcquired = await _distributedHotPathCache.TryAcquireLastUsedRefreshLeaseAsync(clientKeyId, now, minimumInterval, cancellationToken);
+            if (leaseAcquired is false)
+            {
+                _requestPathCache.RecordLastUsedRefresh(authStateRevision, normalizedKeyIdentifier, secretFingerprint, now);
+                return;
+            }
         }
 
         _ = await _sharedStateStore.TryTouchClientKeyLastUsedAsync(clientKeyId, now, minimumInterval, cancellationToken);

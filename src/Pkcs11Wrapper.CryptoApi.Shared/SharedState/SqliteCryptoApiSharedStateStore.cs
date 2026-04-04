@@ -5,7 +5,7 @@ using Pkcs11Wrapper.CryptoApi.Configuration;
 
 namespace Pkcs11Wrapper.CryptoApi.SharedState;
 
-public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPersistenceOptions> options) : ICryptoApiSharedStateStore
+public sealed class SqliteCryptoApiSharedStateStore(IOptions<CryptoApiSharedPersistenceOptions> options) : ICryptoApiAuthoritativeSharedStateStore
 {
     private const string AuthStateRevisionMetadataKey = "auth_state_revision";
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Pkcs11Wrapper.CryptoApi.Caching;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.SharedState;
@@ -114,11 +115,12 @@ public sealed class CryptoApiClientManagementServiceTests
         };
 
         ICryptoApiSharedStateStore store = new SqliteCryptoApiSharedStateStore(Options.Create(options));
+        ICryptoApiDistributedHotPathCache distributedHotPathCache = new NoOpCryptoApiDistributedHotPathCache();
         CryptoApiClientSecretGenerator generator = new();
         CryptoApiClientSecretHasher hasher = new();
         TimeProvider timeProvider = TimeProvider.System;
         CryptoApiClientManagementService management = new(store, generator, hasher, timeProvider);
-        CryptoApiClientAuthenticationService authentication = new(store, hasher, timeProvider);
+        CryptoApiClientAuthenticationService authentication = new(store, distributedHotPathCache, hasher, timeProvider);
         return (store, management, authentication);
     }
 
