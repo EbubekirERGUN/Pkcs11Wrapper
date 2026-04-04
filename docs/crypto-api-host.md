@@ -73,6 +73,7 @@ Steady-state request execution is now intentionally **two-tiered**:
 
 - the source of truth for auth, alias, and policy state remains the shared persistence store
 - each API node keeps a small bounded in-memory cache for successful auth and authorization decisions
+- in Postgres-only deployments, each node also keeps a Postgres-backed auth-state revision hint current via `LISTEN` / `NOTIFY`, so warm request paths do not have to re-read the revision row on every call
 - operators can optionally add Redis as a **shared hot-path accelerator** for auth revision lookups, successful auth/authz cache reuse across nodes, and fleet-wide `last_used_at_utc` write throttling
 - cache entries are keyed by a lightweight shared-state auth revision so admin changes still invalidate warm entries across nodes without forcing full snapshot reloads on every request
 - `last_used_at_utc` updates are throttled to a short interval per key instead of writing synchronously on every successful request
@@ -165,6 +166,7 @@ Notes:
 - `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
 - `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
 - With `Provider=Postgres`, use a standard Npgsql/PostgreSQL connection string and prefer a dedicated database/role for the Crypto API control plane.
+- If the connection string does not specify `Maximum Pool Size` / `Max Pool Size`, the host applies a conservative default cap of `32` pooled Postgres connections per instance. Set an explicit pool size in the connection string if your deployment needs a different budget.
 - `CryptoApiRequestPathCaching:Redis:Enabled=true` turns on the optional Redis-backed hot-path accelerator.
 - `CryptoApiRequestPathCaching:Redis:Configuration` is a standard StackExchange.Redis configuration string.
 - `CryptoApiRequestPathCaching:Redis:InstanceName` prefixes cache/lease keys so multiple environments can share one Redis fleet safely.

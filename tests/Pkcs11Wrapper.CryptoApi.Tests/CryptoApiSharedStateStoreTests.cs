@@ -7,6 +7,32 @@ namespace Pkcs11Wrapper.CryptoApi.Tests;
 
 public sealed class CryptoApiSharedStateStoreTests
 {
+    [Fact]
+    public void PostgresStoreAppliesConservativeDefaultMaxPoolSizeWhenConnectionStringDoesNotSpecifyOne()
+    {
+        PostgresCryptoApiSharedStateStore store = new(Options.Create(new CryptoApiSharedPersistenceOptions
+        {
+            Provider = CryptoApiSharedPersistenceDefaults.PostgresProvider,
+            ConnectionString = "Host=db.internal;Port=5432;Database=pkcs11wrapper;Username=cryptoapi;Password=secret;SSL Mode=Disable",
+            AutoInitialize = true
+        }));
+
+        Assert.Equal(32, store.EffectiveMaxPoolSize);
+    }
+
+    [Fact]
+    public void PostgresStoreRespectsExplicitMaxPoolSizeFromConnectionString()
+    {
+        PostgresCryptoApiSharedStateStore store = new(Options.Create(new CryptoApiSharedPersistenceOptions
+        {
+            Provider = CryptoApiSharedPersistenceDefaults.PostgresProvider,
+            ConnectionString = "Host=db.internal;Port=5432;Database=pkcs11wrapper;Username=cryptoapi;Password=secret;SSL Mode=Disable;Maximum Pool Size=48",
+            AutoInitialize = true
+        }));
+
+        Assert.Equal(48, store.EffectiveMaxPoolSize);
+    }
+
     [PostgresFact]
     public async Task SharedStateStoreSharesStateAcrossIndependentInstances()
     {
@@ -356,5 +382,66 @@ public sealed class CryptoApiSharedStateStoreTests
 
         Assert.Equal(1, afterWarmUp);
         Assert.Equal(afterWarmUp, reader.DatabaseInitializationCount);
+    }
+
+    [PostgresFact]
+    public async Task GetAuthStateRevisionWarmPathDoesNotRequeryDatabaseAfterInitialRead()
+    {
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        PostgresCryptoApiSharedStateStore store = new(scope.AsOptions());
+
+        long firstRevision = await store.GetAuthStateRevisionAsync();
+        long databaseReadsAfterFirst = store.AuthStateRevisionDatabaseReadCount;
+        long secondRevision = await store.GetAuthStateRevisionAsync();
+
+        Assert.Equal(firstRevision, secondRevision);
+        Assert.Equal(1, databaseReadsAfterFirst);
+        Assert.Equal(databaseReadsAfterFirst, store.AuthStateRevisionDatabaseReadCount);
+    }
+
+    [PostgresFact]
+    public async Task GetAuthStateRevisionCacheRefreshesAcrossStoresViaPostgresNotify()
+    {
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        PostgresCryptoApiSharedStateStore reader = new(scope.AsOptions());
+        PostgresCryptoApiSharedStateStore writer = new(scope.AsOptions());
+
+        long initialRevision = await reader.GetAuthStateRevisionAsync();
+        long baselineDatabaseReads = reader.AuthStateRevisionDatabaseReadCount;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        await writer.UpsertClientAsync(new CryptoApiClientRecord(
+            Guid.NewGuid(),
+            $"notify-client-{Guid.NewGuid():N}",
+            "Notify Client",
+            "service",
+            "api-key",
+            true,
+            null,
+            now,
+            now));
+
+        long expectedRevision = await writer.GetAuthStateRevisionAsync();
+
+        await WaitUntilAsync(async () => await reader.GetAuthStateRevisionAsync() == expectedRevision, TimeSpan.FromSeconds(5));
+
+        Assert.True(expectedRevision > initialRevision);
+        Assert.Equal(baselineDatabaseReads, reader.AuthStateRevisionDatabaseReadCount);
+    }
+
+    private static async Task WaitUntilAsync(Func<Task<bool>> condition, TimeSpan timeout)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.Add(timeout);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (await condition())
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        Assert.True(await condition());
     }
 }

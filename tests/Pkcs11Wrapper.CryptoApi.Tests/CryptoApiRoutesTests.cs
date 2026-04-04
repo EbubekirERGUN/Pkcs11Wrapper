@@ -297,6 +297,7 @@ public sealed class CryptoApiRoutesTests
 
         SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
         CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
+        long baselineAuthStateRevisionReads = store.AuthStateRevisionDatabaseReadCount;
         int baselineSnapshotReads = store.SnapshotReads;
         int baselineAuthenticationStateReads = store.AuthenticationStateReads;
         int baselineLastUsedTouches = store.LastUsedTouches;
@@ -312,6 +313,7 @@ public sealed class CryptoApiRoutesTests
             timeProvider.Advance(TimeSpan.FromSeconds(10));
         }
 
+        Assert.Equal(1L, store.AuthStateRevisionDatabaseReadCount - baselineAuthStateRevisionReads);
         Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
         Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
         Assert.Equal(1, store.LastUsedTouches - baselineLastUsedTouches);
@@ -320,6 +322,7 @@ public sealed class CryptoApiRoutesTests
         using HttpResponseMessage afterInterval = await httpClient.GetAsync("/api/v1/auth/self");
         Assert.Equal(HttpStatusCode.OK, afterInterval.StatusCode);
 
+        Assert.Equal(1L, store.AuthStateRevisionDatabaseReadCount - baselineAuthStateRevisionReads);
         Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
         Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
         Assert.Equal(2, store.LastUsedTouches - baselineLastUsedTouches);
@@ -346,6 +349,7 @@ public sealed class CryptoApiRoutesTests
 
         SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
         CountingSharedStateStore store = factory.Services.GetRequiredService<CountingSharedStateStore>();
+        long baselineAuthStateRevisionReads = store.AuthStateRevisionDatabaseReadCount;
         int baselineSnapshotReads = store.SnapshotReads;
         int baselineAuthenticationStateReads = store.AuthenticationStateReads;
         int baselineAuthorizationStateReads = store.AuthorizationStateReads;
@@ -364,6 +368,7 @@ public sealed class CryptoApiRoutesTests
             timeProvider.Advance(TimeSpan.FromSeconds(5));
         }
 
+        Assert.Equal(1L, store.AuthStateRevisionDatabaseReadCount - baselineAuthStateRevisionReads);
         Assert.Equal(0, store.SnapshotReads - baselineSnapshotReads);
         Assert.Equal(1, store.AuthenticationStateReads - baselineAuthenticationStateReads);
         Assert.Equal(1, store.AuthorizationStateReads - baselineAuthorizationStateReads);
@@ -530,6 +535,10 @@ public sealed class CryptoApiRoutesTests
 
     private sealed class CountingSharedStateStore(PostgresCryptoApiSharedStateStore inner) : ICryptoApiSharedStateStore
     {
+        public long AuthStateRevisionDatabaseReadCount => inner.AuthStateRevisionDatabaseReadCount;
+
+        public int AuthStateRevisionReads { get; private set; }
+
         public int SnapshotReads { get; private set; }
 
         public int AuthenticationStateReads { get; private set; }
@@ -544,8 +553,11 @@ public sealed class CryptoApiRoutesTests
         public Task<CryptoApiSharedStateStatus> GetStatusAsync(CancellationToken cancellationToken = default)
             => inner.GetStatusAsync(cancellationToken);
 
-        public Task<long> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default)
-            => inner.GetAuthStateRevisionAsync(cancellationToken);
+        public async Task<long> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default)
+        {
+            AuthStateRevisionReads++;
+            return await inner.GetAuthStateRevisionAsync(cancellationToken);
+        }
 
         public async Task<CryptoApiClientAuthenticationState?> GetClientAuthenticationStateAsync(string keyIdentifier, CancellationToken cancellationToken = default)
         {

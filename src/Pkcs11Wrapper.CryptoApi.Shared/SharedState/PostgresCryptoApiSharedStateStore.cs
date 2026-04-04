@@ -4,17 +4,38 @@ using Pkcs11Wrapper.CryptoApi.Configuration;
 
 namespace Pkcs11Wrapper.CryptoApi.SharedState;
 
-public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPersistenceOptions> options) : ICryptoApiAuthoritativeSharedStateStore
+public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPersistenceOptions> options) : ICryptoApiAuthoritativeSharedStateStore, IAsyncDisposable
 {
     private const string AuthStateRevisionMetadataKey = "auth_state_revision";
+    private const string AuthStateRevisionNotificationChannelPrefix = "crypto_api_auth_state_";
+    private const int DefaultMaxPoolSize = 32;
     private const string SchemaVersionMetadataKey = "schema_version";
+    private static readonly TimeSpan AuthStateRevisionListenerReconnectDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan AuthStateRevisionListenerWaitTimeout = TimeSpan.FromSeconds(30);
 
     private readonly CryptoApiSharedPersistenceOptions _options = options.Value;
+    private readonly string? _pooledConnectionString = NormalizePooledConnectionString(options.Value.ConnectionString);
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
+    private readonly SemaphoreSlim _authStateRevisionListenerGate = new(1, 1);
+    private readonly CancellationTokenSource _listenerCancellationSource = new();
+    private readonly string _authStateRevisionNotificationChannel = CreateAuthStateRevisionNotificationChannel(options.Value.ConnectionString);
     private volatile bool _databaseInitialized;
+    private volatile bool _authStateRevisionListenerStarted;
     private long _databaseInitializationCount;
+    private long _cachedAuthStateRevision;
+    private long _authStateRevisionDatabaseReadCount;
+    private int _disposeState;
+    private Task? _authStateRevisionListenerTask;
+    private TaskCompletionSource _authStateRevisionListenerReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     internal long DatabaseInitializationCount => Interlocked.Read(ref _databaseInitializationCount);
+
+    internal long AuthStateRevisionDatabaseReadCount => Interlocked.Read(ref _authStateRevisionDatabaseReadCount);
+
+    internal int EffectiveMaxPoolSize
+        => string.IsNullOrWhiteSpace(_pooledConnectionString)
+            ? 0
+            : new NpgsqlConnectionStringBuilder(_pooledConnectionString).MaxPoolSize;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -89,9 +110,19 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
 
         await InitializeAsync(cancellationToken);
 
+        await EnsureAuthStateRevisionListenerStartedAsync(cancellationToken);
+
+        long cachedRevision = Interlocked.Read(ref _cachedAuthStateRevision);
+        if (cachedRevision > 0)
+        {
+            return cachedRevision;
+        }
+
         await using NpgsqlConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        return await GetAuthStateRevisionCoreAsync(connection, cancellationToken);
+        long revision = await ReadAuthStateRevisionFromDatabaseAsync(connection, cancellationToken);
+        UpdateCachedAuthStateRevision(revision);
+        return revision;
     }
 
     public async Task<CryptoApiClientAuthenticationState?> GetClientAuthenticationStateAsync(string keyIdentifier, CancellationToken cancellationToken = default)
@@ -265,7 +296,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         AddTimestamp(command, "@updatedAtUtc", client.UpdatedAtUtc);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
-        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        _ = await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -344,7 +375,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         AddNullableTimestamp(command, "@lastUsedAtUtc", clientKey.LastUsedAtUtc);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
-        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        _ = await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -424,7 +455,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         AddTimestamp(command, "@updatedAtUtc", keyAlias.UpdatedAtUtc);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
-        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        _ = await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -475,7 +506,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         AddTimestamp(command, "@updatedAtUtc", policy.UpdatedAtUtc);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
-        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        _ = await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -502,7 +533,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        _ = await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -529,7 +560,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
+        _ = await IncrementAuthStateRevisionAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -547,6 +578,31 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             Policies: await ReadPoliciesAsync(connection, cancellationToken),
             ClientPolicyBindings: await ReadClientPolicyBindingsAsync(connection, cancellationToken),
             KeyAliasPolicyBindings: await ReadKeyAliasPolicyBindingsAsync(connection, cancellationToken));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposeState, 1) != 0)
+        {
+            return;
+        }
+
+        _listenerCancellationSource.Cancel();
+
+        if (_authStateRevisionListenerTask is not null)
+        {
+            try
+            {
+                await _authStateRevisionListenerTask;
+            }
+            catch (OperationCanceledException) when (_listenerCancellationSource.IsCancellationRequested)
+            {
+            }
+        }
+
+        _listenerCancellationSource.Dispose();
+        _authStateRevisionListenerGate.Dispose();
+        _initializationGate.Dispose();
     }
 
     private bool IsConfigured()
@@ -576,8 +632,177 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         await InitializeAsync(cancellationToken);
     }
 
+    private async Task EnsureAuthStateRevisionListenerStartedAsync(CancellationToken cancellationToken)
+    {
+        if (_authStateRevisionListenerStarted)
+        {
+            await WaitForAuthStateRevisionListenerReadyAsync(cancellationToken);
+            return;
+        }
+
+        await _authStateRevisionListenerGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_authStateRevisionListenerStarted)
+            {
+                return;
+            }
+
+            _authStateRevisionListenerReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _authStateRevisionListenerTask = Task.Run(() => ListenForAuthStateRevisionChangesAsync(_authStateRevisionListenerReady, _listenerCancellationSource.Token));
+            _authStateRevisionListenerStarted = true;
+        }
+        finally
+        {
+            _authStateRevisionListenerGate.Release();
+        }
+
+        await WaitForAuthStateRevisionListenerReadyAsync(cancellationToken);
+    }
+
+    private async Task WaitForAuthStateRevisionListenerReadyAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _authStateRevisionListenerReady.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+        }
+    }
+
+    private async Task ListenForAuthStateRevisionChangesAsync(TaskCompletionSource readySignal, CancellationToken cancellationToken)
+    {
+        bool readySignaled = false;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await InitializeAsync(cancellationToken);
+
+                await using NpgsqlConnection connection = CreateListenerConnection();
+                connection.Notification += HandleAuthStateRevisionNotification;
+
+                try
+                {
+                    await connection.OpenAsync(cancellationToken);
+
+                    await using NpgsqlCommand listen = connection.CreateCommand();
+                    listen.CommandText = $"LISTEN {_authStateRevisionNotificationChannel};";
+                    await listen.ExecuteNonQueryAsync(cancellationToken);
+
+                    long revision = await ReadAuthStateRevisionFromDatabaseAsync(connection, cancellationToken);
+                    UpdateCachedAuthStateRevision(revision);
+
+                    if (!readySignaled)
+                    {
+                        readySignal.TrySetResult();
+                        readySignaled = true;
+                    }
+
+                    while (!cancellationToken.IsCancellationRequested)
+                    {
+                        _ = await connection.WaitAsync(AuthStateRevisionListenerWaitTimeout, cancellationToken);
+                    }
+                }
+                finally
+                {
+                    connection.Notification -= HandleAuthStateRevisionNotification;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch
+            {
+                if (!readySignaled)
+                {
+                    readySignal.TrySetResult();
+                    readySignaled = true;
+                }
+
+                try
+                {
+                    await Task.Delay(AuthStateRevisionListenerReconnectDelay, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    private void HandleAuthStateRevisionNotification(object? sender, NpgsqlNotificationEventArgs args)
+    {
+        if (!string.Equals(args.Channel, _authStateRevisionNotificationChannel, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (long.TryParse(args.Payload, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long revision))
+        {
+            UpdateCachedAuthStateRevision(revision);
+        }
+    }
+
     private NpgsqlConnection CreateConnection()
-        => new(_options.ConnectionString);
+        => new(_pooledConnectionString);
+
+    private NpgsqlConnection CreateListenerConnection()
+    {
+        NpgsqlConnectionStringBuilder builder = new(_options.ConnectionString)
+        {
+            Pooling = false
+        };
+
+        return new NpgsqlConnection(builder.ConnectionString);
+    }
+
+    private static string CreateAuthStateRevisionNotificationChannel(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return $"{AuthStateRevisionNotificationChannelPrefix}default";
+        }
+
+        NpgsqlConnectionStringBuilder builder = new(connectionString);
+        string scope = string.Join('|',
+            builder.Host ?? string.Empty,
+            builder.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            builder.Database ?? string.Empty,
+            builder.SearchPath ?? string.Empty);
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(scope));
+        string suffix = Convert.ToHexString(hash.AsSpan(0, 12)).ToLowerInvariant();
+        return $"{AuthStateRevisionNotificationChannelPrefix}{suffix}";
+    }
+
+    private static string? NormalizePooledConnectionString(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return connectionString;
+        }
+
+        NpgsqlConnectionStringBuilder builder = new(connectionString);
+        if (builder.Pooling && !SpecifiesMaxPoolSize(connectionString))
+        {
+            builder.MaxPoolSize = DefaultMaxPoolSize;
+        }
+
+        return builder.ConnectionString;
+    }
+
+    private static bool SpecifiesMaxPoolSize(string connectionString)
+    {
+        string compact = connectionString.Replace(" ", string.Empty, StringComparison.Ordinal);
+        return compact.Contains("maxpoolsize=", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("maximumpoolsize=", StringComparison.OrdinalIgnoreCase)
+            || connectionString.Contains("Max Pool Size=", StringComparison.OrdinalIgnoreCase)
+            || connectionString.Contains("Maximum Pool Size=", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static async Task EnsureSchemaAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
@@ -725,8 +950,10 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             : Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    private static async Task<long> GetAuthStateRevisionCoreAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private async Task<long> ReadAuthStateRevisionFromDatabaseAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _authStateRevisionDatabaseReadCount);
+
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText = "SELECT metadata_value FROM crypto_api_metadata WHERE metadata_key = @metadataKey;";
         AddText(command, "@metadataKey", AuthStateRevisionMetadataKey);
@@ -850,18 +1077,65 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         return policies;
     }
 
-    private static async Task IncrementAuthStateRevisionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    private async Task<long> IncrementAuthStateRevisionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
     {
         await using NpgsqlCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO crypto_api_metadata (metadata_key, metadata_value)
-            VALUES (@metadataKey, '2')
-            ON CONFLICT (metadata_key) DO UPDATE
-            SET metadata_value = CAST(CAST(crypto_api_metadata.metadata_value AS BIGINT) + 1 AS TEXT);
+            WITH next_revision AS (
+                INSERT INTO crypto_api_metadata (metadata_key, metadata_value)
+                VALUES (@metadataKey, '2')
+                ON CONFLICT (metadata_key) DO UPDATE
+                SET metadata_value = CAST(CAST(crypto_api_metadata.metadata_value AS BIGINT) + 1 AS TEXT)
+                RETURNING metadata_value)
+            SELECT CAST(metadata_value AS BIGINT)
+            FROM next_revision;
             """;
         AddText(command, "@metadataKey", AuthStateRevisionMetadataKey);
+        object? value = await command.ExecuteScalarAsync(cancellationToken);
+        long revision = value is null
+            ? 0
+            : Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture);
+
+        if (revision > 0)
+        {
+            UpdateCachedAuthStateRevision(revision);
+            await NotifyAuthStateRevisionChangedAsync(connection, transaction, _authStateRevisionNotificationChannel, revision, cancellationToken);
+        }
+
+        return revision;
+    }
+
+    private static async Task NotifyAuthStateRevisionChangedAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, string channel, long revision, CancellationToken cancellationToken)
+    {
+        await using NpgsqlCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT pg_notify(@channel, @payload);";
+        AddText(command, "@channel", channel);
+        AddText(command, "@payload", revision.ToString(System.Globalization.CultureInfo.InvariantCulture));
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private void UpdateCachedAuthStateRevision(long revision)
+    {
+        if (revision <= 0)
+        {
+            return;
+        }
+
+        while (true)
+        {
+            long currentRevision = Interlocked.Read(ref _cachedAuthStateRevision);
+            if (currentRevision >= revision)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _cachedAuthStateRevision, revision, currentRevision) == currentRevision)
+            {
+                return;
+            }
+        }
     }
 
     private string? GetConnectionTarget()
