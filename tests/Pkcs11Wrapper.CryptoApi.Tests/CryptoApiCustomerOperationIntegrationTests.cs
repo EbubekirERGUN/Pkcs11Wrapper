@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
@@ -9,6 +10,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Pkcs11Wrapper;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
+using Pkcs11Wrapper.CryptoApi.Runtime;
+using Pkcs11Wrapper.Native;
 
 namespace Pkcs11Wrapper.CryptoApi.Tests;
 
@@ -117,6 +120,56 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         Assert.Contains(responses, response => string.Equals(response.Path, "/api/v1/operations/random", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task SequentialRequestsReuseSessionLoginAndKeyLookupAgainstSoftHsm()
+    {
+        if (!SoftHsmTestContext.IsSupported())
+        {
+            return;
+        }
+
+        await using SoftHsmTestContext context = await SoftHsmTestContext.CreateAsync();
+        if (!context.CanExecuteInProcess)
+        {
+            return;
+        }
+
+        await using WebApplicationFactory<Program> factory = CreateFactory(context);
+
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, context);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        CryptoApiPkcs11Runtime runtime = scope.ServiceProvider.GetRequiredService<CryptoApiPkcs11Runtime>();
+        CountingTelemetryListener telemetry = new();
+        runtime.GetInitializedModule().TelemetryListener = telemetry;
+
+        HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+        string payloadBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("steady-state crypto api"));
+        for (int i = 0; i < 3; i++)
+        {
+            using HttpResponseMessage signResponse = await httpClient.PostAsync(
+                "/api/v1/operations/sign",
+                CreateJsonContent($"{{\"keyAlias\":\"{context.AliasName}\",\"algorithm\":\"RS256\",\"payloadBase64\":\"{payloadBase64}\"}}"));
+            Assert.Equal(HttpStatusCode.OK, signResponse.StatusCode);
+        }
+
+        for (int i = 0; i < 3; i++)
+        {
+            using HttpResponseMessage randomResponse = await httpClient.PostAsync(
+                "/api/v1/operations/random",
+                CreateJsonContent($"{{\"keyAlias\":\"{context.AliasName}\",\"length\":32}}"));
+            Assert.Equal(HttpStatusCode.OK, randomResponse.StatusCode);
+        }
+
+        Assert.Equal(1, telemetry.GetCount("C_OpenSession"));
+        Assert.Equal(1, telemetry.GetCount("C_Login"));
+        Assert.Equal(1, telemetry.GetCount("C_FindObjects"));
+        Assert.Equal(3, telemetry.GetCount("C_GenerateRandom"));
+    }
+
     private static async Task<SeededAccess> SeedAuthorizedAccessAsync(WebApplicationFactory<Program> factory, SoftHsmTestContext context)
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -183,6 +236,20 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         CryptoApiManagedPolicy Policy);
 
     private sealed record OperationResponse(string Path, HttpStatusCode StatusCode, string Body);
+
+    private sealed class CountingTelemetryListener : IPkcs11OperationTelemetryListener
+    {
+        private readonly ConcurrentDictionary<string, int> _counts = new(StringComparer.Ordinal);
+
+        public void OnOperationCompleted(in Pkcs11OperationTelemetryEvent operationEvent)
+        {
+            string key = operationEvent.NativeOperationName ?? operationEvent.OperationName;
+            _counts.AddOrUpdate(key, 1, static (_, count) => count + 1);
+        }
+
+        public int GetCount(string operationName)
+            => _counts.TryGetValue(operationName, out int count) ? count : 0;
+    }
 
     private sealed class SoftHsmTestContext : IAsyncDisposable
     {
@@ -372,45 +439,4 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
             return false;
         }
 
-        private static async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments, string configPath)
-        {
-            ProcessStartInfo startInfo = new(fileName)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            };
-
-            foreach (string argument in arguments)
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            startInfo.Environment[SoftHsmConfEnvironmentVariable] = configPath;
-
-            using Process process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start '{fileName}'.");
-            string stdout = await process.StandardOutput.ReadToEndAsync();
-            string stderr = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException($"Command '{fileName} {string.Join(' ', arguments)}' failed with exit code {process.ExitCode}.{Environment.NewLine}STDOUT:{Environment.NewLine}{stdout}{Environment.NewLine}STDERR:{Environment.NewLine}{stderr}");
-            }
-
-            return new ProcessResult(stdout, stderr);
-        }
-
-        private static void DeleteDatabaseArtifacts(string databasePath)
-        {
-            string walPath = databasePath + "-wal";
-            string shmPath = databasePath + "-shm";
-
-            if (File.Exists(databasePath)) File.Delete(databasePath);
-            if (File.Exists(walPath)) File.Delete(walPath);
-            if (File.Exists(shmPath)) File.Delete(shmPath);
-        }
-
-        private sealed record ProcessResult(string StandardOutput, string StandardError);
-    }
-}
+        private static async Task<ProcessResult> RunP
