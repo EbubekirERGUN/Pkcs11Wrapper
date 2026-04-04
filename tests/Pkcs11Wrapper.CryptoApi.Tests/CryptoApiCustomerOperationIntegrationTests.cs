@@ -72,6 +72,51 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         Assert.Contains(random, static value => value != 0);
     }
 
+    [Fact]
+    public async Task ConcurrentSignAndRandomRequestsRemainStableAgainstSoftHsm()
+    {
+        if (!SoftHsmTestContext.IsSupported())
+        {
+            return;
+        }
+
+        await using SoftHsmTestContext context = await SoftHsmTestContext.CreateAsync();
+        if (!context.CanExecuteInProcess)
+        {
+            return;
+        }
+
+        await using WebApplicationFactory<Program> factory = CreateFactory(context);
+
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, context);
+
+        HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+        string payloadBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("concurrent customer-facing crypto api"));
+        Task<OperationResponse>[] tasks = Enumerable.Range(0, 48)
+            .Select(index => index % 2 == 0
+                ? PostOperationAsync(
+                    httpClient,
+                    "/api/v1/operations/sign",
+                    $"{{\"keyAlias\":\"{context.AliasName}\",\"algorithm\":\"RS256\",\"payloadBase64\":\"{payloadBase64}\"}}")
+                : PostOperationAsync(
+                    httpClient,
+                    "/api/v1/operations/random",
+                    $"{{\"keyAlias\":\"{context.AliasName}\",\"length\":32}}"))
+            .ToArray();
+
+        OperationResponse[] responses = await Task.WhenAll(tasks);
+
+        Assert.All(responses, response =>
+            Assert.True(
+                response.StatusCode == HttpStatusCode.OK,
+                $"{response.Path} failed with {(int)response.StatusCode}: {response.Body}"));
+        Assert.Contains(responses, response => string.Equals(response.Path, "/api/v1/operations/sign", StringComparison.Ordinal));
+        Assert.Contains(responses, response => string.Equals(response.Path, "/api/v1/operations/random", StringComparison.Ordinal));
+    }
+
     private static async Task<SeededAccess> SeedAuthorizedAccessAsync(WebApplicationFactory<Program> factory, SoftHsmTestContext context)
     {
         using IServiceScope scope = factory.Services.CreateScope();
@@ -124,11 +169,20 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
     private static StringContent CreateJsonContent(string json)
         => new(json, Encoding.UTF8, "application/json");
 
+    private static async Task<OperationResponse> PostOperationAsync(HttpClient httpClient, string path, string json)
+    {
+        using HttpResponseMessage response = await httpClient.PostAsync(path, CreateJsonContent(json));
+        string body = await response.Content.ReadAsStringAsync();
+        return new OperationResponse(path, response.StatusCode, body);
+    }
+
     private sealed record SeededAccess(
         CryptoApiManagedClient Client,
         CryptoApiCreatedClientKey Key,
         CryptoApiManagedKeyAlias Alias,
         CryptoApiManagedPolicy Policy);
+
+    private sealed record OperationResponse(string Path, HttpStatusCode StatusCode, string Body);
 
     private sealed class SoftHsmTestContext : IAsyncDisposable
     {

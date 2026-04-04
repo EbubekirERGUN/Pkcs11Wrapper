@@ -2,6 +2,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Health;
+using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.CryptoApi.SharedState;
 
 namespace Pkcs11Wrapper.CryptoApi.Tests;
@@ -16,7 +17,8 @@ public sealed class CryptoApiHealthCheckTests
         HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
-        Assert.Equal("Crypto API module path is not configured.", result.Description);
+        Assert.Equal("Crypto API PKCS#11 module path is not configured.", result.Description);
+        Assert.NotNull(result.Exception);
     }
 
     [Fact]
@@ -28,7 +30,7 @@ public sealed class CryptoApiHealthCheckTests
         HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
-        Assert.Equal("Configured PKCS#11 module could not be loaded.", result.Description);
+        Assert.Equal("Configured PKCS#11 module could not be initialized.", result.Description);
         Assert.NotNull(result.Exception);
     }
 
@@ -45,5 +47,5 @@ public sealed class CryptoApiHealthCheckTests
     }
 
     private static CryptoApiModuleReadinessHealthCheck CreateHealthCheck(string? modulePath)
-        => new(Options.Create(new CryptoApiRuntimeOptions { ModulePath = modulePath }));
+        => new(new CryptoApiPkcs11Runtime(Options.Create(new CryptoApiRuntimeOptions { ModulePath = modulePath })));
 }
