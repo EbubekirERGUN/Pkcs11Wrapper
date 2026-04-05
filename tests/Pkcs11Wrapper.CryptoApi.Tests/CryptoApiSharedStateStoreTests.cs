@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.SharedState;
 using static Pkcs11Wrapper.CryptoApi.Tests.PostgresTestEnvironment;
@@ -31,6 +32,73 @@ public sealed class CryptoApiSharedStateStoreTests
         }));
 
         Assert.Equal(48, store.EffectiveMaxPoolSize);
+    }
+
+    [Fact]
+    public void PostgresStoreAppliesListenerKeepAliveDefaultWhenConnectionStringOmitsIt()
+    {
+        PostgresCryptoApiSharedStateStore store = new(Options.Create(new CryptoApiSharedPersistenceOptions
+        {
+            Provider = CryptoApiSharedPersistenceDefaults.PostgresProvider,
+            ConnectionString = "Host=db.internal;Port=5432;Database=pkcs11wrapper;Username=cryptoapi;Password=secret;SSL Mode=Disable",
+            AutoInitialize = true
+        }));
+
+        Assert.Equal(30, store.EffectiveListenerKeepAliveSeconds);
+    }
+
+    [Fact]
+    public void PostgresStoreRespectsExplicitListenerKeepAliveFromConnectionString()
+    {
+        PostgresCryptoApiSharedStateStore store = new(Options.Create(new CryptoApiSharedPersistenceOptions
+        {
+            Provider = CryptoApiSharedPersistenceDefaults.PostgresProvider,
+            ConnectionString = "Host=db.internal;Port=5432;Database=pkcs11wrapper;Username=cryptoapi;Password=secret;SSL Mode=Disable;Keepalive=9",
+            AutoInitialize = true
+        }));
+
+        Assert.Equal(9, store.EffectiveListenerKeepAliveSeconds);
+    }
+
+    [PostgresFact]
+    public async Task GetStatusDoesNotBackfillSchemaWhenAutoInitializeIsDisabled()
+    {
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        PostgresCryptoApiSharedStateStore store = new(Options.Create(new CryptoApiSharedPersistenceOptions
+        {
+            Provider = CryptoApiSharedPersistenceDefaults.PostgresProvider,
+            ConnectionString = scope.Options.ConnectionString,
+            AutoInitialize = false
+        }));
+
+        PostgresException exception = await Assert.ThrowsAsync<PostgresException>(() => store.GetStatusAsync());
+
+        Assert.Equal(PostgresErrorCodes.UndefinedTable, exception.SqlState);
+    }
+
+    [PostgresFact]
+    public async Task SchemaInitializationCreatesCaseInsensitiveAliasLookupIndex()
+    {
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        PostgresCryptoApiSharedStateStore store = new(scope.AsOptions());
+
+        await store.InitializeAsync();
+
+        await using NpgsqlConnection connection = new(scope.Options.ConnectionString);
+        await connection.OpenAsync();
+        await using NpgsqlCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND tablename = 'crypto_api_key_aliases'
+              AND indexname = 'ix_crypto_api_key_aliases_alias_name_lower';
+            """;
+
+        string? indexDefinition = (string?)await command.ExecuteScalarAsync();
+
+        Assert.NotNull(indexDefinition);
+        Assert.Contains("lower(alias_name)", indexDefinition, StringComparison.OrdinalIgnoreCase);
     }
 
     [PostgresFact]

@@ -45,7 +45,7 @@ public sealed class CryptoApiDistributedHotPathCacheTests
 
         Assert.False(afterRevocation.Succeeded);
         Assert.Equal(401, afterRevocation.FailureStatusCode);
-        Assert.Equal("API key has been revoked.", afterRevocation.FailureReason);
+        Assert.Equal("API key id or secret is invalid.", afterRevocation.FailureReason);
         Assert.Equal(1, instanceB.Store.AuthStateRevisionDatabaseReadCount);
         Assert.Equal(2, instanceB.Store.AuthenticationStateReads);
         Assert.Equal(1, instanceB.Store.AuthorizationStateReads);
@@ -115,7 +115,7 @@ public sealed class CryptoApiDistributedHotPathCacheTests
 
         Assert.False(afterRevocation.Succeeded);
         Assert.Equal(401, afterRevocation.FailureStatusCode);
-        Assert.Equal("API key has been revoked.", afterRevocation.FailureReason);
+        Assert.Equal("API key id or secret is invalid.", afterRevocation.FailureReason);
         Assert.Equal(0, instanceB.Store.AuthStateRevisionReads);
         Assert.Equal(1, instanceB.Store.AuthenticationStateReads);
         Assert.Equal(0, instanceB.Store.AuthorizationStateReads);

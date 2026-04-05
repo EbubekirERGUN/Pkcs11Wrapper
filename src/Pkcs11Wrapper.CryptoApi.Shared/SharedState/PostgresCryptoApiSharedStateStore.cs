@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using NpgsqlTypes;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Observability;
 
@@ -11,12 +12,15 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
     private const string AuthStateRevisionMetadataKey = "auth_state_revision";
     private const string AuthStateRevisionNotificationChannelPrefix = "crypto_api_auth_state_";
     private const int DefaultMaxPoolSize = 32;
+    private const int DefaultListenerKeepAliveSeconds = 30;
     private const string SchemaVersionMetadataKey = "schema_version";
     private static readonly TimeSpan AuthStateRevisionListenerReconnectDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan AuthStateRevisionListenerWaitTimeout = TimeSpan.FromSeconds(30);
 
     private readonly CryptoApiSharedPersistenceOptions _options = options.Value;
     private readonly string? _pooledConnectionString = NormalizePooledConnectionString(options.Value.ConnectionString);
+    private readonly NpgsqlDataSource? _pooledDataSource = CreatePooledDataSource(options.Value.ConnectionString);
+    private readonly NpgsqlDataSource? _listenerDataSource = CreateListenerDataSource(options.Value.ConnectionString);
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly SemaphoreSlim _authStateRevisionListenerGate = new(1, 1);
     private readonly CancellationTokenSource _listenerCancellationSource = new();
@@ -39,6 +43,11 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         => string.IsNullOrWhiteSpace(_pooledConnectionString)
             ? 0
             : new NpgsqlConnectionStringBuilder(_pooledConnectionString).MaxPoolSize;
+
+    internal int EffectiveListenerKeepAliveSeconds
+        => string.IsNullOrWhiteSpace(_options.ConnectionString)
+            ? 0
+            : new NpgsqlConnectionStringBuilder(NormalizeListenerConnectionString(_options.ConnectionString)!).KeepAlive;
 
     public CryptoApiSharedStateMetricsSnapshot GetMetricsSnapshot()
         => new(
@@ -119,19 +128,19 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
 
             await using NpgsqlConnection connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
-            await EnsureSchemaAsync(connection, cancellationToken);
+            SharedStateStatusSnapshot snapshot = await ReadStatusSnapshotAsync(connection, cancellationToken);
 
             return new CryptoApiSharedStateStatus(
                 Configured: true,
                 Provider: CryptoApiSharedPersistenceDefaults.PostgresProvider,
                 ConnectionTarget: GetConnectionTarget(),
-                SchemaVersion: await GetSchemaVersionAsync(connection, cancellationToken),
-                ApiClientCount: await CountRowsAsync(connection, "crypto_api_clients", cancellationToken),
-                ApiClientKeyCount: await CountRowsAsync(connection, "crypto_api_client_keys", cancellationToken),
-                KeyAliasCount: await CountRowsAsync(connection, "crypto_api_key_aliases", cancellationToken),
-                PolicyCount: await CountRowsAsync(connection, "crypto_api_policies", cancellationToken),
-                ClientPolicyBindingCount: await CountRowsAsync(connection, "crypto_api_client_policy_bindings", cancellationToken),
-                KeyAliasPolicyBindingCount: await CountRowsAsync(connection, "crypto_api_key_alias_policy_bindings", cancellationToken),
+                SchemaVersion: snapshot.SchemaVersion,
+                ApiClientCount: snapshot.ApiClientCount,
+                ApiClientKeyCount: snapshot.ApiClientKeyCount,
+                KeyAliasCount: snapshot.KeyAliasCount,
+                PolicyCount: snapshot.PolicyCount,
+                ClientPolicyBindingCount: snapshot.ClientPolicyBindingCount,
+                KeyAliasPolicyBindingCount: snapshot.KeyAliasPolicyBindingCount,
                 SharedReadyAreas: CryptoApiSharedStateConstants.SharedReadyAreas);
         }
         catch
@@ -232,7 +241,13 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
                 k.expires_at_utc,
                 k.revoked_at_utc,
                 k.revoked_reason,
-                k.last_used_at_utc
+                k.last_used_at_utc,
+                ARRAY(
+                    SELECT cpb.policy_id
+                    FROM crypto_api_client_policy_bindings cpb
+                    WHERE cpb.client_id = c.client_id
+                    ORDER BY cpb.policy_id)
+                    AS bound_policy_ids
             FROM crypto_api_client_keys k
             INNER JOIN crypto_api_clients c ON c.client_id = k.client_id
             WHERE k.key_identifier = @keyIdentifier
@@ -278,10 +293,10 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
                     RevokedAtUtc: ReadNullableTimestamp(reader, 20),
                     RevokedReason: reader.IsDBNull(21) ? null : reader.GetString(21),
                     LastUsedAtUtc: ReadNullableTimestamp(reader, 22));
-            }
 
-            Guid[] boundPolicyIds = await ReadClientBoundPolicyIdsAsync(connection, client.ClientId, cancellationToken);
-            return new CryptoApiClientAuthenticationState(client, key, boundPolicyIds);
+                Guid[] boundPolicyIds = reader.GetFieldValue<Guid[]>(23);
+                return new CryptoApiClientAuthenticationState(client, key, boundPolicyIds);
+            }
         }
         catch
         {
@@ -314,21 +329,49 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             await using NpgsqlConnection connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
 
-            CryptoApiClientRecord? client = await ReadClientByIdAsync(connection, clientId, cancellationToken);
+            await using NpgsqlCommand command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT client_id, client_name, display_name, application_type, authentication_mode, is_enabled, notes, created_at_utc, updated_at_utc
+                FROM crypto_api_clients
+                WHERE client_id = @clientId
+                LIMIT 1;
+
+                SELECT alias_id, alias_name, route_group_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
+                FROM crypto_api_key_aliases
+                WHERE lower(alias_name) = lower(@aliasName)
+                LIMIT 1;
+
+                SELECT DISTINCT p.policy_id, p.policy_name, p.description, p.revision, p.document_json, p.is_enabled, p.created_at_utc, p.updated_at_utc
+                FROM crypto_api_policies p
+                INNER JOIN crypto_api_client_policy_bindings cpb ON cpb.policy_id = p.policy_id
+                INNER JOIN crypto_api_key_alias_policy_bindings kapb ON kapb.policy_id = p.policy_id
+                INNER JOIN crypto_api_key_aliases aliases ON aliases.alias_id = kapb.alias_id
+                WHERE cpb.client_id = @clientId
+                  AND lower(aliases.alias_name) = lower(@aliasName)
+                  AND p.is_enabled = TRUE
+                ORDER BY p.policy_name;
+                """;
+            AddGuid(command, "@clientId", clientId);
+            AddText(command, "@aliasName", aliasName);
+
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+            CryptoApiClientRecord? client = await ReadSingleClientAsync(reader, cancellationToken);
             if (client is null)
             {
                 result = "client_not_found";
                 return new CryptoApiKeyAuthorizationState(null, null, []);
             }
 
-            CryptoApiKeyAliasRecord? alias = await ReadKeyAliasByNameAsync(connection, aliasName, cancellationToken);
+            await reader.NextResultAsync(cancellationToken);
+            CryptoApiKeyAliasRecord? alias = await ReadSingleAliasAsync(reader, cancellationToken);
             if (alias is null)
             {
                 result = "alias_not_found";
                 return new CryptoApiKeyAuthorizationState(client, null, []);
             }
 
-            IReadOnlyList<CryptoApiPolicyRecord> sharedPolicies = await ReadSharedPoliciesAsync(connection, clientId, alias.AliasId, cancellationToken);
+            await reader.NextResultAsync(cancellationToken);
+            IReadOnlyList<CryptoApiPolicyRecord> sharedPolicies = await ReadPoliciesAsync(reader, cancellationToken);
             return new CryptoApiKeyAuthorizationState(client, alias, sharedPolicies);
         }
         catch
@@ -637,16 +680,18 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         await DeleteBindingsAsync(connection, transaction, "crypto_api_client_policy_bindings", "client_id", clientId, cancellationToken);
-        foreach (Guid policyId in policyIds.Distinct())
+        Guid[] distinctPolicyIds = policyIds.Distinct().ToArray();
+        if (distinctPolicyIds.Length > 0)
         {
             await using NpgsqlCommand insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO crypto_api_client_policy_bindings (client_id, policy_id, bound_at_utc)
-                VALUES (@clientId, @policyId, @boundAtUtc);
+                SELECT @clientId, policy_id, @boundAtUtc
+                FROM unnest(@policyIds) AS policy_id;
                 """;
             AddGuid(insert, "@clientId", clientId);
-            AddGuid(insert, "@policyId", policyId);
+            AddGuidArray(insert, "@policyIds", distinctPolicyIds);
             AddTimestamp(insert, "@boundAtUtc", DateTimeOffset.UtcNow);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -664,16 +709,18 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         await DeleteBindingsAsync(connection, transaction, "crypto_api_key_alias_policy_bindings", "alias_id", aliasId, cancellationToken);
-        foreach (Guid policyId in policyIds.Distinct())
+        Guid[] distinctPolicyIds = policyIds.Distinct().ToArray();
+        if (distinctPolicyIds.Length > 0)
         {
             await using NpgsqlCommand insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO crypto_api_key_alias_policy_bindings (alias_id, policy_id, bound_at_utc)
-                VALUES (@aliasId, @policyId, @boundAtUtc);
+                SELECT @aliasId, policy_id, @boundAtUtc
+                FROM unnest(@policyIds) AS policy_id;
                 """;
             AddGuid(insert, "@aliasId", aliasId);
-            AddGuid(insert, "@policyId", policyId);
+            AddGuidArray(insert, "@policyIds", distinctPolicyIds);
             AddTimestamp(insert, "@boundAtUtc", DateTimeOffset.UtcNow);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -689,13 +736,53 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         await using NpgsqlConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
+        await using NpgsqlCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT client_id, client_name, display_name, application_type, authentication_mode, is_enabled, notes, created_at_utc, updated_at_utc
+            FROM crypto_api_clients
+            ORDER BY client_name;
+
+            SELECT client_key_id, client_id, key_name, key_identifier, credential_type, secret_hash_algorithm, secret_hash, secret_hint, is_enabled, created_at_utc, updated_at_utc, expires_at_utc, revoked_at_utc, revoked_reason, last_used_at_utc
+            FROM crypto_api_client_keys
+            ORDER BY key_name;
+
+            SELECT alias_id, alias_name, route_group_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
+            FROM crypto_api_key_aliases
+            ORDER BY alias_name;
+
+            SELECT policy_id, policy_name, description, revision, document_json, is_enabled, created_at_utc, updated_at_utc
+            FROM crypto_api_policies
+            ORDER BY policy_name;
+
+            SELECT client_id, policy_id, bound_at_utc
+            FROM crypto_api_client_policy_bindings
+            ORDER BY client_id, policy_id;
+
+            SELECT alias_id, policy_id, bound_at_utc
+            FROM crypto_api_key_alias_policy_bindings
+            ORDER BY alias_id, policy_id;
+            """;
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        IReadOnlyList<CryptoApiClientRecord> clients = await ReadClientsAsync(reader, cancellationToken);
+        await reader.NextResultAsync(cancellationToken);
+        IReadOnlyList<CryptoApiClientKeyRecord> clientKeys = await ReadClientKeysAsync(reader, cancellationToken);
+        await reader.NextResultAsync(cancellationToken);
+        IReadOnlyList<CryptoApiKeyAliasRecord> keyAliases = await ReadKeyAliasesAsync(reader, cancellationToken);
+        await reader.NextResultAsync(cancellationToken);
+        IReadOnlyList<CryptoApiPolicyRecord> policies = await ReadPoliciesAsync(reader, cancellationToken);
+        await reader.NextResultAsync(cancellationToken);
+        IReadOnlyList<CryptoApiClientPolicyBinding> clientPolicyBindings = await ReadClientPolicyBindingsAsync(reader, cancellationToken);
+        await reader.NextResultAsync(cancellationToken);
+        IReadOnlyList<CryptoApiKeyAliasPolicyBinding> keyAliasPolicyBindings = await ReadKeyAliasPolicyBindingsAsync(reader, cancellationToken);
+
         return new CryptoApiSharedStateSnapshot(
-            Clients: await ReadClientsAsync(connection, cancellationToken),
-            ClientKeys: await ReadClientKeysAsync(connection, cancellationToken),
-            KeyAliases: await ReadKeyAliasesAsync(connection, cancellationToken),
-            Policies: await ReadPoliciesAsync(connection, cancellationToken),
-            ClientPolicyBindings: await ReadClientPolicyBindingsAsync(connection, cancellationToken),
-            KeyAliasPolicyBindings: await ReadKeyAliasPolicyBindingsAsync(connection, cancellationToken));
+            Clients: clients,
+            ClientKeys: clientKeys,
+            KeyAliases: keyAliases,
+            Policies: policies,
+            ClientPolicyBindings: clientPolicyBindings,
+            KeyAliasPolicyBindings: keyAliasPolicyBindings);
     }
 
     public async ValueTask DisposeAsync()
@@ -716,6 +803,16 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             catch (OperationCanceledException) when (_listenerCancellationSource.IsCancellationRequested)
             {
             }
+        }
+
+        if (_listenerDataSource is not null)
+        {
+            await _listenerDataSource.DisposeAsync();
+        }
+
+        if (_pooledDataSource is not null)
+        {
+            await _pooledDataSource.DisposeAsync();
         }
 
         _listenerCancellationSource.Dispose();
@@ -867,17 +964,12 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
     }
 
     private NpgsqlConnection CreateConnection()
-        => new(_pooledConnectionString);
+        => _pooledDataSource?.CreateConnection()
+            ?? throw new InvalidOperationException("Shared persistence is not configured.");
 
     private NpgsqlConnection CreateListenerConnection()
-    {
-        NpgsqlConnectionStringBuilder builder = new(_options.ConnectionString)
-        {
-            Pooling = false
-        };
-
-        return new NpgsqlConnection(builder.ConnectionString);
-    }
+        => _listenerDataSource?.CreateConnection()
+            ?? throw new InvalidOperationException("Shared persistence listener is not configured.");
 
     private static string CreateAuthStateRevisionNotificationChannel(string? connectionString)
     {
@@ -911,6 +1003,47 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         }
 
         return builder.ConnectionString;
+    }
+
+    private static string? NormalizeListenerConnectionString(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return connectionString;
+        }
+
+        NpgsqlConnectionStringBuilder builder = new(connectionString)
+        {
+            Pooling = false
+        };
+
+        if (builder.KeepAlive <= 0)
+        {
+            builder.KeepAlive = DefaultListenerKeepAliveSeconds;
+        }
+
+        if (string.IsNullOrWhiteSpace(builder.ApplicationName))
+        {
+            builder.ApplicationName = "Pkcs11Wrapper.CryptoApi.SharedStateListener";
+        }
+
+        return builder.ConnectionString;
+    }
+
+    private static NpgsqlDataSource? CreatePooledDataSource(string? connectionString)
+    {
+        string? normalized = NormalizePooledConnectionString(connectionString);
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : NpgsqlDataSource.Create(normalized);
+    }
+
+    private static NpgsqlDataSource? CreateListenerDataSource(string? connectionString)
+    {
+        string? normalized = NormalizeListenerConnectionString(connectionString);
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : NpgsqlDataSource.Create(normalized);
     }
 
     private static bool SpecifiesMaxPoolSize(string connectionString)
@@ -1011,6 +1144,9 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             CREATE INDEX IF NOT EXISTS ix_crypto_api_client_keys_key_identifier
                 ON crypto_api_client_keys(key_identifier);
 
+            CREATE INDEX IF NOT EXISTS ix_crypto_api_key_aliases_alias_name_lower
+                ON crypto_api_key_aliases(lower(alias_name));
+
             CREATE INDEX IF NOT EXISTS ix_crypto_api_client_policy_bindings_policy_id
                 ON crypto_api_client_policy_bindings(policy_id);
 
@@ -1051,25 +1187,6 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task<int> CountRowsAsync(NpgsqlConnection connection, string tableName, CancellationToken cancellationToken)
-    {
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = $"SELECT COUNT(*) FROM {tableName};";
-        object? value = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    private static async Task<int> GetSchemaVersionAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
-    {
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT metadata_value FROM crypto_api_metadata WHERE metadata_key = @metadataKey;";
-        AddText(command, "@metadataKey", SchemaVersionMetadataKey);
-        object? value = await command.ExecuteScalarAsync(cancellationToken);
-        return value is null
-            ? CryptoApiSharedStateConstants.SchemaVersion
-            : Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
-    }
-
     private async Task<long> ReadAuthStateRevisionFromDatabaseAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _authStateRevisionDatabaseReadCount);
@@ -1084,39 +1201,44 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             : Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    private static async Task<Guid[]> ReadClientBoundPolicyIdsAsync(NpgsqlConnection connection, Guid clientId, CancellationToken cancellationToken)
+    private static async Task<SharedStateStatusSnapshot> ReadStatusSnapshotAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        List<Guid> policyIds = [];
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT policy_id
-            FROM crypto_api_client_policy_bindings
-            WHERE client_id = @clientId
-            ORDER BY policy_id;
+            SELECT
+                COALESCE(
+                    (SELECT CAST(metadata_value AS INTEGER)
+                     FROM crypto_api_metadata
+                     WHERE metadata_key = @schemaVersionKey),
+                    @defaultSchemaVersion),
+                (SELECT COUNT(*)::INTEGER FROM crypto_api_clients),
+                (SELECT COUNT(*)::INTEGER FROM crypto_api_client_keys),
+                (SELECT COUNT(*)::INTEGER FROM crypto_api_key_aliases),
+                (SELECT COUNT(*)::INTEGER FROM crypto_api_policies),
+                (SELECT COUNT(*)::INTEGER FROM crypto_api_client_policy_bindings),
+                (SELECT COUNT(*)::INTEGER FROM crypto_api_key_alias_policy_bindings);
             """;
-        AddGuid(command, "@clientId", clientId);
+        AddText(command, "@schemaVersionKey", SchemaVersionMetadataKey);
+        command.Parameters.AddWithValue("@defaultSchemaVersion", CryptoApiSharedStateConstants.SchemaVersion);
 
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        if (!await reader.ReadAsync(cancellationToken))
         {
-            policyIds.Add(reader.GetGuid(0));
+            return new SharedStateStatusSnapshot(0, 0, 0, 0, 0, 0, 0);
         }
 
-        return policyIds.ToArray();
+        return new SharedStateStatusSnapshot(
+            SchemaVersion: reader.GetInt32(0),
+            ApiClientCount: reader.GetInt32(1),
+            ApiClientKeyCount: reader.GetInt32(2),
+            KeyAliasCount: reader.GetInt32(3),
+            PolicyCount: reader.GetInt32(4),
+            ClientPolicyBindingCount: reader.GetInt32(5),
+            KeyAliasPolicyBindingCount: reader.GetInt32(6));
     }
 
-    private static async Task<CryptoApiClientRecord?> ReadClientByIdAsync(NpgsqlConnection connection, Guid clientId, CancellationToken cancellationToken)
+    private static async Task<CryptoApiClientRecord?> ReadSingleClientAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT client_id, client_name, display_name, application_type, authentication_mode, is_enabled, notes, created_at_utc, updated_at_utc
-            FROM crypto_api_clients
-            WHERE client_id = @clientId
-            LIMIT 1;
-            """;
-        AddGuid(command, "@clientId", clientId);
-
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
         {
             return null;
@@ -1134,18 +1256,8 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             UpdatedAtUtc: ReadTimestamp(reader, 8));
     }
 
-    private static async Task<CryptoApiKeyAliasRecord?> ReadKeyAliasByNameAsync(NpgsqlConnection connection, string aliasName, CancellationToken cancellationToken)
+    private static async Task<CryptoApiKeyAliasRecord?> ReadSingleAliasAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT alias_id, alias_name, route_group_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
-            FROM crypto_api_key_aliases
-            WHERE lower(alias_name) = lower(@aliasName)
-            LIMIT 1;
-            """;
-        AddText(command, "@aliasName", aliasName);
-
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
         {
             return null;
@@ -1163,40 +1275,6 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             IsEnabled: reader.GetBoolean(8),
             CreatedAtUtc: ReadTimestamp(reader, 9),
             UpdatedAtUtc: ReadTimestamp(reader, 10));
-    }
-
-    private static async Task<IReadOnlyList<CryptoApiPolicyRecord>> ReadSharedPoliciesAsync(NpgsqlConnection connection, Guid clientId, Guid aliasId, CancellationToken cancellationToken)
-    {
-        List<CryptoApiPolicyRecord> policies = [];
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT DISTINCT p.policy_id, p.policy_name, p.description, p.revision, p.document_json, p.is_enabled, p.created_at_utc, p.updated_at_utc
-            FROM crypto_api_policies p
-            INNER JOIN crypto_api_client_policy_bindings cpb ON cpb.policy_id = p.policy_id
-            INNER JOIN crypto_api_key_alias_policy_bindings kapb ON kapb.policy_id = p.policy_id
-            WHERE cpb.client_id = @clientId
-              AND kapb.alias_id = @aliasId
-              AND p.is_enabled = TRUE
-            ORDER BY p.policy_name;
-            """;
-        AddGuid(command, "@clientId", clientId);
-        AddGuid(command, "@aliasId", aliasId);
-
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            policies.Add(new CryptoApiPolicyRecord(
-                PolicyId: reader.GetGuid(0),
-                PolicyName: reader.GetString(1),
-                Description: reader.IsDBNull(2) ? null : reader.GetString(2),
-                Revision: reader.GetInt32(3),
-                DocumentJson: reader.GetString(4),
-                IsEnabled: reader.GetBoolean(5),
-                CreatedAtUtc: ReadTimestamp(reader, 6),
-                UpdatedAtUtc: ReadTimestamp(reader, 7)));
-        }
-
-        return policies;
     }
 
     private async Task<long> IncrementAuthStateRevisionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
@@ -1280,16 +1358,9 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         await delete.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task<IReadOnlyList<CryptoApiClientRecord>> ReadClientsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<CryptoApiClientRecord>> ReadClientsAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
         List<CryptoApiClientRecord> clients = [];
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT client_id, client_name, display_name, application_type, authentication_mode, is_enabled, notes, created_at_utc, updated_at_utc
-            FROM crypto_api_clients
-            ORDER BY client_name;
-            """;
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             clients.Add(new CryptoApiClientRecord(
@@ -1307,16 +1378,9 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         return clients;
     }
 
-    private static async Task<IReadOnlyList<CryptoApiClientKeyRecord>> ReadClientKeysAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<CryptoApiClientKeyRecord>> ReadClientKeysAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
         List<CryptoApiClientKeyRecord> clientKeys = [];
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT client_key_id, client_id, key_name, key_identifier, credential_type, secret_hash_algorithm, secret_hash, secret_hint, is_enabled, created_at_utc, updated_at_utc, expires_at_utc, revoked_at_utc, revoked_reason, last_used_at_utc
-            FROM crypto_api_client_keys
-            ORDER BY key_name;
-            """;
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             clientKeys.Add(new CryptoApiClientKeyRecord(
@@ -1340,16 +1404,9 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         return clientKeys;
     }
 
-    private static async Task<IReadOnlyList<CryptoApiKeyAliasRecord>> ReadKeyAliasesAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<CryptoApiKeyAliasRecord>> ReadKeyAliasesAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
         List<CryptoApiKeyAliasRecord> aliases = [];
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT alias_id, alias_name, route_group_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
-            FROM crypto_api_key_aliases
-            ORDER BY alias_name;
-            """;
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             aliases.Add(new CryptoApiKeyAliasRecord(
@@ -1369,16 +1426,9 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         return aliases;
     }
 
-    private static async Task<IReadOnlyList<CryptoApiPolicyRecord>> ReadPoliciesAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<CryptoApiPolicyRecord>> ReadPoliciesAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
         List<CryptoApiPolicyRecord> policies = [];
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT policy_id, policy_name, description, revision, document_json, is_enabled, created_at_utc, updated_at_utc
-            FROM crypto_api_policies
-            ORDER BY policy_name;
-            """;
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             policies.Add(new CryptoApiPolicyRecord(
@@ -1395,16 +1445,9 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         return policies;
     }
 
-    private static async Task<IReadOnlyList<CryptoApiClientPolicyBinding>> ReadClientPolicyBindingsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<CryptoApiClientPolicyBinding>> ReadClientPolicyBindingsAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
         List<CryptoApiClientPolicyBinding> bindings = [];
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT client_id, policy_id, bound_at_utc
-            FROM crypto_api_client_policy_bindings
-            ORDER BY client_id, policy_id;
-            """;
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             bindings.Add(new CryptoApiClientPolicyBinding(
@@ -1416,16 +1459,9 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         return bindings;
     }
 
-    private static async Task<IReadOnlyList<CryptoApiKeyAliasPolicyBinding>> ReadKeyAliasPolicyBindingsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<CryptoApiKeyAliasPolicyBinding>> ReadKeyAliasPolicyBindingsAsync(NpgsqlDataReader reader, CancellationToken cancellationToken)
     {
         List<CryptoApiKeyAliasPolicyBinding> bindings = [];
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT alias_id, policy_id, bound_at_utc
-            FROM crypto_api_key_alias_policy_bindings
-            ORDER BY alias_id, policy_id;
-            """;
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             bindings.Add(new CryptoApiKeyAliasPolicyBinding(
@@ -1460,6 +1496,12 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
     private static void AddGuid(NpgsqlCommand command, string parameterName, Guid value)
         => command.Parameters.AddWithValue(parameterName, value);
 
+    private static void AddGuidArray(NpgsqlCommand command, string parameterName, Guid[] values)
+        => command.Parameters.Add(new NpgsqlParameter<Guid[]>(parameterName, NpgsqlDbType.Array | NpgsqlDbType.Uuid)
+        {
+            TypedValue = values
+        });
+
     private static void AddText(NpgsqlCommand command, string parameterName, string value)
         => command.Parameters.AddWithValue(parameterName, value);
 
@@ -1477,4 +1519,13 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
 
     private static void AddNullableTimestamp(NpgsqlCommand command, string parameterName, DateTimeOffset? value)
         => command.Parameters.AddWithValue(parameterName, value?.UtcDateTime ?? (object)DBNull.Value);
+
+    private readonly record struct SharedStateStatusSnapshot(
+        int SchemaVersion,
+        int ApiClientCount,
+        int ApiClientKeyCount,
+        int KeyAliasCount,
+        int PolicyCount,
+        int ClientPolicyBindingCount,
+        int KeyAliasPolicyBindingCount);
 }
