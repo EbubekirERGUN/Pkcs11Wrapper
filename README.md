@@ -83,8 +83,10 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 ### Crypto API host scaffold
 
 - dedicated ASP.NET Core host at `src/Pkcs11Wrapper.CryptoApi`
+- dedicated YARP gateway host at `src/Pkcs11Wrapper.CryptoApi.Gateway` for repo-owned fleet ingress
 - stateless, machine-facing boundary separate from the admin dashboard
 - DI/config binding for service identity, API base path, PKCS#11 runtime, and shared persistence
+- health-aware/load-balanced ingress across multiple Crypto API instances, with correlation-id propagation and practical ingress request-body limits
 - `/health/live` + `/health/ready` endpoints, with readiness validating the configured PKCS#11 module and shared persistence when configured
 - `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, `POST /api/v1/operations/authorize`, `/api/v1/shared-state`, and `/api/v1/auth/self` route space for the emerging machine-facing contract
 - shared persistence for multi-instance API clients/keys, key aliases, policies, and policy bindings, with PostgreSQL as the supported shared backend across local/dev/lab and production-oriented deployments
@@ -249,6 +251,7 @@ If the admin dashboard is pointed at the same `CryptoApiSharedPersistence:Connec
 For the intended boundary/runtime model, scale-out expectations, state-sharing rules, and deployment guidance, see:
 
 - [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md)
+- [docs/crypto-api-gateway.md](docs/crypto-api-gateway.md)
 - [docs/crypto-api-host.md](docs/crypto-api-host.md)
 - [docs/security-review-issue-112.md](docs/security-review-issue-112.md)
 
@@ -380,9 +383,11 @@ Current capabilities include:
 - [docs/benchmarks/latest-linux-softhsm.md](docs/benchmarks/latest-linux-softhsm.md) - latest committed Linux benchmark baseline
 - [docs/admin-container.md](docs/admin-container.md) - standalone admin-container deployment guide, volume layout, PKCS#11 mount patterns, and local/dev vs production-safe guidance
 - [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md) - single-dashboard + multi-instance Crypto API topology, scaling expectations, shared-state boundaries, and container/deployment guidance
+- [docs/crypto-api-gateway.md](docs/crypto-api-gateway.md) - repo-owned YARP fleet ingress for the Crypto API service, including health-aware balancing, correlation IDs, config, and rollout guidance
 - [docs/crypto-api-host.md](docs/crypto-api-host.md) - stateless Crypto API host boundary, shared persistence model, config, and current scaffold endpoints
 - `deploy/container/admin-panel.env.example` - starter env template for the standalone admin container path
 - `deploy/container/crypto-api.env.example` - starter env template for operator-built Crypto API process/container wrappers
+- `deploy/container/crypto-api-gateway.env.example` - starter env template for operator-built Crypto API gateway process/container wrappers
 - [deploy/compose/softhsm-lab/README.md](deploy/compose/softhsm-lab/README.md) - local/dev/lab compose stack for the admin panel + SoftHSM backend
 - [docs/admin-ops-recovery.md](docs/admin-ops-recovery.md) - local admin-panel operations and recovery runbook
 - [docs/vendor-regression.md](docs/vendor-regression.md) - vendor compatibility profile and env contract
