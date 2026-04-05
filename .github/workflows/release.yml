@@ -229,8 +229,8 @@ jobs:
           # Windows release readiness
 
           - Version: `${{ needs.preflight.outputs.version }}`
-          - Validation: fixture provisioning + restore/build + managed/admin regression subset on `windows-latest`
-          - Note: hosted Windows currently excludes the crash-prone SoftHSM fixture native suites (`SoftHsmCryptRegressionTests`, `TelemetryRegressionTests`), and hosted smoke / win-x64 NativeAOT smoke remain manual until the backend is stable enough for GitHub-hosted runtime execution.
+          - Validation: fixture provisioning + restore/build + safe managed/admin regression subset on `windows-latest`
+          - Note: hosted Windows currently excludes the crash-prone SoftHSM fixture native suites (`SoftHsmCryptRegressionTests`, `TelemetryRegressionTests`), self-skips the admin SoftHSM runtime integration suite (`AdminPkcs11RuntimeIntegrationTests`) unless explicitly re-enabled, and leaves hosted smoke / win-x64 NativeAOT smoke as manual validation until the backend is stable enough for GitHub-hosted runtime execution.
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
   publish-release:

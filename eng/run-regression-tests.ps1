@@ -44,7 +44,7 @@ if ($IsWindows) {
         'FullyQualifiedName!~TelemetryRegressionTests'
     ) -join '&'
 
-    Write-Host 'Windows regression lane: excluding SoftHsmCryptRegressionTests and TelemetryRegressionTests from dotnet test because the current SoftHSM-for-Windows fixture can crash the native test host during C_Initialize; fixture provisioning plus managed/admin regression coverage still run.'
+    Write-Host 'Windows regression lane: excluding SoftHsmCryptRegressionTests and TelemetryRegressionTests from dotnet test because the current SoftHSM-for-Windows fixture can crash the native test host during C_Initialize; AdminPkcs11RuntimeIntegrationTests also self-skip on GitHub-hosted Windows unless WINDOWS_CI_SOFTHSM_RUNTIME_ENABLED=true so the hosted lane stays explicit about its safe coverage subset.'
 
     dotnet test (Join-Path $repoRoot 'tests/Pkcs11Wrapper.Native.Tests/Pkcs11Wrapper.Native.Tests.csproj') -c Release --no-build --nologo --filter $nativeTestFilter
     dotnet test (Join-Path $repoRoot 'tests/Pkcs11Wrapper.ThalesLuna.Tests/Pkcs11Wrapper.ThalesLuna.Tests.csproj') -c Release --no-build --nologo

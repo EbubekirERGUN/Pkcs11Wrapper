@@ -194,7 +194,7 @@ jobs:
           ### Windows hosted SoftHSM coverage note
           GitHub-hosted `windows-latest` with SoftHSM-for-Windows currently crashes in native `C_Initialize` for some fixture-backed runtime paths.
 
-          This CI lane therefore validates fixture provisioning, restore/build, managed/admin regression coverage, and the safe Windows regression subset. The native SoftHSM runtime suites (`SoftHsmCryptRegressionTests`, `TelemetryRegressionTests`) plus smoke runtime and win-x64 NativeAOT smoke remain local/manual validation paths until the backend is stable enough for hosted CI.
+          This CI lane therefore validates fixture provisioning, restore/build, the safe managed/admin regression subset, and the safe Windows regression subset. The native SoftHSM runtime suites (`SoftHsmCryptRegressionTests`, `TelemetryRegressionTests`), the admin SoftHSM runtime integration suite (`AdminPkcs11RuntimeIntegrationTests`), plus smoke runtime and win-x64 NativeAOT smoke remain local/manual validation paths until the backend is stable enough for hosted CI.
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Windows smoke runtime

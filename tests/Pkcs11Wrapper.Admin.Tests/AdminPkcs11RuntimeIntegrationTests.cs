@@ -8,7 +8,7 @@ namespace Pkcs11Wrapper.Admin.Tests;
 
 public sealed class AdminPkcs11RuntimeIntegrationTests
 {
-    [Fact]
+    [HostedWindowsSoftHsmRuntimeFact]
     public void RawPerOperationModuleLifecycleCanInvalidateAnotherSoftHsmSession()
     {
         if (!TryCreateFixture(out FixtureContext? fixture) || fixture is null)
@@ -46,7 +46,7 @@ public sealed class AdminPkcs11RuntimeIntegrationTests
         }
     }
 
-    [Fact]
+    [HostedWindowsSoftHsmRuntimeFact]
     public async Task HsmAdminServiceKeepsTrackedSessionsStableWhileKeysPageLoads()
     {
         if (!TryCreateFixture(out FixtureContext? fixture) || fixture is null)
@@ -86,7 +86,7 @@ public sealed class AdminPkcs11RuntimeIntegrationTests
         }
     }
 
-    [Fact]
+    [HostedWindowsSoftHsmRuntimeFact]
     public void AdminPkcs11RuntimeKeepsSecondLeaseSessionClosableAfterFirstLeaseEnds()
     {
         if (!TryCreateFixture(out FixtureContext? fixture) || fixture is null)

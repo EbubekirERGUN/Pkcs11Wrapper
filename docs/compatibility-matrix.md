@@ -32,5 +32,6 @@
 
 - PKCS#11 v3 runtime validation now uses a deterministic Linux-built shim rather than a vendor module, so it validates marshalling/runtime behavior but not vendor-specific semantics.
 - Windows NativeAOT validation now exists, but Linux still remains the deepest day-to-day validation environment because it is the primary benchmark baseline and the most feature-complete local automation path.
+- GitHub-hosted Windows CI still scopes out the crash-prone SoftHSM fixture native suites and self-skips the admin SoftHSM runtime integration suite unless `WINDOWS_CI_SOFTHSM_RUNTIME_ENABLED=true`; those runtime paths remain local/manual Windows validation until SoftHSM-for-Windows is stable enough for hosted `C_Initialize` coverage.
 - Mechanism parameter helpers are intentionally selective; uncommon mechanisms may still require raw parameter bytes.
 - Packaging discipline is defined in `docs/release.md`, and tagged releases now automate GitHub release asset publication plus optional NuGet publication when repository credentials are configured.
