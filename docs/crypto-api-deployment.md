@@ -13,6 +13,7 @@ Keep this guide operator-focused:
 - what is deliberately **not** provided by the repo yet
 
 For host/API surface details, see [docs/crypto-api-host.md](docs/crypto-api-host.md).
+For the repo-owned YARP ingress host that can front the Crypto API fleet, see [docs/crypto-api-gateway.md](docs/crypto-api-gateway.md).
 For the standalone admin image contract, see [docs/admin-container.md](docs/admin-container.md).
 
 ## What the current topology is
@@ -23,7 +24,7 @@ flowchart LR
     A --> AR[(AdminStorage__DataRoot\nusers, audit log, telemetry,\ndevice profiles, protected pins,\nData Protection keys)]
     A -->|CryptoApiSharedPersistence| S[(Shared Crypto API state\nPostgreSQL database)]
 
-    G[Gateway / load balancer] --> C1[Crypto API instance A]
+    G[Pkcs11Wrapper.CryptoApi.Gateway\n(or external load balancer)] --> C1[Crypto API instance A]
     G --> C2[Crypto API instance B]
     G --> CN[Crypto API instance N]
 
@@ -39,9 +40,33 @@ flowchart LR
 Operationally:
 
 - run **one** `Pkcs11Wrapper.Admin.Web` instance per deployment boundary
+- optionally run **one** `Pkcs11Wrapper.CryptoApi.Gateway` instance (or a small replicated set behind your outer ingress) as the repo-owned fleet ingress layer
 - run **one or more** `Pkcs11Wrapper.CryptoApi` instances behind your gateway/load balancer
 - point the admin dashboard and every Crypto API instance at the **same** `CryptoApiSharedPersistence:ConnectionString`
 - keep the admin dashboard's own storage root **separate** from the shared Crypto API state database
+
+## Repo-owned gateway layer
+
+Issue #151 adds the first repository-owned ingress host for the Crypto API fleet:
+
+- `src/Pkcs11Wrapper.CryptoApi.Gateway`
+- YARP-based reverse proxy
+- health-aware load balancing across multiple Crypto API instances
+- correlation-id propagation and basic ingress request-body limits
+
+Use it when you want a **repo-native** answer for:
+
+- one stable API URL in front of many stateless Crypto API workers
+- load-balanced traffic distribution across workers
+- automatic removal of unhealthy workers from active selection
+- a central place for light ingress policy without moving auth/policy ownership out of the Crypto API hosts
+
+Keep the boundary clear:
+
+- the gateway chooses the **Crypto API instance**
+- the chosen Crypto API instance still chooses the **PKCS#11 backend / route candidate** for alias execution
+
+That lets the gateway layer and the issue #150 HSM routing layer compose cleanly instead of collapsing into one oversized component.
 
 ## Shared persistence baseline
 
@@ -351,6 +376,8 @@ Today the repository ships:
 
 - a supported admin dashboard Dockerfile at `src/Pkcs11Wrapper.Admin.Web/Dockerfile`
 - an admin env template at `deploy/container/admin-panel.env.example`
+- a repo-owned gateway host at `src/Pkcs11Wrapper.CryptoApi.Gateway`
+- a gateway env template at `deploy/container/crypto-api-gateway.env.example`
 - a local/dev SoftHSM compose lab at `deploy/compose/softhsm-lab`
 
 ### What the repo does **not** provide yet
@@ -358,6 +385,7 @@ Today the repository ships:
 Today the repository does **not** ship:
 
 - a supported `Pkcs11Wrapper.CryptoApi` Dockerfile
+- a supported `Pkcs11Wrapper.CryptoApi.Gateway` Dockerfile
 - a production compose/Kubernetes manifest for the multi-instance Crypto API service
 - a production-owned Postgres image/compose/Kubernetes bundle for the shared control plane
 
@@ -367,6 +395,7 @@ Base it on `src/Pkcs11Wrapper.CryptoApi`, but preserve the runtime contract desc
 A starting env template for that operator-owned container/process wrapper lives at:
 
 - `deploy/container/crypto-api.env.example`
+- `deploy/container/crypto-api-gateway.env.example`
 
 ### Container rules that matter
 
@@ -384,6 +413,13 @@ For every Crypto API container you build around the host project:
 - inject `CryptoApiRuntime__UserPin` through your secret manager/orchestrator, not by baking it into the image
 - wire `/health/ready` into the scheduler/load balancer
 - keep container-local state disposable
+
+For every gateway container you build around `Pkcs11Wrapper.CryptoApi.Gateway`:
+
+- point every configured destination at the private/internal address of a Crypto API instance
+- wire the gateway's own `/health/ready` into your outer ingress or scheduler
+- keep request-body limits and timeout settings aligned with the outer ingress so operators do not have to debug conflicting edge behavior
+- treat the gateway as disposable stateless infrastructure; it should not own control-plane or PKCS#11 state
 
 ### Recommended container volume model
 
@@ -407,9 +443,10 @@ For upgrades or new deployments:
 
 1. bring up or upgrade the **single** admin dashboard with its existing `AdminStorage__DataRoot`
 2. verify the dashboard can still open the shared Crypto API database
-3. roll Crypto API instances behind the load balancer using the same shared connection string and PKCS#11 mount layout
+3. roll Crypto API instances behind the load balancer/gateway using the same shared connection string and PKCS#11 mount layout
 4. watch `/health/ready` on each instance before shifting traffic
-5. verify one authenticated request path such as `auth/self` or a low-risk sign/verify call
+5. if you use `Pkcs11Wrapper.CryptoApi.Gateway`, verify its `/health/ready` endpoint reports at least one healthy destination
+6. verify one authenticated request path such as `auth/self` or a low-risk sign/verify call through the final ingress URL
 
 ## Current constraints to plan around
 
@@ -418,7 +455,7 @@ Plan around these present-day constraints:
 
 - one admin dashboard is the documented operating model
 - Crypto API instances are stateless, but they still depend on a reachable shared control-plane database
-- the repository does not yet provide a first-class Crypto API container image
+- the repository does not yet provide a first-class Crypto API or gateway container image
 - the current admin UI now covers the practical shared-store workflow for clients, keys, aliases, policies, and bindings, but the overall control plane is still intentionally conservative
 - current request execution depends on the locally configured PKCS#11 module path and HSM reachability on every API instance
 

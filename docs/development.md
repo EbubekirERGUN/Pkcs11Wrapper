@@ -120,6 +120,7 @@ Notable current assumptions:
 - Telemetry redaction policy: `docs/telemetry-redaction.md`
 - Admin telemetry operations: `docs/admin-telemetry-operations.md`
 - Crypto API deployment model: `docs/crypto-api-deployment.md`
+- Crypto API gateway ingress: `docs/crypto-api-gateway.md`
 - Crypto API host scaffold: `docs/crypto-api-host.md`
 - Smoke sample usage: `docs/smoke.md`
 - Compatibility matrix: `docs/compatibility-matrix.md`

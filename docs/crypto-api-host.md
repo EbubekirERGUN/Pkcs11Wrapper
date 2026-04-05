@@ -4,7 +4,7 @@
 
 It is intentionally **thin** and intentionally **separate** from the admin dashboard stack.
 
-For the operator-facing deployment model covering **one admin dashboard + many stateless Crypto API instances**, shared-state boundaries, and container guidance, see [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md). This page stays focused on the host surface itself.
+For the operator-facing deployment model covering **one admin dashboard + many stateless Crypto API instances**, shared-state boundaries, and container guidance, see [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md). For the repo-owned YARP ingress layer that can front those instances, see [docs/crypto-api-gateway.md](docs/crypto-api-gateway.md). This page stays focused on the host surface itself.
 
 ## Why this host exists
 
@@ -264,7 +264,7 @@ Important caveats:
 
 - the limiter is **not cluster-global**; multiple API instances mean multiple per-instance budgets
 - the limiter runs before full authentication/authorization, so the presented key id is the practical partition key
-- upstream ingress/gateway policy should still enforce fleet-wide quotas, body-size limits, and abuse controls
+- upstream ingress/gateway policy should still enforce fleet-wide quotas, body-size limits, and abuse controls; the repository gateway host in `src/Pkcs11Wrapper.CryptoApi.Gateway` is the current first-class reference ingress for that role
 
 Rejected requests return:
 
