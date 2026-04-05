@@ -140,6 +140,42 @@ public sealed class CryptoApiGatewayRoutingTests
         Assert.Equal(1, backend.EchoRequestCount);
     }
 
+    [Fact]
+    public async Task MetricsEndpointPublishesGatewayReadinessAndIngressCounters()
+    {
+        await using TestBackendHost backend = await TestBackendHost.StartAsync("crypto-a", HttpStatusCode.OK);
+        await using WebApplicationFactory<Program> factory = CreateFactory(
+            [backend],
+            new Dictionary<string, string?>
+            {
+                ["CryptoApiGateway:MaxRequestBodySizeBytes"] = "8"
+            });
+
+        using HttpClient client = factory.CreateClient();
+
+        using (HttpResponseMessage readyResponse = await client.GetAsync("/health/ready"))
+        {
+            Assert.Equal(HttpStatusCode.OK, readyResponse.StatusCode);
+        }
+
+        using (HttpResponseMessage rejected = await client.PostAsync(
+                   "/api/v1/echo",
+                   new StringContent("0123456789", Encoding.UTF8, "text/plain")))
+        {
+            Assert.Equal(HttpStatusCode.RequestEntityTooLarge, rejected.StatusCode);
+        }
+
+        using HttpResponseMessage metricsResponse = await client.GetAsync("/metrics");
+        string metrics = await metricsResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, metricsResponse.StatusCode);
+        Assert.Contains("pkcs11wrapper_crypto_api_gateway_backend_readiness_probes_total", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_gateway_backend_readiness_probe_duration_seconds", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_gateway_request_body_rejections_total", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_gateway_healthy_destinations", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_gateway_configured_destinations", metrics, StringComparison.Ordinal);
+    }
+
     private static WebApplicationFactory<Program> CreateFactory(IReadOnlyList<TestBackendHost> backends, IReadOnlyDictionary<string, string?>? additionalConfiguration = null)
         => new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>

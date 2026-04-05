@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.Admin.Application.Abstractions;
 using Pkcs11Wrapper.Admin.Application.Models;
+using Pkcs11Wrapper.Admin.Application.Observability;
 using Pkcs11Wrapper.Admin.Application.Services;
 using Pkcs11Wrapper.Admin.Infrastructure;
 using Pkcs11Wrapper.Admin.Web.Components;
@@ -15,6 +16,8 @@ using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.SharedState;
+using Pkcs11Wrapper.Observability;
+using OpenTelemetry.Metrics;
 
 if (await AdminContainerHealthProbe.TryExecuteAsync(args))
 {
@@ -47,6 +50,11 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddHealthChecks()
     .AddCheck<AdminStorageHealthCheck>("admin-storage", tags: ["ready"]);
+builder.Services.AddOptions<ObservabilityOptions>()
+    .Bind(builder.Configuration.GetSection(ObservabilityOptions.SectionName))
+    .PostConfigure(ObservabilityOptions.Normalize)
+    .Validate(static options => options.MetricsPath.StartsWith("/", StringComparison.Ordinal), "Observability metrics path must start with '/'.")
+    .ValidateOnStart();
 builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
     .Bind(builder.Configuration.GetSection(CryptoApiSharedPersistenceOptions.SectionName))
     .PostConfigure(static options =>
@@ -85,6 +93,17 @@ builder.Services.AddSingleton(runtimeOptions);
 builder.Services.AddSingleton<IOptions<AdminRuntimeOptions>>(Options.Create(runtimeOptions));
 builder.Services.AddSingleton(telemetryOptions);
 builder.Services.AddSingleton<IOptions<AdminPkcs11TelemetryOptions>>(Options.Create(telemetryOptions));
+builder.Services.AddSingleton<AdminMetrics>();
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddPrometheusExporter()
+            .AddMeter(
+                "Microsoft.AspNetCore.Hosting",
+                "Microsoft.AspNetCore.Server.Kestrel",
+                AdminMetrics.MeterName);
+    });
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(AdminHostDefaults.GetKeysRoot(adminStorage.DataRoot)));
 builder.Services.AddSingleton(TimeProvider.System);
@@ -114,6 +133,9 @@ builder.Services.AddScoped<LocalAdminLoginService>();
 builder.Services.AddScoped<HsmAdminService>();
 
 var app = builder.Build();
+ObservabilityOptions observabilityOptions = app.Services.GetRequiredService<IOptions<ObservabilityOptions>>().Value;
+AdminMetrics adminMetrics = app.Services.GetRequiredService<AdminMetrics>();
+adminMetrics.RegisterSessionRegistry(app.Services.GetRequiredService<AdminSessionRegistry>());
 
 await app.Services.GetRequiredService<LocalAdminUserStore>().EnsureSeedDataAsync();
 await app.Services.GetRequiredService<AdminBootstrapDeviceSeeder>().EnsureSeedDataAsync();
@@ -154,6 +176,12 @@ app.MapGet(AdminHostDefaults.HealthReadyPath, (Delegate)AdminHealthEndpoints.Rea
     .WithDescription("Returns the storage-focused readiness payload used by container and orchestrator probes.")
     .Produces<AdminHealthResponse>(StatusCodes.Status200OK, contentType: "application/json")
     .Produces<AdminHealthResponse>(StatusCodes.Status503ServiceUnavailable, contentType: "application/json");
+
+if (observabilityOptions.EnablePrometheusScrapingEndpoint)
+{
+    app.MapPrometheusScrapingEndpoint(observabilityOptions.MetricsPath);
+}
+
 app.MapStaticAssets();
 app.MapPost("/account/login", (Delegate)AccountEndpoints.LoginAsync)
     .AllowAnonymous()

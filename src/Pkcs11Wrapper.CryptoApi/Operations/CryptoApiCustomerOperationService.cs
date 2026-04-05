@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Pkcs11Wrapper.CryptoApi.Access;
+using Pkcs11Wrapper.CryptoApi.Observability;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.Native;
 
@@ -32,7 +34,8 @@ public sealed record CryptoApiRandomOperationResult(
 public sealed class CryptoApiPkcs11CustomerOperationService(
     CryptoApiPkcs11Runtime pkcs11Runtime,
     CryptoApiRouteDispatchService routeDispatchService,
-    TimeProvider timeProvider) : ICryptoApiCustomerOperationService
+    TimeProvider timeProvider,
+    CryptoApiMetrics? metrics = null) : ICryptoApiCustomerOperationService
 {
     private const int MaxPayloadBytes = 1024 * 1024;
     private const int MaxRandomLength = 4096;
@@ -79,6 +82,8 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         SignatureAlgorithmProfile profile,
         byte[] payload)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string backend = route.DeviceRoute ?? "default";
         Pkcs11SlotId slotId = new((nuint)route.SlotId);
         using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = RentCandidateSession(route, slotId);
         Pkcs11Session session = sessionLease.Session;
@@ -96,11 +101,13 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
                     return SignWithRetry(session, keyHandle, mechanism, payload);
                 });
 
+            metrics?.RecordPkcs11Operation("sign", profile.Name, backend, "success", stopwatch.Elapsed);
             return new CryptoApiSignOperationResult(profile.Name, signature, timeProvider.GetUtcNow());
         }
         catch (Exception ex) when (IsRecoverableCandidateFailure(ex))
         {
             sessionLease.MarkBroken();
+            metrics?.RecordPkcs11Operation("sign", profile.Name, backend, "failure", stopwatch.Elapsed);
             throw CreateRouteCandidateUnavailable(route, authorization, ex);
         }
     }
@@ -113,6 +120,8 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         byte[] payload,
         byte[] signature)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string backend = route.DeviceRoute ?? "default";
         Pkcs11SlotId slotId = new((nuint)route.SlotId);
         using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = RentCandidateSession(route, slotId);
         Pkcs11Session session = sessionLease.Session;
@@ -130,17 +139,21 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
                     return session.Verify(keyHandle, mechanism, payload, signature);
                 });
 
+            metrics?.RecordPkcs11Operation("verify", profile.Name, backend, verified ? "verified" : "invalid", stopwatch.Elapsed);
             return new CryptoApiVerifyOperationResult(profile.Name, verified, timeProvider.GetUtcNow());
         }
         catch (Exception ex) when (IsRecoverableCandidateFailure(ex))
         {
             sessionLease.MarkBroken();
+            metrics?.RecordPkcs11Operation("verify", profile.Name, backend, "failure", stopwatch.Elapsed);
             throw CreateRouteCandidateUnavailable(route, authorization, ex);
         }
     }
 
     private CryptoApiRandomOperationResult GenerateRandomOnRoute(CryptoApiAuthorizedKeyOperation authorization, CryptoApiResolvedKeyRoute route, int length)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string backend = route.DeviceRoute ?? "default";
         Pkcs11SlotId slotId = new((nuint)route.SlotId);
         using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = RentCandidateSession(route, slotId);
 
@@ -148,11 +161,13 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         {
             byte[] buffer = new byte[length];
             sessionLease.Session.GenerateRandom(buffer);
+            metrics?.RecordPkcs11Operation("random", "RANDOM", backend, "success", stopwatch.Elapsed);
             return new CryptoApiRandomOperationResult(buffer, timeProvider.GetUtcNow());
         }
         catch (Exception ex) when (IsRecoverableCandidateFailure(ex))
         {
             sessionLease.MarkBroken();
+            metrics?.RecordPkcs11Operation("random", "RANDOM", backend, "failure", stopwatch.Elapsed);
             throw CreateRouteCandidateUnavailable(route, authorization, ex);
         }
     }

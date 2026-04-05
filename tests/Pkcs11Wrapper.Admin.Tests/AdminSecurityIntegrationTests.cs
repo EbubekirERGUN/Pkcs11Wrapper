@@ -3,7 +3,9 @@ using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Pkcs11Wrapper.Admin.Web.Components;
+using Pkcs11Wrapper.Admin.Web.Security;
 
 namespace Pkcs11Wrapper.Admin.Tests;
 
@@ -53,6 +55,36 @@ public sealed class AdminSecurityIntegrationTests
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             Assert.Contains("missing a valid antiforgery token", body, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            DeleteDirectory(rootPath);
+        }
+    }
+
+    [Fact]
+    public async Task MetricsEndpointPublishesAdminLoginAndSessionMetrics()
+    {
+        string rootPath = CreateTempDirectory();
+        await using WebApplicationFactory<App> factory = CreateFactory(rootPath);
+
+        try
+        {
+            using (IServiceScope scope = factory.Services.CreateScope())
+            {
+                LocalAdminLoginService loginService = scope.ServiceProvider.GetRequiredService<LocalAdminLoginService>();
+                _ = await loginService.AttemptLoginAsync("admin", "wrong-password", "127.0.0.1");
+            }
+
+            using HttpClient client = factory.CreateClient();
+            using HttpResponseMessage response = await client.GetAsync("/metrics");
+            string metrics = await response.Content.ReadAsStringAsync();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Contains("pkcs11wrapper_admin_login_attempts_total", metrics, StringComparison.Ordinal);
+            Assert.Contains("result=\"failure\"", metrics, StringComparison.Ordinal);
+            Assert.Contains("pkcs11wrapper_admin_sessions", metrics, StringComparison.Ordinal);
+            Assert.Contains("status=\"healthy\"", metrics, StringComparison.Ordinal);
         }
         finally
         {

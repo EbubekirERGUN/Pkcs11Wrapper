@@ -40,6 +40,16 @@ public sealed class AdminSessionRegistry(AdminSessionRegistryOptions? options = 
             .ToArray();
     }
 
+    public AdminSessionRegistryMetricsSnapshot GetMetricsSnapshot()
+    {
+        IReadOnlyList<AdminSessionSnapshot> snapshots = GetSnapshots();
+        return new AdminSessionRegistryMetricsSnapshot(
+            Healthy: snapshots.Count(static snapshot => snapshot.IsHealthy && string.Equals(snapshot.HealthLabel, "Healthy", StringComparison.Ordinal)),
+            Broken: snapshots.Count(static snapshot => string.Equals(snapshot.HealthLabel, "Broken", StringComparison.Ordinal)),
+            Expired: snapshots.Count(static snapshot => string.Equals(snapshot.HealthLabel, "Expired", StringComparison.Ordinal)),
+            Invalidated: snapshots.Count(static snapshot => string.Equals(snapshot.HealthLabel, "Invalidated", StringComparison.Ordinal)));
+    }
+
     public bool TryTouch(Guid sessionId, string operation)
     {
         ExpireIdleSessions();
@@ -197,6 +207,12 @@ public sealed class AdminSessionRegistry(AdminSessionRegistryOptions? options = 
         string DeviceName,
         bool IsReadWrite,
         string Notes);
+
+    public sealed record AdminSessionRegistryMetricsSnapshot(
+        int Healthy,
+        int Broken,
+        int Expired,
+        int Invalidated);
 
     private sealed class TrackedSession(
         Guid id,

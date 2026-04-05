@@ -1,16 +1,19 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Caching;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Endpoints;
 using Pkcs11Wrapper.CryptoApi.Health;
+using Pkcs11Wrapper.CryptoApi.Observability;
 using Pkcs11Wrapper.CryptoApi.Operations;
 using Pkcs11Wrapper.CryptoApi.RateLimiting;
 using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.CryptoApi.SharedState;
+using Pkcs11Wrapper.Observability;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -85,6 +88,25 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
         $"Crypto API shared persistence supports '{CryptoApiSharedPersistenceDefaults.PostgresProvider}' only.")
     .ValidateOnStart();
 
+builder.Services.AddOptions<ObservabilityOptions>()
+    .Bind(builder.Configuration.GetSection(ObservabilityOptions.SectionName))
+    .PostConfigure(ObservabilityOptions.Normalize)
+    .Validate(static options => options.MetricsPath.StartsWith("/", StringComparison.Ordinal), "Observability metrics path must start with '/'.")
+    .ValidateOnStart();
+
+builder.Services.AddSingleton<CryptoApiMetrics>();
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddPrometheusExporter()
+            .AddMeter(
+                "Microsoft.AspNetCore.Hosting",
+                "Microsoft.AspNetCore.Server.Kestrel",
+                "System.Net.Http",
+                CryptoApiMetrics.MeterName);
+    });
+
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(sp => new CryptoApiRequestPathCache(
     sp.GetRequiredService<TimeProvider>(),
@@ -131,6 +153,16 @@ CryptoApiRuntimeOptions runtimeOptions = app.Services.GetRequiredService<IOption
 CryptoApiSecurityOptions securityOptions = app.Services.GetRequiredService<IOptions<CryptoApiSecurityOptions>>().Value;
 CryptoApiRateLimitingOptions rateLimitingOptions = app.Services.GetRequiredService<IOptions<CryptoApiRateLimitingOptions>>().Value;
 CryptoApiSharedPersistenceOptions sharedPersistenceOptions = app.Services.GetRequiredService<IOptions<CryptoApiSharedPersistenceOptions>>().Value;
+ObservabilityOptions observabilityOptions = app.Services.GetRequiredService<IOptions<ObservabilityOptions>>().Value;
+CryptoApiMetrics cryptoApiMetrics = app.Services.GetRequiredService<CryptoApiMetrics>();
+
+cryptoApiMetrics.RegisterRequestPathCache(app.Services.GetRequiredService<CryptoApiRequestPathCache>());
+if (app.Services.GetRequiredService<ICryptoApiAuthoritativeSharedStateStore>() is ICryptoApiSharedStateMetricsSource sharedStateMetricsSource)
+{
+    cryptoApiMetrics.RegisterSharedStateSource(sharedStateMetricsSource);
+}
+
+cryptoApiMetrics.RegisterRuntimeSource(app.Services.GetRequiredService<CryptoApiPkcs11Runtime>());
 
 if (!app.Environment.IsDevelopment())
 {
@@ -151,7 +183,7 @@ if (!string.IsNullOrWhiteSpace(sharedPersistenceOptions.ConnectionString) && sha
     await sharedStateStore.InitializeAsync();
 }
 
-app.MapGet("/", static (CryptoApiRuntimeDescriptorProvider descriptorProvider) =>
+app.MapGet("/", (CryptoApiRuntimeDescriptorProvider descriptorProvider) =>
 {
     CryptoApiRuntimeDescriptor descriptor = descriptorProvider.Describe();
     return TypedResults.Ok(new
@@ -167,7 +199,8 @@ app.MapGet("/", static (CryptoApiRuntimeDescriptorProvider descriptorProvider) =
         {
             Live = CryptoApiHostDefaults.HealthLivePath,
             Ready = CryptoApiHostDefaults.HealthReadyPath
-        }
+        },
+        Metrics = observabilityOptions.EnablePrometheusScrapingEndpoint ? observabilityOptions.MetricsPath : null
     });
 });
 app.MapHealthChecks(CryptoApiHostDefaults.HealthLivePath, new HealthCheckOptions
@@ -180,6 +213,12 @@ app.MapHealthChecks(CryptoApiHostDefaults.HealthReadyPath, new HealthCheckOption
     Predicate = static registration => registration.Tags.Contains("ready", StringComparer.Ordinal),
     ResponseWriter = CryptoApiHealthResponseWriter.WriteAsync
 });
+
+if (observabilityOptions.EnablePrometheusScrapingEndpoint)
+{
+    app.MapPrometheusScrapingEndpoint(observabilityOptions.MetricsPath);
+}
+
 app.MapCryptoApiRoutes(hostOptions, securityOptions, rateLimitingOptions);
 
 app.Run();

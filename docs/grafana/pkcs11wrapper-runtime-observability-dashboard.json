@@ -1,0 +1,150 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Crypto API authentication results / min",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum by (source, result) (rate(pkcs11wrapper_crypto_api_authentication_results_total[5m])) * 60",
+          "legendFormat": "{{source}} / {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Request-path cache lookups / min",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "sum by (cache, layer, result) (rate(pkcs11wrapper_crypto_api_request_path_cache_lookups_total[5m])) * 60",
+          "legendFormat": "{{cache}} / {{layer}} / {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Shared-state p95 latency (ms)",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(pkcs11wrapper_crypto_api_shared_state_request_duration_seconds_bucket[5m]))) * 1000",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Redis hot-path p95 latency (ms)",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(pkcs11wrapper_crypto_api_distributed_cache_request_duration_seconds_bucket[5m]))) * 1000",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "PKCS#11 operation p95 latency (ms)",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, operation, backend) (rate(pkcs11wrapper_crypto_api_pkcs11_operation_duration_seconds_bucket[5m]))) * 1000",
+          "legendFormat": "{{operation}} / {{backend}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Rate-limit rejections / min",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "expr": "sum by (scope) (rate(pkcs11wrapper_crypto_api_rate_limit_rejections_total[5m])) * 60",
+          "legendFormat": "{{scope}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "PKCS#11 sessions",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "targets": [
+        {
+          "expr": "pkcs11wrapper_crypto_api_pkcs11_sessions_in_use",
+          "legendFormat": "in-use / {{backend}} / slot {{slot}}"
+        },
+        {
+          "expr": "pkcs11wrapper_crypto_api_pkcs11_sessions_idle",
+          "legendFormat": "idle / {{backend}} / slot {{slot}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Gateway healthy destinations",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [
+        {
+          "expr": "pkcs11wrapper_crypto_api_gateway_healthy_destinations",
+          "legendFormat": "healthy / {{cluster}}"
+        },
+        {
+          "expr": "pkcs11wrapper_crypto_api_gateway_configured_destinations",
+          "legendFormat": "configured / {{cluster}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Admin login attempts / min",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32},
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(pkcs11wrapper_admin_login_attempts_total[5m])) * 60",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 40,
+  "style": "dark",
+  "tags": ["pkcs11wrapper", "crypto-api", "observability"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Prometheus"
+      }
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "title": "Pkcs11Wrapper Runtime Observability",
+  "uid": "pkcs11wrapper-runtime-observability",
+  "version": 1
+}
