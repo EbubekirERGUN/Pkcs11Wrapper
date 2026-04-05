@@ -12,5 +12,6 @@ TestResults/
 *.cache
 *.tmp
 *.log
+.tmp-msbuild/
 BenchmarkDotNet.Artifacts/
 deploy/compose/softhsm-lab/.env

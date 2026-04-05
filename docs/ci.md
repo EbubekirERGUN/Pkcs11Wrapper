@@ -73,7 +73,7 @@ Ordered Linux steps:
 - mark engineering scripts executable
 - `dotnet restore Pkcs11Wrapper.sln`
 - `dotnet build Pkcs11Wrapper.sln -c Release --no-restore`
-- `./eng/run-regression-tests.sh` (this now also builds the Linux PKCS#11 v3 runtime shim before `dotnet test`)
+- `./eng/run-regression-tests.sh` (this now also builds the Linux PKCS#11 v3 runtime shim before `dotnet test`, and uses the repo-local `./.tmp-msbuild` temp root plus serialized/no-shared-compilation Linux defaults so local MSBuild-node instability does not hide real regression outcomes)
 - `./eng/run-smoke-aot.sh`
 - upload captured CI logs plus the Linux NativeAOT publish output as Actions artifacts
 

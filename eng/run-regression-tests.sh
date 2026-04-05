@@ -7,14 +7,23 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 setup_script="$script_dir/setup-softhsm-fixture.sh"
 build_v3_shim_script="$script_dir/build-pkcs11-v3-shim.sh"
 build_luna_shim_script="$script_dir/build-luna-extension-shim.sh"
+temp_root_default="$repo_root/.tmp-msbuild"
 fixture_root=""
 fixture_env=""
 use_existing_env=false
+no_restore=false
+no_build=false
 
 for arg in "$@"; do
   case "$arg" in
     --use-existing-env)
       use_existing_env=true
+      ;;
+    --no-restore)
+      no_restore=true
+      ;;
+    --no-build)
+      no_build=true
       ;;
     *)
       printf 'Unknown argument: %s\n' "$arg" >&2
@@ -48,6 +57,21 @@ require_env() {
     printf 'Required PKCS#11 environment variable is missing: %s\n' "$name" >&2
     exit 1
   fi
+}
+
+configure_temp_root() {
+  local resolved_temp_root="${PKCS11_TEMP_ROOT:-$temp_root_default}"
+
+  export TMPDIR="$resolved_temp_root"
+  export TMP="$resolved_temp_root"
+  export TEMP="$resolved_temp_root"
+  mkdir -p "$resolved_temp_root"
+}
+
+append_safe_dotnet_args() {
+  local -n args_ref=$1
+
+  args_ref+=(--disable-build-servers -m:1 -nr:false /p:UseSharedCompilation=false /p:BuildInParallel=false)
 }
 
 apply_rsa_aes_profile_defaults() {
@@ -109,6 +133,8 @@ print_existing_env_summary() {
 require_command dotnet
 require_command pkcs11-tool
 
+configure_temp_root
+
 if [[ "$(uname -s)" == "Linux" ]]; then
   chmod +x "$build_v3_shim_script" "$build_luna_shim_script"
   export PKCS11_V3_SHIM_PATH="$($build_v3_shim_script)"
@@ -165,5 +191,14 @@ if [[ "$PKCS11_PROVISIONING_REGRESSION" == "1" ]]; then
 fi
 
 printf 'Running regression test suite with PKCS#11-backed environment\n'
-dotnet test "$repo_root/Pkcs11Wrapper.sln" -c Release --nologo --logger "console;verbosity=minimal"
+test_args=(test "$repo_root/Pkcs11Wrapper.sln" -c Release --nologo --logger "console;verbosity=minimal")
+append_safe_dotnet_args test_args
+
+if [[ "$no_build" == "true" ]]; then
+  test_args+=(--no-build)
+elif [[ "$no_restore" == "true" ]]; then
+  test_args+=(--no-restore)
+fi
+
+dotnet "${test_args[@]}"
 printf 'Regression test suite completed successfully\n'
