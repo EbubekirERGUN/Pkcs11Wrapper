@@ -2,6 +2,8 @@
 
 `Pkcs11Wrapper` includes a dedicated `BenchmarkDotNet` suite for tracking wrapper overhead and realistic PKCS#11 operation cost over time.
 
+If you are looking for **Crypto API service throughput/latency/scaling regression coverage** instead of wrapper microbenchmarks, see [docs/crypto-api-performance.md](crypto-api-performance.md).
+
 ## Why this exists
 
 The goal is not a one-off speed screenshot. The benchmark suite gives the repository a repeatable baseline so we can answer:

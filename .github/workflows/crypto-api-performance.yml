@@ -1,0 +1,85 @@
+name: crypto-api-performance
+run-name: >-
+  crypto-api-performance • ${{ inputs.profile || 'ci' }} • ${{ github.ref_name }} • run #${{ github.run_number }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Performance profile to execute
+        required: true
+        default: ci
+        type: choice
+        options:
+          - ci
+          - quick
+          - baseline
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crypto-api-performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-crypto-api-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      CI: true
+      TMPDIR: ${{ github.workspace }}/.tmp-msbuild
+      TMP: ${{ github.workspace }}/.tmp-msbuild
+      TEMP: ${{ github.workspace }}/.tmp-msbuild
+      CRYPTO_API_PERF_ARTIFACT_NAME: pkcs11wrapper-crypto-api-performance-${{ inputs.profile }}-run-${{ github.run_number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Prepare temp workspace
+        run: mkdir -p "$TMPDIR"
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y softhsm2 opensc file
+
+      - name: Make engineering scripts executable
+        run: chmod +x eng/setup-softhsm-fixture.sh eng/run-cryptoapi-perf.sh
+
+      - name: Restore
+        run: dotnet restore Pkcs11Wrapper.sln
+
+      - name: Build
+        run: dotnet build Pkcs11Wrapper.sln -c Release --no-restore -m:1 -nr:false /p:UseSharedCompilation=false /p:RunAnalyzers=false /p:BuildInParallel=false
+
+      - name: Run Crypto API performance suite
+        run: ./eng/run-cryptoapi-perf.sh --no-restore --no-build --profile=${{ inputs.profile }}
+
+      - name: Publish run summary
+        if: always()
+        run: |
+          if [ -f artifacts/crypto-api-perf/latest/summary.md ]; then
+            cat artifacts/crypto-api-perf/latest/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s\n' \
+              '# Crypto API performance run produced no summary' \
+              '' \
+              '- Expected summary path: artifacts/crypto-api-perf/latest/summary.md' \
+              '- Check the uploaded artifact bundle for logs and any partial scenario outputs.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.CRYPTO_API_PERF_ARTIFACT_NAME }}
+          path: artifacts/crypto-api-perf/latest
+          if-no-files-found: error
+          retention-days: 30

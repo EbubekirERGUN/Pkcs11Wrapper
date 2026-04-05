@@ -62,7 +62,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - Fixture-backed SoftHSM regression suite
 - Windows runtime + `win-x64` NativeAOT smoke validation with SoftHSM-for-Windows
 - NativeAOT smoke validation on Linux
-- BenchmarkDotNet performance baseline + periodic benchmark workflow with allocation/regression reporting
+- BenchmarkDotNet performance baseline for wrapper/interoperability paths plus a dedicated Crypto API throughput/latency regression suite for sign/random/mixed single-instance and multi-instance workloads
 - Optional vendor regression lane
 - Tagged release workflow with preflight checks, artifact publication, optional NuGet push, plus release verification script and SourceLink/symbol package validation
 
@@ -93,6 +93,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - practical access-control slice: generated API-key secrets are shown once, stored only as hashes, and can now be paired end-to-end with alias routing, policy definitions, and binding management from the admin dashboard without exposing raw PKCS#11 locator details to callers
 - admin-panel/shared-store control-plane model for Crypto API applications, aliases, policies, and bindings without turning the machine-facing host into a tenant portal
 - intended deployment model: **one admin dashboard + many stateless crypto API instances**
+- committed local/manual perf-regression workflow for sign/random/mixed Crypto API traffic so service-level regressions are easier to catch before release
 
 ## Platform & validation status
 
