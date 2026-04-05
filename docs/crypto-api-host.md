@@ -202,8 +202,11 @@ Notes:
 - `CryptoApiSharedPersistence:Provider` supports `Postgres`.
 - `CryptoApiSharedPersistence:ConnectionString` enables the shared state store. If omitted, the host still runs, but `/api/v1/shared-state` reports that shared persistence is not configured.
 - `CryptoApiSharedPersistence:AutoInitialize=true` creates the schema on startup/first use.
+- With `AutoInitialize=false`, the host stops treating status/read endpoints as implicit schema bootstrap paths; use that mode after first deployment if you want startup/status checks to fail fast instead of issuing DDL.
 - With `Provider=Postgres`, use a standard Npgsql/PostgreSQL connection string and prefer a dedicated database/role for the Crypto API control plane.
 - If the connection string does not specify `Maximum Pool Size` / `Max Pool Size`, the host applies a conservative default cap of `32` pooled Postgres connections per instance. Set an explicit pool size in the connection string if your deployment needs a different budget.
+- Each instance also keeps one dedicated **unpooled** Postgres `LISTEN` connection for auth-state revision invalidation. That listener does **not** consume one of the pooled request connections.
+- If the Postgres connection string does not set `Keepalive`, the dedicated listener defaults to a 30-second keepalive so long-lived `LISTEN` sockets survive common idle network appliances more reliably. Set an explicit `Keepalive` value in the connection string if your environment needs a different cadence.
 - `CryptoApiRequestPathCaching:Redis:Enabled=true` turns on the optional Redis-backed hot-path accelerator.
 - `CryptoApiRequestPathCaching:Redis:Configuration` is a standard StackExchange.Redis configuration string.
 - `CryptoApiRequestPathCaching:Redis:InstanceName` prefixes cache/lease keys so multiple environments can share one Redis fleet safely.

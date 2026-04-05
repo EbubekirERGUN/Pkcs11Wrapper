@@ -158,7 +158,16 @@ Operators can also layer in an optional **Redis-backed hot-path accelerator** so
 Even without Redis, Postgres-backed instances now keep a local auth-state revision hint synchronized through Postgres `LISTEN` / `NOTIFY`, so warm request paths do not have to re-read the revision row on every request.
 Those caches remain disposable; correctness still comes from the shared database because cache keys are tied to a shared auth-state revision that advances when clients, keys, aliases, policies, or bindings change.
 If the Postgres connection string does not set `Maximum Pool Size` / `Max Pool Size`, the host applies a conservative default of `32` pooled database connections per Crypto API instance; set an explicit value in the connection string if your environment needs a different cap.
+Each Crypto API instance also holds one dedicated **unpooled** Postgres `LISTEN` connection for auth-state invalidation. Budget that as `instances × (pooled connections + 1 listener)` when sizing database connection limits.
+If the Postgres connection string does not set `Keepalive`, that listener defaults to a 30-second keepalive so long-lived notification sockets survive common idle network devices more reliably.
 `last_used_at_utc` remains shared metadata, but the host now writes it on a short throttled interval instead of once per successful request, and Redis can reduce duplicate cross-node touches within that interval.
+
+Practical tuning guidance:
+
+- start with `Max Pool Size=16` to `32` per Crypto API instance unless load data shows you need more
+- only raise the pool after confirming request concurrency is actually waiting on Postgres rather than PKCS#11 work, HTTP ingress, or upstream gateway behavior
+- remember the admin dashboard has its own Postgres usage; do not spend the entire database connection budget on API pools alone
+- once the schema exists, consider `CryptoApiSharedPersistence__AutoInitialize=false` for steady-state rollouts so readiness/status checks stop issuing idempotent DDL
 
 ### Not shared
 
@@ -243,6 +252,7 @@ Important:
 - `ModulePath` must be the path the process/container can actually open
 - `UserPin` is deployment secret material; do not hard-code it in checked-in config
 - `AutoInitialize=true` is fine for first-run convenience; the schema creation path is designed to be idempotent
+- after bootstrap, `AutoInitialize=false` is a reasonable steady-state posture if you want schema drift or missing migrations to fail fast during rollout
 - Redis acceleration is optional and should be treated as a performance layer only; the relational shared persistence backend remains authoritative
 - if Redis is unavailable, the request path falls back to the relational/shared-store behavior rather than rejecting healthy traffic
 
