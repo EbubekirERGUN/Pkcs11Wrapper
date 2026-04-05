@@ -1,11 +1,14 @@
 @page "/crypto-api-access"
 @using System.Globalization
+@using Microsoft.Extensions.Options
+@using Pkcs11Wrapper.Admin.Web.Configuration
 @using Pkcs11Wrapper.Admin.Web.Security
 @using Pkcs11Wrapper.CryptoApi.Access
 @using Pkcs11Wrapper.CryptoApi.Clients
 @attribute [Authorize(Policy = AdminRoles.Admin)]
 @inject CryptoApiClientManagementService ClientAccess
 @inject CryptoApiKeyAccessManagementService KeyAccess
+@inject IOptions<AdminCryptoApiRouteRuntimeOptions> RuntimeOptions
 
 <PageTitle>Crypto API Access</PageTitle>
 
@@ -108,6 +111,11 @@ else
             </div>
         </div>
     </div>
+
+    @if (_readiness is not null)
+    {
+        <div class="alert alert-light border small text-muted mb-4" data-testid="crypto-api-readiness-runtime-summary">@_readiness.RuntimeInspectionSummary</div>
+    }
 
     <div class="row g-4">
         <div class="col-xxl-4">
@@ -372,6 +380,36 @@ else
                             <div><strong>Bound clients:</strong> @_selectedPolicy.BoundClientIds.Count</div>
                             <div><strong>Bound aliases:</strong> @_selectedPolicy.BoundAliasIds.Count</div>
                         </div>
+                        @{
+                            CryptoApiPolicyReadinessViewItem? selectedPolicyReadiness = GetPolicyReadiness(_selectedPolicy.PolicyId);
+                        }
+                        @if (selectedPolicyReadiness is not null)
+                        {
+                            <div class="col-12">
+                                <div class="border rounded p-3 small">
+                                    <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                                        <span class="fw-semibold">Policy readiness</span>
+                                        <span class="badge @GetReadinessBadgeClass(selectedPolicyReadiness.Level)">@GetReadinessLabel(selectedPolicyReadiness.Level)</span>
+                                    </div>
+                                    <div class="text-muted mb-2">@selectedPolicyReadiness.Summary</div>
+                                    @if (selectedPolicyReadiness.Issues.Count > 0)
+                                    {
+                                        <ul class="mb-0 ps-3">
+                                            @foreach (CryptoApiAccessReadinessIssue issue in selectedPolicyReadiness.Issues)
+                                            {
+                                                <li class="mb-2">
+                                                    <span class="@(issue.Severity == CryptoApiAccessIssueSeverity.Blocker ? "text-danger" : "text-warning-emphasis")">@issue.Message</span>
+                                                    @if (issue.TargetId is not null && !string.IsNullOrWhiteSpace(issue.ActionLabel))
+                                                    {
+                                                        <button class="btn btn-sm btn-outline-secondary ms-2" @onclick="() => SelectReadinessTarget(issue)">@issue.ActionLabel</button>
+                                                    }
+                                                </li>
+                                            }
+                                        </ul>
+                                    }
+                                </div>
+                            </div>
+                        }
                         <div class="col-12 d-flex gap-2 flex-wrap">
                             <button class="btn btn-outline-primary" @onclick="UpdatePolicyAsync">Save policy</button>
                             <button class="btn btn-outline-secondary" @onclick="TogglePolicyAsync">@(_selectedPolicy.IsEnabled ? "Disable policy" : "Enable policy")</button>
@@ -399,6 +437,7 @@ else
                                         <th>Type</th>
                                         <th>Policies</th>
                                         <th>Keys</th>
+                                        <th>Readiness</th>
                                         <th>Status</th>
                                         <th></th>
                                     </tr>
@@ -406,6 +445,7 @@ else
                                 <tbody>
                                     @foreach (CryptoApiManagedClient client in _clientSnapshot.Clients)
                                     {
+                                        CryptoApiClientReadinessViewItem? clientReadiness = GetClientReadiness(client.ClientId);
                                         <tr class="@(ReferenceEquals(client, _selectedClient) ? "table-active" : null)">
                                             <td>
                                                 <div class="fw-semibold">@client.DisplayName</div>
@@ -414,6 +454,15 @@ else
                                             <td class="small">@client.ApplicationType</td>
                                             <td class="small text-muted">@(FormatBoundPolicySummary(client.BoundPolicyIds))</td>
                                             <td class="small">@client.Keys.Count</td>
+                                            <td>
+                                                @if (clientReadiness is not null)
+                                                {
+                                                    <div class="d-flex flex-column gap-1">
+                                                        <span class="badge @GetReadinessBadgeClass(clientReadiness.Level)">@GetReadinessLabel(clientReadiness.Level)</span>
+                                                        <div class="small text-muted">@clientReadiness.Summary</div>
+                                                    </div>
+                                                }
+                                            </td>
                                             <td>
                                                 <span class="badge @(client.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(client.IsEnabled ? "Enabled" : "Disabled")</span>
                                             </td>
@@ -431,6 +480,97 @@ else
 
             @if (_selectedClient is not null)
             {
+                CryptoApiClientReadinessViewItem? selectedClientReadiness = GetClientReadiness(_selectedClient.ClientId);
+                IReadOnlyList<CryptoApiClientAliasReadinessViewItem> selectedClientRoutes = GetRoutesForClient(_selectedClient.ClientId);
+
+                <div class="card shadow-sm feature-card mb-4" data-testid="crypto-api-client-readiness-panel">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Route readiness for @_selectedClient.DisplayName</span>
+                        @if (selectedClientReadiness is not null)
+                        {
+                            <span class="badge @GetReadinessBadgeClass(selectedClientReadiness.Level)">@GetReadinessLabel(selectedClientReadiness.Level)</span>
+                        }
+                    </div>
+                    <div class="card-body">
+                        @if (selectedClientReadiness is not null)
+                        {
+                            <div class="small text-muted mb-3">@selectedClientReadiness.Summary</div>
+                            <div class="small text-muted mb-3">Active keys: @selectedClientReadiness.ActiveKeyCount · Ready aliases: @selectedClientReadiness.ReadyRouteCount · Needs attention: @selectedClientReadiness.NeedsAttentionRouteCount · Blocked: @selectedClientReadiness.BlockedRouteCount</div>
+                            @if (selectedClientReadiness.Issues.Count > 0)
+                            {
+                                <ul class="small mb-3 ps-3">
+                                    @foreach (CryptoApiAccessReadinessIssue issue in selectedClientReadiness.Issues)
+                                    {
+                                        <li class="mb-2">
+                                            <span class="@(issue.Severity == CryptoApiAccessIssueSeverity.Blocker ? "text-danger" : "text-warning-emphasis")">@issue.Message</span>
+                                            @if (issue.TargetId is not null && !string.IsNullOrWhiteSpace(issue.ActionLabel))
+                                            {
+                                                <button class="btn btn-sm btn-outline-secondary ms-2" @onclick="() => SelectReadinessTarget(issue)">@issue.ActionLabel</button>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        }
+
+                        @if (selectedClientRoutes.Count == 0)
+                        {
+                            <div class="empty-state">No alias routes exist for this client yet.</div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive table-shell" data-testid="crypto-api-client-route-matrix">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Alias</th>
+                                            <th>Shared policies</th>
+                                            <th>Allowed operations</th>
+                                            <th>Route</th>
+                                            <th>Readiness</th>
+                                            <th>Fix</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (CryptoApiClientAliasReadinessViewItem route in selectedClientRoutes)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    <div class="fw-semibold">@route.AliasName</div>
+                                                </td>
+                                                <td class="small text-muted">@(route.SharedPolicyNames.Count == 0 ? "None" : string.Join(", ", route.SharedPolicyNames))</td>
+                                                <td class="small text-muted">@(route.AllowedOperations.Count == 0 ? "None" : string.Join(", ", route.AllowedOperations))</td>
+                                                <td class="small text-muted">@route.RouteSummary</td>
+                                                <td>
+                                                    <div class="d-flex flex-column gap-1">
+                                                        <span class="badge @GetReadinessBadgeClass(route.Level)">@GetReadinessLabel(route.Level)</span>
+                                                        <div class="small text-muted">@route.Summary</div>
+                                                        @if (route.Issues.Count > 0)
+                                                        {
+                                                            <ul class="small mb-0 ps-3 text-muted">
+                                                                @foreach (CryptoApiAccessReadinessIssue issue in route.Issues.Take(3))
+                                                                {
+                                                                    <li>@issue.Message</li>
+                                                                }
+                                                            </ul>
+                                                        }
+                                                    </div>
+                                                </td>
+                                                <td class="text-end">
+                                                    <div class="btn-group btn-group-sm" role="group">
+                                                        <button class="btn btn-outline-primary" @onclick="() => SelectAliasById(route.AliasId)">Alias</button>
+                                                        <button class="btn btn-outline-secondary" @onclick="() => SelectClientById(route.ClientId)">Client</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+
                 <div class="card shadow-sm feature-card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>API keys for @_selectedClient.DisplayName</span>
@@ -514,6 +654,7 @@ else
                                         <th>Alias</th>
                                         <th>Route</th>
                                         <th>Policies</th>
+                                        <th>Readiness</th>
                                         <th>Status</th>
                                         <th></th>
                                     </tr>
@@ -521,6 +662,7 @@ else
                                 <tbody>
                                     @foreach (CryptoApiManagedKeyAlias alias in _accessSnapshot.KeyAliases)
                                     {
+                                        CryptoApiAliasReadinessViewItem? aliasReadiness = GetAliasReadiness(alias.AliasId);
                                         <tr class="@(ReferenceEquals(alias, _selectedAlias) ? "table-active" : null)">
                                             <td>
                                                 <div class="fw-semibold">@alias.AliasName</div>
@@ -550,6 +692,15 @@ else
                                             </td>
                                             <td class="small text-muted">@(FormatBoundPolicySummary(alias.BoundPolicyIds))</td>
                                             <td>
+                                                @if (aliasReadiness is not null)
+                                                {
+                                                    <div class="d-flex flex-column gap-1">
+                                                        <span class="badge @GetReadinessBadgeClass(aliasReadiness.Level)">@GetReadinessLabel(aliasReadiness.Level)</span>
+                                                        <div class="small text-muted">@aliasReadiness.Summary</div>
+                                                    </div>
+                                                }
+                                            </td>
+                                            <td>
                                                 <span class="badge @(alias.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(alias.IsEnabled ? "Enabled" : "Disabled")</span>
                                             </td>
                                             <td class="text-end">
@@ -563,6 +714,99 @@ else
                     }
                 </div>
             </div>
+
+            @if (_selectedAlias is not null)
+            {
+                CryptoApiAliasReadinessViewItem? selectedAliasReadiness = GetAliasReadiness(_selectedAlias.AliasId);
+                IReadOnlyList<CryptoApiClientAliasReadinessViewItem> selectedAliasRoutes = GetRoutesForAlias(_selectedAlias.AliasId);
+
+                <div class="card shadow-sm feature-card mb-4" data-testid="crypto-api-alias-readiness-panel">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Client readiness for alias @_selectedAlias.AliasName</span>
+                        @if (selectedAliasReadiness is not null)
+                        {
+                            <span class="badge @GetReadinessBadgeClass(selectedAliasReadiness.Level)">@GetReadinessLabel(selectedAliasReadiness.Level)</span>
+                        }
+                    </div>
+                    <div class="card-body">
+                        @if (selectedAliasReadiness is not null)
+                        {
+                            <div class="small text-muted mb-3">@selectedAliasReadiness.Summary</div>
+                            <div class="small text-muted mb-3">Ready clients: @selectedAliasReadiness.ReadyClientCount · Needs attention: @selectedAliasReadiness.NeedsAttentionClientCount · Blocked: @selectedAliasReadiness.BlockedClientCount</div>
+                            @if (selectedAliasReadiness.Issues.Count > 0)
+                            {
+                                <ul class="small mb-3 ps-3">
+                                    @foreach (CryptoApiAccessReadinessIssue issue in selectedAliasReadiness.Issues)
+                                    {
+                                        <li class="mb-2">
+                                            <span class="@(issue.Severity == CryptoApiAccessIssueSeverity.Blocker ? "text-danger" : "text-warning-emphasis")">@issue.Message</span>
+                                            @if (issue.TargetId is not null && !string.IsNullOrWhiteSpace(issue.ActionLabel))
+                                            {
+                                                <button class="btn btn-sm btn-outline-secondary ms-2" @onclick="() => SelectReadinessTarget(issue)">@issue.ActionLabel</button>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        }
+
+                        @if (selectedAliasRoutes.Count == 0)
+                        {
+                            <div class="empty-state">No client routes exist for this alias yet.</div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive table-shell" data-testid="crypto-api-alias-client-matrix">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Client</th>
+                                            <th>Shared policies</th>
+                                            <th>Allowed operations</th>
+                                            <th>Readiness</th>
+                                            <th>Fix</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (CryptoApiClientAliasReadinessViewItem route in selectedAliasRoutes)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    <div class="fw-semibold">@route.ClientDisplayName</div>
+                                                    <div class="small text-muted">@route.ClientName</div>
+                                                </td>
+                                                <td class="small text-muted">@(route.SharedPolicyNames.Count == 0 ? "None" : string.Join(", ", route.SharedPolicyNames))</td>
+                                                <td class="small text-muted">@(route.AllowedOperations.Count == 0 ? "None" : string.Join(", ", route.AllowedOperations))</td>
+                                                <td>
+                                                    <div class="d-flex flex-column gap-1">
+                                                        <span class="badge @GetReadinessBadgeClass(route.Level)">@GetReadinessLabel(route.Level)</span>
+                                                        <div class="small text-muted">@route.Summary</div>
+                                                        @if (route.Issues.Count > 0)
+                                                        {
+                                                            <ul class="small mb-0 ps-3 text-muted">
+                                                                @foreach (CryptoApiAccessReadinessIssue issue in route.Issues.Take(3))
+                                                                {
+                                                                    <li>@issue.Message</li>
+                                                                }
+                                                            </ul>
+                                                        }
+                                                    </div>
+                                                </td>
+                                                <td class="text-end">
+                                                    <div class="btn-group btn-group-sm" role="group">
+                                                        <button class="btn btn-outline-primary" @onclick="() => SelectClientById(route.ClientId)">Client</button>
+                                                        <button class="btn btn-outline-secondary" @onclick="() => SelectAliasById(route.AliasId)">Alias</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
 
             <div class="card shadow-sm feature-card">
                 <div class="card-header">Policies</div>
@@ -581,6 +825,7 @@ else
                                         <th>Operations</th>
                                         <th>Bound clients</th>
                                         <th>Bound aliases</th>
+                                        <th>Readiness</th>
                                         <th>Status</th>
                                         <th></th>
                                     </tr>
@@ -588,6 +833,7 @@ else
                                 <tbody>
                                     @foreach (CryptoApiManagedPolicy policy in _accessSnapshot.Policies)
                                     {
+                                        CryptoApiPolicyReadinessViewItem? policyReadiness = GetPolicyReadiness(policy.PolicyId);
                                         <tr class="@(ReferenceEquals(policy, _selectedPolicy) ? "table-active" : null)">
                                             <td>
                                                 <div class="fw-semibold">@policy.PolicyName</div>
@@ -600,6 +846,15 @@ else
                                             <td class="small text-muted">@string.Join(", ", policy.AllowedOperations)</td>
                                             <td class="small text-muted">@(FormatBoundClientSummary(policy.BoundClientIds))</td>
                                             <td class="small text-muted">@(FormatBoundAliasSummary(policy.BoundAliasIds))</td>
+                                            <td>
+                                                @if (policyReadiness is not null)
+                                                {
+                                                    <div class="d-flex flex-column gap-1">
+                                                        <span class="badge @GetReadinessBadgeClass(policyReadiness.Level)">@GetReadinessLabel(policyReadiness.Level)</span>
+                                                        <div class="small text-muted">@policyReadiness.Summary</div>
+                                                    </div>
+                                                }
+                                            </td>
                                             <td>
                                                 <span class="badge @(policy.IsEnabled ? "text-bg-success" : "text-bg-secondary")">@(policy.IsEnabled ? "Enabled" : "Disabled")</span>
                                             </td>
@@ -625,6 +880,7 @@ else
     private CryptoApiManagedKeyAlias? _selectedAlias;
     private CryptoApiManagedPolicy? _selectedPolicy;
     private CryptoApiCreatedClientKey? _revealedKey;
+    private CryptoApiAccessReadinessState? _readiness;
     private string? _statusMessage;
     private bool _statusIsError;
 
@@ -676,6 +932,7 @@ else
 
         _clientSnapshot = await clientTask;
         _accessSnapshot = await accessTask;
+        _readiness = CryptoApiAccessReadinessView.Build(_clientSnapshot, _accessSnapshot, RuntimeOptions.Value, DateTimeOffset.UtcNow);
 
         if (_clientSnapshot.Clients.Count == 0)
         {
@@ -738,6 +995,100 @@ else
         }
 
         return items[0];
+    }
+
+    private CryptoApiClientReadinessViewItem? GetClientReadiness(Guid clientId)
+        => CryptoApiAccessReadinessView.GetClient(_readiness, clientId);
+
+    private CryptoApiAliasReadinessViewItem? GetAliasReadiness(Guid aliasId)
+        => CryptoApiAccessReadinessView.GetAlias(_readiness, aliasId);
+
+    private CryptoApiPolicyReadinessViewItem? GetPolicyReadiness(Guid policyId)
+        => CryptoApiAccessReadinessView.GetPolicy(_readiness, policyId);
+
+    private IReadOnlyList<CryptoApiClientAliasReadinessViewItem> GetRoutesForClient(Guid clientId)
+        => CryptoApiAccessReadinessView.GetRoutesForClient(_readiness, clientId);
+
+    private IReadOnlyList<CryptoApiClientAliasReadinessViewItem> GetRoutesForAlias(Guid aliasId)
+        => CryptoApiAccessReadinessView.GetRoutesForAlias(_readiness, aliasId);
+
+    private static string GetReadinessBadgeClass(CryptoApiAccessReadinessLevel level)
+        => level switch
+        {
+            CryptoApiAccessReadinessLevel.Ready => "text-bg-success",
+            CryptoApiAccessReadinessLevel.NeedsAttention => "text-bg-warning",
+            _ => "text-bg-danger"
+        };
+
+    private static string GetReadinessLabel(CryptoApiAccessReadinessLevel level)
+        => level switch
+        {
+            CryptoApiAccessReadinessLevel.Ready => "Ready",
+            CryptoApiAccessReadinessLevel.NeedsAttention => "Needs attention",
+            _ => "Blocked"
+        };
+
+    private void SelectReadinessTarget(CryptoApiAccessReadinessIssue issue)
+    {
+        if (issue.TargetId is not Guid targetId)
+        {
+            return;
+        }
+
+        switch (issue.TargetKind)
+        {
+            case CryptoApiAccessReadinessTargetKind.Client:
+                SelectClientById(targetId);
+                break;
+            case CryptoApiAccessReadinessTargetKind.Alias:
+                SelectAliasById(targetId);
+                break;
+            case CryptoApiAccessReadinessTargetKind.Policy:
+                SelectPolicyById(targetId);
+                break;
+        }
+    }
+
+    private void SelectClientById(Guid clientId)
+    {
+        if (_clientSnapshot is null)
+        {
+            return;
+        }
+
+        CryptoApiManagedClient? client = _clientSnapshot.Clients.FirstOrDefault(candidate => candidate.ClientId == clientId);
+        if (client is not null)
+        {
+            SelectClient(client);
+        }
+    }
+
+    private void SelectAliasById(Guid aliasId)
+    {
+        if (_accessSnapshot is null)
+        {
+            return;
+        }
+
+        CryptoApiManagedKeyAlias? alias = _accessSnapshot.KeyAliases.FirstOrDefault(candidate => candidate.AliasId == aliasId);
+        if (alias is not null)
+        {
+            SelectAlias(alias);
+        }
+    }
+
+    private void SelectPolicyById(Guid policyId)
+    {
+        if (_accessSnapshot is null)
+        {
+            return;
+        }
+
+        CryptoApiManagedPolicy? policy = _accessSnapshot.Policies.FirstOrDefault(candidate => candidate.PolicyId == policyId);
+        if (policy is not null)
+        {
+            SelectPolicy(policy);
+        }
     }
 
     private void SelectClient(CryptoApiManagedClient client)
