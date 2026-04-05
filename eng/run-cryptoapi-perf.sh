@@ -87,16 +87,54 @@ wait_for_postgres_container() {
   local container_id="$1"
   local database_user="$2"
   local database_name="$3"
-  local attempts="${4:-60}"
+  local database_password="$4"
+  local attempts="${5:-90}"
+  local bootstrap_complete=false
+  local initialization_skipped=false
+  local bootstrap_complete_marker='PostgreSQL init process complete; ready for start up.'
+  local initialization_skipped_marker='PostgreSQL Database directory appears to contain a database; Skipping initialization'
+  local consecutive_sql_successes=0
+  local required_consecutive_sql_successes_without_bootstrap=3
 
   for ((i=1; i<=attempts; i++)); do
-    if docker exec "$container_id" pg_isready -U "$database_user" -d "$database_name" >/dev/null 2>&1; then
-      return 0
-    fi
-
     if ! docker inspect "$container_id" >/dev/null 2>&1; then
       printf 'Managed PostgreSQL container exited before readiness check completed.\n' >&2
       return 1
+    fi
+
+    if [[ "$bootstrap_complete" != "true" && "$initialization_skipped" != "true" ]]; then
+      local postgres_logs
+      postgres_logs="$(docker logs "$container_id" 2>&1 || true)"
+
+      if [[ "$postgres_logs" == *"$bootstrap_complete_marker"* ]]; then
+        bootstrap_complete=true
+      elif [[ "$postgres_logs" == *"$initialization_skipped_marker"* ]]; then
+        initialization_skipped=true
+      fi
+    fi
+
+    if [[ "$bootstrap_complete" == "true" || "$initialization_skipped" == "true" ]]; then
+      # Fresh postgres:* containers briefly accept connections during entrypoint bootstrap,
+      # then shut that temporary server down before the final post-init server comes up.
+      # Wait for the bootstrap marker plus one real SQL round-trip against the target DB.
+      if docker exec \
+        -e PGPASSWORD="$database_password" \
+        "$container_id" \
+        psql --username "$database_user" --dbname "$database_name" --no-psqlrc --tuples-only --no-align --quiet -c 'SELECT 1' \
+        2>/dev/null | tr -d '[:space:]' | grep -qx '1'; then
+        return 0
+      fi
+    elif docker exec \
+      -e PGPASSWORD="$database_password" \
+      "$container_id" \
+      psql --username "$database_user" --dbname "$database_name" --no-psqlrc --tuples-only --no-align --quiet -c 'SELECT 1' \
+      2>/dev/null | tr -d '[:space:]' | grep -qx '1'; then
+      ((consecutive_sql_successes+=1))
+      if (( consecutive_sql_successes >= required_consecutive_sql_successes_without_bootstrap )); then
+        return 0
+      fi
+    else
+      consecutive_sql_successes=0
     fi
 
     sleep 1
@@ -140,7 +178,7 @@ configure_shared_persistence() {
     exit 1
   fi
 
-  if ! wait_for_postgres_container "$postgres_container_id" "$postgres_user" "$postgres_database"; then
+  if ! wait_for_postgres_container "$postgres_container_id" "$postgres_user" "$postgres_database" "$postgres_password"; then
     docker logs "$postgres_container_id" > "$artifact_root/postgres.log" 2>&1 || true
     printf 'Ephemeral PostgreSQL container did not become ready in time.\n' >&2
     exit 1
