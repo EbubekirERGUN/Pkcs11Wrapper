@@ -15,7 +15,7 @@
             <span class="page-tag">Health visibility</span>
             <span class="page-tag">Grouped by device</span>
             <span class="page-tag">Direct session controls</span>
-            <span class="page-tag">Recovery cleanup</span>
+            <span class="page-tag">Reviewable cleanup</span>
         </div>
     </div>
     <div class="page-hero-side">
@@ -27,7 +27,7 @@
         <div class="hero-panel">
             <div class="hero-panel-title">Control model</div>
             <div class="hero-panel-value">Tracked + explicit</div>
-            <div class="hero-panel-copy">The UI keeps dangerous operations visible but deliberate, so bulk cleanup and direct login/logout actions feel controlled.</div>
+            <div class="hero-panel-copy">Single-session close stays quick, while bulk cleanup now moves through a review step before anything is closed.</div>
         </div>
     </div>
 </section>
@@ -96,7 +96,7 @@
     <div class="card-body row g-3 align-items-end">
         <div class="col-xl-2 col-lg-3 col-md-6 d-flex gap-2 flex-wrap">
             <button class="btn btn-primary" @onclick="Refresh">Refresh</button>
-            <button class="btn btn-outline-danger" @onclick="CloseAllTrackedAsync" disabled="@(_sessions.Count == 0 || !_isOperator)">Close All Tracked</button>
+            <button class="btn btn-outline-danger" @onclick="ReviewAllTrackedCleanup" disabled="@(_sessions.Count == 0 || !_isOperator)">Close All Tracked</button>
         </div>
         <div class="col-xl-3 col-lg-4 col-md-6">
             <label class="form-label">Search</label>
@@ -129,13 +129,232 @@
                 <option value="health">Health first, then newest</option>
             </select>
         </div>
-        <div class="col-12 d-flex flex-wrap gap-2">
-            <button class="btn btn-outline-secondary" @onclick="CloseFilteredAsync" disabled="@(FilteredSessions.Count == 0 || !_isOperator)">Close Filtered</button>
-            <button class="btn btn-outline-warning" @onclick="CloseInvalidatedAsync" disabled="@(_sessions.All(session => session.IsHealthy) || !_isOperator)">Close Invalidated</button>
-            <div class="small text-muted align-self-center">Showing @FilteredSessions.Count of @_sessions.Count tracked session(s).</div>
+        <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+            <button class="btn btn-outline-secondary" @onclick="ReviewFilteredCleanup" disabled="@(FilteredSessions.Count == 0 || !_isOperator)">Close Filtered</button>
+            <button class="btn btn-outline-warning" @onclick="ReviewInvalidatedCleanup" disabled="@(_sessions.All(session => session.IsHealthy) || !_isOperator)">Close Invalidated</button>
+            <div class="small text-muted">Showing @FilteredSessions.Count of @_sessions.Count tracked session(s). Bulk actions now open a review plan first.</div>
         </div>
     </div>
 </div>
+
+@if (PendingCleanupPlan is not null)
+{
+    SessionBulkCleanupPlan plan = PendingCleanupPlan;
+
+    <div class="card shadow-sm mb-4 feature-card border-danger-subtle">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <div class="small text-uppercase text-muted">Bulk cleanup review</div>
+                <div class="fw-semibold">@plan.ScopeLabel</div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                @if (plan.HasExcludedSessions)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="RestoreAllCleanupExceptions">Restore all exceptions</button>
+                }
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CancelCleanupReview">Cancel review</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <p class="text-muted mb-3">@plan.Description</p>
+
+            <div class="alert alert-warning">
+                <div class="fw-semibold">Nothing is closed yet.</div>
+                <div>Review the affected tracked sessions below, remove exceptions when needed, then execute the cleanup explicitly.</div>
+            </div>
+
+            <div class="row g-3 mb-4">
+                <div class="col-xl-2 col-md-4 col-sm-6">
+                    <div class="card shadow-sm h-100 metric-card">
+                        <div class="card-body">
+                            <div class="metric-label">Included</div>
+                            <div class="display-6 metric-meta">@plan.IncludedCount</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-xl-2 col-md-4 col-sm-6">
+                    <div class="card shadow-sm h-100 metric-card">
+                        <div class="card-body">
+                            <div class="metric-label">Excluded</div>
+                            <div class="display-6 metric-meta">@plan.ExcludedCount</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-xl-2 col-md-4 col-sm-6">
+                    <div class="card shadow-sm h-100 metric-card">
+                        <div class="card-body">
+                            <div class="metric-label">Invalidated</div>
+                            <div class="display-6 metric-meta">@plan.InvalidatedCount</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-xl-2 col-md-4 col-sm-6">
+                    <div class="card shadow-sm h-100 metric-card">
+                        <div class="card-body">
+                            <div class="metric-label">Healthy</div>
+                            <div class="display-6 metric-meta">@plan.HealthyCount</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-xl-2 col-md-4 col-sm-6">
+                    <div class="card shadow-sm h-100 metric-card">
+                        <div class="card-body">
+                            <div class="metric-label">Devices</div>
+                            <div class="display-6 metric-meta">@plan.DeviceCount</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-xl-2 col-md-4 col-sm-6">
+                    <div class="card shadow-sm h-100 metric-card">
+                        <div class="card-body">
+                            <div class="metric-label">Review source</div>
+                            <div class="display-6 metric-meta">@plan.CandidateCount</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            @if (!plan.HasIncludedSessions)
+            {
+                <div class="alert alert-secondary mb-4">
+                    Every session in this review was removed as an exception. Restore one or more entries before executing cleanup.
+                </div>
+            }
+
+            @foreach (SessionBulkCleanupHealthGroup healthGroup in plan.HealthGroups)
+            {
+                <div class="card shadow-sm mb-3 feature-card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>@healthGroup.Label</span>
+                        <span class="badge @(healthGroup.IsHealthy ? "text-bg-success" : "text-bg-danger")">@healthGroup.Count session(s)</span>
+                    </div>
+                    <div class="card-body">
+                        @foreach (SessionBulkCleanupDeviceGroup deviceGroup in healthGroup.DeviceGroups)
+                        {
+                            <div class="card shadow-sm mb-3">
+                                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                    <div>
+                                        <span class="fw-semibold">@deviceGroup.DeviceName</span>
+                                        <span class="small text-muted ms-2">@deviceGroup.Count tracked session(s)</span>
+                                    </div>
+                                    <div class="small text-muted">@deviceGroup.InvalidatedCount invalidated / @deviceGroup.HealthyCount healthy</div>
+                                </div>
+                                <div class="table-responsive table-shell">
+                                    <table class="table table-sm align-middle mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Session Id</th>
+                                                <th>Slot</th>
+                                                <th>Mode</th>
+                                                <th>Status</th>
+                                                <th>Review note</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (AdminSessionSnapshot session in deviceGroup.Sessions)
+                                            {
+                                                <tr>
+                                                    <td><span class="table-pill table-pill-code">@session.SessionId</span></td>
+                                                    <td><span class="table-pill table-pill-code">@session.SlotId</span></td>
+                                                    <td><span class="table-pill">@(session.IsReadWrite ? "RW" : "RO")</span></td>
+                                                    <td>
+                                                        <span class="badge @(session.IsHealthy ? "text-bg-success" : "text-bg-danger")">@session.HealthLabel</span>
+                                                    </td>
+                                                    <td>
+                                                        <div class="fw-semibold">@session.LastOperation</div>
+                                                        <div class="small text-muted">@(session.InvalidationReason ?? session.Notes ?? "Healthy tracked session selected by the current review scope.")</div>
+                                                    </td>
+                                                    <td class="text-end">
+                                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() =>ExcludeFromCleanup(session.SessionId)">Keep Open</button>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (plan.HasExcludedSessions)
+            {
+                <div class="card shadow-sm mb-4 feature-card border-secondary-subtle">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Exceptions kept open</span>
+                        <span class="small text-muted">These sessions are removed from this bulk cleanup only.</span>
+                    </div>
+                    <div class="table-responsive table-shell">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Device</th>
+                                    <th>Session Id</th>
+                                    <th>Status</th>
+                                    <th>Reason kept open</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (AdminSessionSnapshot session in plan.ExcludedSessions)
+                                {
+                                    <tr>
+                                        <td>@session.DeviceName</td>
+                                        <td><span class="table-pill table-pill-code">@session.SessionId</span></td>
+                                        <td><span class="badge @(session.IsHealthy ? "text-bg-success" : "text-bg-danger")">@session.HealthLabel</span></td>
+                                        <td class="small text-muted">Removed from the pending cleanup by operator review.</td>
+                                        <td class="text-end">
+                                            <button class="btn btn-sm btn-outline-primary" @onclick="() =>RestoreCleanupSession(session.SessionId)">Restore</button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+
+            <div class="border rounded p-3 bg-body-tertiary">
+                <div class="fw-semibold mb-1">Execute reviewed cleanup</div>
+                <div class="small text-muted mb-3">This will send close requests for exactly @plan.IncludedCount tracked session(s) from the review above.</div>
+
+                @if (plan.RequiresTypedConfirmation)
+                {
+                    <div class="mb-3">
+                        <label class="form-label">Large batch confirmation</label>
+                        <input class="form-control" @bind="_cleanupConfirmationText" @bind:event="oninput" placeholder="Type exact confirmation text" />
+                        <div class="form-text">Type <code>@plan.ConfirmationText</code> to execute this larger cleanup batch.</div>
+                    </div>
+                }
+
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-danger" @onclick="ExecuteCleanupReviewAsync" disabled="@(!CanExecuteCleanup)">Execute cleanup</button>
+                    <button class="btn btn-outline-secondary" @onclick="CancelCleanupReview">Cancel review</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else if (_lastCleanupResult is not null)
+{
+    <div class="card shadow-sm mb-4 feature-card border-success-subtle">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Last cleanup summary</span>
+            <span class="small text-muted">@_lastCleanupResult.ScopeLabel</span>
+        </div>
+        <div class="card-body">
+            <p class="mb-3">@_lastCleanupResult.Summary</p>
+            <div class="d-flex flex-wrap gap-3 small text-muted">
+                <span>Closed: @_lastCleanupResult.ClosedCount</span>
+                <span>Already gone: @_lastCleanupResult.MissingCount</span>
+                <span>Excluded: @_lastCleanupResult.ExcludedCount</span>
+                <span>Devices: @_lastCleanupResult.DeviceCount</span>
+            </div>
+        </div>
+    </div>
+}
 
 @if (_sessions.Count == 0)
 {
@@ -277,6 +496,11 @@ else
     private string _searchText = string.Empty;
     private string _sortMode = "lastTouched";
     private bool _isOperator;
+    private SessionBulkCleanupScope? _cleanupScope;
+    private IReadOnlyList<AdminSessionSnapshot> _cleanupSourceSessions = [];
+    private readonly HashSet<Guid> _cleanupExcludedSessionIds = [];
+    private string _cleanupConfirmationText = string.Empty;
+    private SessionBulkCleanupResult? _lastCleanupResult;
 
     private IReadOnlyList<string> AvailableDevices => _sessions
         .Select(session => session.DeviceName)
@@ -288,16 +512,36 @@ else
         .Where(MatchesFilters)
         .ToArray();
 
+    private SessionBulkCleanupPlan? PendingCleanupPlan
+        => _cleanupScope is null
+            ? null
+            : SessionBulkCleanupView.BuildPlan(_cleanupScope.Value, _cleanupSourceSessions, _cleanupExcludedSessionIds);
+
+    private bool CanExecuteCleanup
+        => PendingCleanupPlan is { HasIncludedSessions: true } plan
+            && (!plan.RequiresTypedConfirmation || string.Equals(_cleanupConfirmationText.Trim(), plan.ConfirmationText, StringComparison.Ordinal));
+
     protected override async Task OnInitializedAsync()
     {
         AuthenticationState state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _isOperator = state.User.IsInRole(AdminRoles.Operator) || state.User.IsInRole(AdminRoles.Admin);
         _userPin = await PinStore.TryGetAsync(Guid.Empty, 0, "sessions");
         _rememberPin = !string.IsNullOrWhiteSpace(_userPin);
-        Refresh();
+        RefreshCore();
     }
 
     private void Refresh()
+    {
+        bool hadPendingCleanup = PendingCleanupPlan is not null;
+        RefreshCore();
+        if (hadPendingCleanup)
+        {
+            ClearCleanupReview();
+            SetStatus("Tracked sessions refreshed. Pending bulk cleanup review was cleared because the source set may have changed.", false);
+        }
+    }
+
+    private void RefreshCore()
     {
         _sessions = Admin.GetSessions();
         if (_selectedSession is not null)
@@ -308,7 +552,7 @@ else
 
     private void SelectSession(Guid sessionId)
     {
-        Refresh();
+        RefreshCore();
         _selectedSession = _sessions.FirstOrDefault(x => x.SessionId == sessionId);
     }
 
@@ -322,13 +566,14 @@ else
             _selectedSession = await Admin.LoginTrackedSessionAsync(_selectedSession.SessionId, _userPin ?? string.Empty);
             await PersistPinAsync();
             SetStatus("Tracked session logged in as CKU_USER.", false);
-            Refresh();
+            ClearCleanupReview();
+            RefreshCore();
             SelectSession(_selectedSession.SessionId);
         }
         catch (Exception ex)
         {
             SetStatus(ex.Message, true);
-            Refresh();
+            RefreshCore();
         }
     }
 
@@ -339,13 +584,14 @@ else
         {
             _selectedSession = await Admin.LogoutTrackedSessionAsync(_selectedSession.SessionId);
             SetStatus("Tracked session logged out.", false);
-            Refresh();
+            ClearCleanupReview();
+            RefreshCore();
             SelectSession(_selectedSession.SessionId);
         }
         catch (Exception ex)
         {
             SetStatus(ex.Message, true);
-            Refresh();
+            RefreshCore();
         }
     }
 
@@ -356,13 +602,14 @@ else
         {
             _selectedSession = await Admin.CancelTrackedSessionOperationsAsync(_selectedSession.SessionId);
             SetStatus("Issued C_SessionCancel for the tracked session.", false);
-            Refresh();
+            ClearCleanupReview();
+            RefreshCore();
             SelectSession(_selectedSession.SessionId);
         }
         catch (Exception ex)
         {
             SetStatus(ex.Message, true);
-            Refresh();
+            RefreshCore();
         }
     }
 
@@ -373,7 +620,8 @@ else
         {
             await Admin.CloseAllSessionsAsync(_selectedSession.DeviceId, _selectedSession.SlotId);
             SetStatus($"Invoked CloseAllSessions for device slot {_selectedSession.SlotId}. Matching tracked sessions are now explicitly marked invalidated until you close them.", false);
-            Refresh();
+            ClearCleanupReview();
+            RefreshCore();
             SelectSession(_selectedSession.SessionId);
         }
         catch (Exception ex)
@@ -392,51 +640,106 @@ else
     {
         bool closed = await Admin.CloseSessionAsync(sessionId);
         SetStatus(closed ? "Session closed." : "Session not found.", !closed);
+        ClearCleanupReview();
         if (_selectedSession?.SessionId == sessionId)
         {
             _selectedSession = null;
         }
-        Refresh();
+        RefreshCore();
     }
 
-    private async Task CloseAllTrackedAsync()
+    private void ReviewAllTrackedCleanup() => BeginCleanupReview(SessionBulkCleanupScope.AllTracked, _sessions);
+
+    private void ReviewFilteredCleanup() => BeginCleanupReview(SessionBulkCleanupScope.Filtered, FilteredSessions);
+
+    private void ReviewInvalidatedCleanup()
+        => BeginCleanupReview(SessionBulkCleanupScope.Invalidated, _sessions.Where(session => !session.IsHealthy).ToArray());
+
+    private void BeginCleanupReview(SessionBulkCleanupScope scope, IReadOnlyList<AdminSessionSnapshot> sourceSessions)
     {
-        foreach (AdminSessionSnapshot session in _sessions.ToArray())
+        if (!_isOperator || sourceSessions.Count == 0)
         {
-            await Admin.CloseSessionAsync(session.SessionId);
+            return;
         }
 
+        _cleanupScope = scope;
+        _cleanupSourceSessions = sourceSessions.ToArray();
+        _cleanupExcludedSessionIds.Clear();
+        _cleanupConfirmationText = string.Empty;
+        _lastCleanupResult = null;
         _selectedSession = null;
-        SetStatus("All tracked sessions closed.", false);
-        Refresh();
+        SetStatus($"Reviewing {sourceSessions.Count} tracked session(s) for {SessionBulkCleanupView.BuildPlan(scope, _cleanupSourceSessions).ScopeLabel.ToLowerInvariant()}.", false);
     }
 
-    private async Task CloseFilteredAsync()
+    private void ExcludeFromCleanup(Guid sessionId)
     {
-        foreach (AdminSessionSnapshot session in FilteredSessions.ToArray())
+        _cleanupExcludedSessionIds.Add(sessionId);
+        _cleanupConfirmationText = string.Empty;
+    }
+
+    private void RestoreCleanupSession(Guid sessionId)
+    {
+        _cleanupExcludedSessionIds.Remove(sessionId);
+        _cleanupConfirmationText = string.Empty;
+    }
+
+    private void RestoreAllCleanupExceptions()
+    {
+        _cleanupExcludedSessionIds.Clear();
+        _cleanupConfirmationText = string.Empty;
+    }
+
+    private void CancelCleanupReview() => ClearCleanupReview();
+
+    private void ClearCleanupReview()
+    {
+        _cleanupScope = null;
+        _cleanupSourceSessions = [];
+        _cleanupExcludedSessionIds.Clear();
+        _cleanupConfirmationText = string.Empty;
+    }
+
+    private async Task ExecuteCleanupReviewAsync()
+    {
+        SessionBulkCleanupPlan? plan = PendingCleanupPlan;
+        if (plan is null)
         {
-            await Admin.CloseSessionAsync(session.SessionId);
+            return;
         }
 
+        if (!plan.HasIncludedSessions)
+        {
+            SetStatus("Restore at least one tracked session before executing cleanup.", true);
+            return;
+        }
+
+        if (plan.RequiresTypedConfirmation && !string.Equals(_cleanupConfirmationText.Trim(), plan.ConfirmationText, StringComparison.Ordinal))
+        {
+            SetStatus($"Type '{plan.ConfirmationText}' to execute this larger cleanup batch.", true);
+            return;
+        }
+
+        int closedCount = 0;
+        int missingCount = 0;
+
+        foreach (AdminSessionSnapshot session in plan.IncludedSessions)
+        {
+            bool closed = await Admin.CloseSessionAsync(session.SessionId);
+            if (closed)
+            {
+                closedCount++;
+            }
+            else
+            {
+                missingCount++;
+            }
+        }
+
+        _lastCleanupResult = SessionBulkCleanupView.BuildResult(plan, closedCount, missingCount);
+        SetStatus(_lastCleanupResult.Summary, closedCount == 0 && plan.IncludedCount != 0);
+        ClearCleanupReview();
         _selectedSession = null;
-        SetStatus("Filtered tracked sessions closed.", false);
-        Refresh();
-    }
-
-    private async Task CloseInvalidatedAsync()
-    {
-        foreach (AdminSessionSnapshot session in _sessions.Where(session => !session.IsHealthy).ToArray())
-        {
-            await Admin.CloseSessionAsync(session.SessionId);
-        }
-
-        if (_selectedSession is not null && !_selectedSession.IsHealthy)
-        {
-            _selectedSession = null;
-        }
-
-        SetStatus("Invalidated tracked sessions closed.", false);
-        Refresh();
+        RefreshCore();
     }
 
     private void SetStatus(string message, bool isError)
