@@ -25,6 +25,51 @@ public sealed class AdminConfigurationExportBundle
     public List<HsmDeviceProfile> DeviceProfiles { get; init; } = [];
 }
 
+public sealed record AdminConfigurationImportIssue(
+    string Scope,
+    string Severity,
+    string? DeviceName,
+    string? DeviceId,
+    string Message);
+
+public sealed record AdminConfigurationImportImpact(
+    AdminConfigurationImportMode Mode,
+    bool CanImport,
+    int FinalDeviceProfileCount,
+    int AddedDeviceProfileCount,
+    int UpdatedDeviceProfileCount,
+    int RemovedDeviceProfileCount,
+    int DuplicateDeviceProfileCount,
+    int InvalidDeviceProfileCount,
+    IReadOnlyList<string> AddedDeviceProfileNames,
+    IReadOnlyList<string> UpdatedDeviceProfileNames,
+    IReadOnlyList<string> RemovedDeviceProfileNames,
+    IReadOnlyList<string> Blockers,
+    string Summary);
+
+public sealed record AdminConfigurationImportAnalysis(
+    int ExistingDeviceProfileCount,
+    int ImportedDeviceProfileCount,
+    int ReadyDeviceProfileCount,
+    int DuplicateDeviceProfileCount,
+    int InvalidDeviceProfileCount,
+    AdminConfigurationImportImpact MergeImpact,
+    AdminConfigurationImportImpact ReplaceAllImpact,
+    IReadOnlyList<AdminConfigurationImportIssue> Issues);
+
+public sealed record AdminConfigurationImportPreview(
+    string SourceName,
+    string? Format,
+    int? SchemaVersion,
+    string? ProductName,
+    string? ProductVersion,
+    DateTimeOffset? ExportedUtc,
+    IReadOnlyList<string> IncludedSections,
+    IReadOnlyList<string> ExcludedSections,
+    IReadOnlyList<string> Problems,
+    IReadOnlyList<string> Warnings,
+    AdminConfigurationImportAnalysis Analysis);
+
 public sealed record AdminConfigurationImportResult(
     AdminConfigurationImportMode Mode,
     int ImportedDeviceProfileCount,

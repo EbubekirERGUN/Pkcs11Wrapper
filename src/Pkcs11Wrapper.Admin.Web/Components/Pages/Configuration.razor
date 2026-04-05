@@ -115,49 +115,181 @@
     <div class="col-lg-7">
         <div class="card shadow-sm h-100 feature-card workflow-card">
             <div class="card-header">Import</div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">Configuration file</label>
-                    <InputFile @key="_filePickerKey" class="form-control" OnChange="OnFileChanged" accept=".json,application/json" />
-                    @if (_selectedFile is not null)
+            <div class="card-body d-flex flex-column gap-4">
+                <div>
+                    <div class="mb-3">
+                        <label class="form-label">Configuration file</label>
+                        <InputFile @key="_filePickerKey" class="form-control" OnChange="OnFileChangedAsync" accept=".json,application/json" />
+                        @if (_selectedFile is not null)
+                        {
+                            <div class="form-text">Selected: @_selectedFile.Name (@FormatSize(_selectedFile.Size))</div>
+                        }
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Import mode</label>
+                        <InputSelect class="form-select" @bind-Value="_importMode">
+                            <option value="@AdminConfigurationImportMode.Merge">Merge existing configuration</option>
+                            <option value="@AdminConfigurationImportMode.ReplaceAll">Replace all existing configuration</option>
+                        </InputSelect>
+                        <div class="form-text">
+                            Merge updates matching device IDs and adds new profiles. Replace All overwrites the current device-profile set with the imported bundle.
+                        </div>
+                    </div>
+
+                    @if (_importMode == AdminConfigurationImportMode.ReplaceAll)
                     {
-                        <div class="form-text">Selected: @_selectedFile.Name (@FormatSize(_selectedFile.Size))</div>
+                        <div class="alert alert-warning small mb-3">
+                            Replace All will remove every currently configured device profile before the imported bundle is applied.
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <InputCheckbox class="form-check-input" @bind-Value="_acknowledgeReplaceAll" />
+                            <label class="form-check-label">I understand that Replace All overwrites the current device configuration.</label>
+                        </div>
                     }
-                </div>
 
-                <div class="mb-3">
-                    <label class="form-label">Import mode</label>
-                    <InputSelect class="form-select" @bind-Value="_importMode">
-                        <option value="@AdminConfigurationImportMode.Merge">Merge existing configuration</option>
-                        <option value="@AdminConfigurationImportMode.ReplaceAll">Replace all existing configuration</option>
-                    </InputSelect>
-                    <div class="form-text">
-                        Merge updates matching device IDs and adds new profiles. Replace All overwrites the current device-profile set with the imported bundle.
+                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                        <button class="btn btn-warning" @onclick="ImportAsync" disabled="@(!CanImportSelectedMode)">
+                            @(_isImporting ? "Importing..." : "Import configuration")
+                        </button>
+                        <button class="btn btn-outline-secondary" @onclick="RefreshPreviewAsync" disabled="@(_selectedFile is null || _isPreviewing || _isImporting)">
+                            @(_isPreviewing ? "Reviewing..." : "Refresh preview")
+                        </button>
+                        <button class="btn btn-outline-secondary" @onclick="ResetImportForm" disabled="@(_isImporting || _isPreviewing)">Reset</button>
                     </div>
                 </div>
 
-                @if (_importMode == AdminConfigurationImportMode.ReplaceAll)
-                {
-                    <div class="alert alert-warning small">
-                        Replace All will remove every currently configured device profile before the imported bundle is applied.
+                <div class="border rounded-3 p-3 bg-body-tertiary">
+                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                        <div>
+                            <div class="fw-semibold">Import preflight review</div>
+                            <div class="text-muted small">Selecting a bundle runs a read-only preview before any Merge or Replace All action is allowed.</div>
+                        </div>
+                        @if (_isPreviewing)
+                        {
+                            <span class="badge text-bg-info">Reviewing bundle…</span>
+                        }
+                        else if (_importPreview is not null)
+                        {
+                            <span class="badge @(SelectedImpact.CanImport ? "text-bg-success" : "text-bg-danger")">
+                                @(SelectedImpact.CanImport ? "Selected mode ready" : "Selected mode blocked")
+                            </span>
+                        }
                     </div>
 
-                    <div class="form-check mb-3">
-                        <InputCheckbox class="form-check-input" @bind-Value="_acknowledgeReplaceAll" />
-                        <label class="form-check-label">I understand that Replace All overwrites the current device configuration.</label>
-                    </div>
-                }
+                    @if (_selectedFile is null)
+                    {
+                        <div class="small text-muted mt-3">Choose a configuration export to see bundle metadata, validation issues, and Merge vs Replace All impact before import.</div>
+                    }
+                    else if (_isPreviewing && _importPreview is null)
+                    {
+                        <div class="small text-muted mt-3">Reading bundle metadata and comparing it with the current device profile set…</div>
+                    }
+                    else if (_importPreview is not null)
+                    {
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-3 col-6">
+                                <div class="surface-item h-100">
+                                    <div class="fw-semibold small text-uppercase text-muted">Current profiles</div>
+                                    <div class="display-6 metric-meta">@_importPreview.Analysis.ExistingDeviceProfileCount</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="surface-item h-100">
+                                    <div class="fw-semibold small text-uppercase text-muted">Bundle profiles</div>
+                                    <div class="display-6 metric-meta">@_importPreview.Analysis.ImportedDeviceProfileCount</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="surface-item h-100">
+                                    <div class="fw-semibold small text-uppercase text-muted">Ready</div>
+                                    <div class="display-6 metric-meta text-success">@_importPreview.Analysis.ReadyDeviceProfileCount</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="surface-item h-100">
+                                    <div class="fw-semibold small text-uppercase text-muted">Bundle issues</div>
+                                    <div class="display-6 metric-meta @((_importPreview.Analysis.InvalidDeviceProfileCount + _importPreview.Analysis.DuplicateDeviceProfileCount) == 0 ? "text-success" : "text-danger")">
+                                        @(_importPreview.Analysis.InvalidDeviceProfileCount + _importPreview.Analysis.DuplicateDeviceProfileCount)
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
-                <div class="d-flex gap-2 align-items-center">
-                    <button class="btn btn-warning" @onclick="ImportAsync" disabled="@(_selectedFile is null || _isImporting)">
-                        @(_isImporting ? "Importing..." : "Import configuration")
-                    </button>
-                    <button class="btn btn-outline-secondary" @onclick="ResetImportForm" disabled="@_isImporting">Reset</button>
+                        @if (_importPreview.Problems.Count > 0)
+                        {
+                            <div class="alert alert-danger mt-3 mb-0">
+                                <div class="fw-semibold">Blocking bundle problems</div>
+                                <ul class="small mt-2 mb-0">
+                                    @foreach (string problem in _importPreview.Problems)
+                                    {
+                                        <li>@problem</li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+
+                        @if (_importPreview.Warnings.Count > 0)
+                        {
+                            <div class="alert alert-warning mt-3 mb-0">
+                                <div class="fw-semibold">Bundle warnings</div>
+                                <ul class="small mt-2 mb-0">
+                                    @foreach (string warning in _importPreview.Warnings)
+                                    {
+                                        <li>@warning</li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+
+                        <div class="surface-item mt-3">
+                            <div class="fw-semibold mb-2">Bundle metadata</div>
+                            <div class="small d-flex flex-column gap-1">
+                                <div><strong>Source:</strong> @_importPreview.SourceName</div>
+                                <div><strong>Format / schema:</strong> @(_importPreview.Format ?? "—") / @(_importPreview.SchemaVersion?.ToString() ?? "—")</div>
+                                <div><strong>Exported from:</strong> @((string.IsNullOrWhiteSpace(_importPreview.ProductName) ? "Unknown product" : _importPreview.ProductName) + (string.IsNullOrWhiteSpace(_importPreview.ProductVersion) ? string.Empty : $" {_importPreview.ProductVersion}"))</div>
+                                <div><strong>Exported at:</strong> @(_importPreview.ExportedUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</div>
+                                <div><strong>Included:</strong> @FormatSections(_importPreview.IncludedSections)</div>
+                                <div><strong>Excluded:</strong> @FormatSections(_importPreview.ExcludedSections)</div>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-6">
+                                @RenderImpactCard(_importPreview.Analysis.MergeImpact, "Safest default for ongoing environments.")
+                            </div>
+                            <div class="col-md-6">
+                                @RenderImpactCard(_importPreview.Analysis.ReplaceAllImpact, "Use intentionally for rebuilds and migrations.")
+                            </div>
+                        </div>
+
+                        @if (_importPreview.Analysis.Issues.Count > 0)
+                        {
+                            <div class="surface-item mt-3">
+                                <div class="fw-semibold mb-2">Detected issues</div>
+                                <ul class="small mb-0 d-flex flex-column gap-2">
+                                    @foreach (AdminConfigurationImportIssue issue in _importPreview.Analysis.Issues)
+                                    {
+                                        <li>
+                                            <span class="badge text-bg-danger me-2">@issue.Scope</span>
+                                            <strong>@(string.IsNullOrWhiteSpace(issue.DeviceName) ? "Bundle" : issue.DeviceName)</strong>
+                                            @if (!string.IsNullOrWhiteSpace(issue.DeviceId))
+                                            {
+                                                <span class="text-muted">(@issue.DeviceId)</span>
+                                            }
+                                            <div class="text-muted">@issue.Message</div>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                    }
                 </div>
 
                 @if (_lastImportResult is not null)
                 {
-                    <div class="alert alert-info mt-3 mb-0">
+                    <div class="alert alert-info mb-0">
                         <div class="fw-semibold">Latest import result</div>
                         <div>@_lastImportResult.Summary</div>
                         <div class="small mt-2">
@@ -178,10 +310,11 @@
                     </div>
                 }
 
-                <div class="border-top mt-4 pt-3">
+                <div class="border-top pt-3">
                     <div class="fw-semibold mb-2">Import safety checklist</div>
                     <ol class="small ps-3 mb-0 d-flex flex-column gap-1">
                         <li>Export the current bundle first.</li>
+                        <li>Review the preflight diff before committing Merge or Replace All.</li>
                         <li>Use <strong>Merge</strong> when you want the safest default for ongoing environments.</li>
                         <li>Use <strong>Replace All</strong> only when rebuilding or migrating the device-profile set intentionally.</li>
                         <li>Remember that local users, audit history, protected PIN cache, and Data Protection keys stay on the current host.</li>
@@ -194,29 +327,77 @@
 
 @code {
     private const long MaxImportBytes = 1024 * 1024;
+    private const int PreviewNameLimit = 6;
 
     private IBrowserFile? _selectedFile;
     private AdminConfigurationImportMode _importMode = AdminConfigurationImportMode.Merge;
     private AdminConfigurationImportResult? _lastImportResult;
+    private AdminConfigurationImportPreview? _importPreview;
     private string? _statusMessage;
     private bool _statusIsError;
     private bool _acknowledgeReplaceAll;
     private bool _isImporting;
+    private bool _isPreviewing;
     private Guid _filePickerKey = Guid.NewGuid();
     private int _deviceCount;
 
     protected override Task OnInitializedAsync() => LoadSummaryAsync();
+
+    private bool CanImportSelectedMode
+        => _selectedFile is not null
+           && _importPreview is not null
+           && !_isPreviewing
+           && !_isImporting
+           && SelectedImpact.CanImport
+           && (_importMode != AdminConfigurationImportMode.ReplaceAll || _acknowledgeReplaceAll);
+
+    private AdminConfigurationImportImpact SelectedImpact
+        => _importMode == AdminConfigurationImportMode.ReplaceAll
+            ? _importPreview?.Analysis.ReplaceAllImpact ?? EmptyImpact(AdminConfigurationImportMode.ReplaceAll)
+            : _importPreview?.Analysis.MergeImpact ?? EmptyImpact(AdminConfigurationImportMode.Merge);
 
     private async Task LoadSummaryAsync()
     {
         _deviceCount = (await Admin.GetDevicesAsync()).Count;
     }
 
-    private void OnFileChanged(InputFileChangeEventArgs args)
+    private async Task OnFileChangedAsync(InputFileChangeEventArgs args)
     {
         _selectedFile = args.FileCount == 0 ? null : args.File;
         _lastImportResult = null;
         _statusMessage = null;
+        _statusIsError = false;
+        _importPreview = null;
+        _acknowledgeReplaceAll = false;
+
+        if (_selectedFile is not null)
+        {
+            await RefreshPreviewAsync();
+        }
+    }
+
+    private async Task RefreshPreviewAsync()
+    {
+        if (_selectedFile is null)
+        {
+            return;
+        }
+
+        _isPreviewing = true;
+        try
+        {
+            await using Stream stream = _selectedFile.OpenReadStream(MaxImportBytes);
+            _importPreview = await Admin.PreviewConfigurationImportAsync(stream, _selectedFile.Name);
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.Message;
+            _statusIsError = true;
+        }
+        finally
+        {
+            _isPreviewing = false;
+        }
     }
 
     private async Task ImportAsync()
@@ -249,6 +430,69 @@
         }
     }
 
+    private RenderFragment RenderImpactCard(AdminConfigurationImportImpact impact, string note) => @<div class="card shadow-sm h-100 @GetImpactCardClass(impact)">
+        <div class="card-body d-flex flex-column gap-3">
+            <div>
+                <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                    <div>
+                        <div class="fw-semibold">@GetImpactTitle(impact.Mode)</div>
+                        <div class="text-muted small">@note</div>
+                    </div>
+                    <span class="badge @(impact.CanImport ? "text-bg-success" : "text-bg-danger")">
+                        @(impact.CanImport ? "Ready" : "Blocked")
+                    </span>
+                </div>
+                <div class="small mt-2">@impact.Summary</div>
+            </div>
+
+            <div class="small d-flex flex-column gap-1">
+                <div><strong>Added:</strong> @impact.AddedDeviceProfileCount</div>
+                <div><strong>Updated:</strong> @impact.UpdatedDeviceProfileCount</div>
+                <div><strong>Removed:</strong> @impact.RemovedDeviceProfileCount</div>
+                <div><strong>Duplicate/conflicting:</strong> @impact.DuplicateDeviceProfileCount</div>
+                <div><strong>Invalid:</strong> @impact.InvalidDeviceProfileCount</div>
+                <div><strong>Final profiles:</strong> @impact.FinalDeviceProfileCount</div>
+            </div>
+
+            @if (impact.AddedDeviceProfileNames.Count > 0)
+            {
+                <div>
+                    <div class="fw-semibold small text-uppercase text-muted">Added</div>
+                    <div class="small">@FormatPreviewNames(impact.AddedDeviceProfileNames)</div>
+                </div>
+            }
+
+            @if (impact.UpdatedDeviceProfileNames.Count > 0)
+            {
+                <div>
+                    <div class="fw-semibold small text-uppercase text-muted">Updated</div>
+                    <div class="small">@FormatPreviewNames(impact.UpdatedDeviceProfileNames)</div>
+                </div>
+            }
+
+            @if (impact.RemovedDeviceProfileNames.Count > 0)
+            {
+                <div>
+                    <div class="fw-semibold small text-uppercase text-muted">Removed</div>
+                    <div class="small">@FormatPreviewNames(impact.RemovedDeviceProfileNames)</div>
+                </div>
+            }
+
+            @if (impact.Blockers.Count > 0)
+            {
+                <div class="mt-auto">
+                    <div class="fw-semibold small text-uppercase text-muted">Blockers</div>
+                    <ul class="small mb-0">
+                        @foreach (string blocker in impact.Blockers)
+                        {
+                            <li>@blocker</li>
+                        }
+                    </ul>
+                </div>
+            }
+        </div>
+    </div>;
+
     private void ResetImportForm()
         => ResetImportForm(clearStatus: true, keepResult: false);
 
@@ -257,6 +501,8 @@
         _selectedFile = null;
         _acknowledgeReplaceAll = false;
         _importMode = AdminConfigurationImportMode.Merge;
+        _importPreview = null;
+        _isPreviewing = false;
         _filePickerKey = Guid.NewGuid();
         if (clearStatus)
         {
@@ -268,6 +514,37 @@
         {
             _lastImportResult = null;
         }
+    }
+
+    private static AdminConfigurationImportImpact EmptyImpact(AdminConfigurationImportMode mode)
+        => new(mode, false, 0, 0, 0, 0, 0, 0, [], [], [], [], string.Empty);
+
+    private string GetImpactCardClass(AdminConfigurationImportImpact impact)
+    {
+        List<string> classes = ["border"];
+        if (_importMode == impact.Mode)
+        {
+            classes.Add(impact.CanImport ? "border-primary" : "border-danger");
+        }
+
+        return string.Join(' ', classes);
+    }
+
+    private static string GetImpactTitle(AdminConfigurationImportMode mode)
+        => mode == AdminConfigurationImportMode.ReplaceAll ? "Replace All impact" : "Merge impact";
+
+    private static string FormatSections(IReadOnlyList<string> sections)
+        => sections.Count == 0 ? "—" : string.Join(", ", sections);
+
+    private static string FormatPreviewNames(IReadOnlyList<string> names)
+    {
+        IReadOnlyList<string> preview = names.Take(PreviewNameLimit).ToArray();
+        if (names.Count <= PreviewNameLimit)
+        {
+            return string.Join(", ", preview);
+        }
+
+        return $"{string.Join(", ", preview)} +{names.Count - PreviewNameLimit} more";
     }
 
     private static string FormatSize(long bytes)
