@@ -120,6 +120,7 @@ builder.Services.AddSingleton<ProtectedPinStore>();
 builder.Services.AddSingleton<Pkcs11LabTemplateStore>();
 builder.Services.AddSingleton<IDeviceDependencyCleanupService, DeviceDependencyCleanupService>();
 builder.Services.AddSingleton<DeviceProfileService>();
+builder.Services.AddSingleton<AdminPkcs11Runtime>();
 builder.Services.AddSingleton<AdminBootstrapDeviceSeeder>();
 builder.Services.AddSingleton(sp => new AdminSessionRegistry(sp.GetRequiredService<AdminSessionRegistryOptions>()));
 builder.Services.AddSingleton<LocalAdminUserStore>();

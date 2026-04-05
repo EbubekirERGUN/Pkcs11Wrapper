@@ -9,7 +9,7 @@ using Pkcs11Wrapper.Native;
 
 namespace Pkcs11Wrapper.Admin.Application.Services;
 
-public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization, IDeviceDependencyCleanupService? dependencyCleanup = null, Pkcs11TelemetryService? pkcs11Telemetry = null)
+public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLogService auditLog, AdminSessionRegistry sessionRegistry, IAdminAuthorizationService authorization, AdminPkcs11Runtime pkcs11Runtime, IDeviceDependencyCleanupService? dependencyCleanup = null, Pkcs11TelemetryService? pkcs11Telemetry = null)
 {
     private const string DestroyConfirmationPrefix = "DESTROY ";
     private const string ConfigurationFormat = "Pkcs11Wrapper.Admin.Configuration";
@@ -318,7 +318,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         try
         {
-            using Pkcs11Module module = CreateInitializedModule(device);
+            using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+            Pkcs11Module module = moduleLease.Module;
             LabExecutionPayload execution = request.Operation switch
             {
                 Pkcs11LabOperation.ModuleInfo => ExecuteModuleInfoLab(module),
@@ -376,7 +377,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
 
         try
         {
-            using Pkcs11Module module = CreateInitializedModule(device);
+            using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+            Pkcs11Module module = moduleLease.Module;
             Pkcs11ModuleInfo info = module.GetInfo();
             int slotCount = module.GetSlotCount();
             HsmConnectionTestResult result = new(true, $"Connected. Slots discovered: {slotCount}.", slotCount, module.SupportsInterfaceDiscovery, info.LibraryDescription, info.ManufacturerId);
@@ -394,7 +396,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
 
         int slotCount = module.GetSlotCount();
         if (slotCount == 0)
@@ -449,7 +452,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(slotIdValue), readWriteRequested: false);
         using Pkcs11Session session = sessionOpen.Session;
 
@@ -467,7 +471,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         ValidateKeyObjectPageRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(slotIdValue), readWriteRequested: false);
         using Pkcs11Session session = sessionOpen.Session;
         string pinNote = LoginIfProvided(session, userPin);
@@ -484,7 +489,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(slotIdValue), readWriteRequested: false);
         using Pkcs11Session session = sessionOpen.Session;
         string pinNote = LoginIfProvided(session, userPin);
@@ -498,7 +504,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         authorization.DemandViewer();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
 
         bool tokenPresent = module.TryGetTokenInfo(new Pkcs11SlotId(slotIdValue), out _);
         List<string> warnings = [];
@@ -586,7 +593,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] label = Encoding.UTF8.GetBytes(request.Label.Trim());
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "generate AES keys");
         LoginUserToleratingAlreadyLoggedIn(session, userPin);
@@ -607,7 +615,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] value = ParseRequiredHex(request.ValueHex, nameof(request.ValueHex));
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "import AES keys");
         LoginUserToleratingAlreadyLoggedIn(session, userPin);
@@ -628,7 +637,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         byte[] exponent = ParseRequiredHex(request.PublicExponentHex, nameof(request.PublicExponentHex));
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "generate RSA key pairs");
         LoginUserToleratingAlreadyLoggedIn(session, userPin);
@@ -648,7 +658,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         authorization.DemandOperator();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        Pkcs11Module module = CreateInitializedModule(device);
+        AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         try
         {
             SessionOpenResult sessionOpen = OpenCompatibleSession(module, new Pkcs11SlotId(slotIdValue), readWrite);
@@ -665,7 +676,24 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
                 notes += " (opened as read-write after the module rejected a read-only session request)";
             }
 
-            AdminSessionSnapshot snapshot = sessionRegistry.Register(device.Id, device.Name, module, session, sessionOpen.OpenedReadWrite, notes);
+            AdminSessionSnapshot snapshot = sessionRegistry.Register(
+                device.Id,
+                device.Name,
+                module,
+                session,
+                sessionOpen.OpenedReadWrite,
+                notes,
+                releaseAction: () =>
+                {
+                    try
+                    {
+                        session.Dispose();
+                    }
+                    finally
+                    {
+                        moduleLease.Dispose();
+                    }
+                });
             string auditDetail = sessionOpen.EscalatedToReadWrite
                 ? "Opened read-write session after the module rejected a read-only session request."
                 : $"Opened {(sessionOpen.OpenedReadWrite ? "read-write" : "read-only")} session.";
@@ -674,7 +702,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
         catch
         {
-            module.Dispose();
+            moduleLease.Dispose();
             throw;
         }
     }
@@ -728,7 +756,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
     {
         authorization.DemandOperator();
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         module.CloseAllSessions(new Pkcs11SlotId(slotIdValue));
         sessionRegistry.MarkInvalidatedForSlot(deviceId, slotIdValue, "Invalidated by CloseAllSessions on the same slot.", "CloseAllSessions");
         await auditLog.WriteAsync("Session", "CloseAll", $"{device.Name}/slot-{slotIdValue}", "Success", "Invoked CloseAllSessions on slot.", cancellationToken: cancellationToken);
@@ -740,7 +769,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         ValidateDestroyRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         LoginUserToleratingAlreadyLoggedIn(session, request.UserPin);
         session.DestroyObject(new Pkcs11ObjectHandle(request.Handle));
@@ -753,7 +783,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         ValidateUpdateObjectAttributesRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "update object attributes");
         LoginUserToleratingAlreadyLoggedIn(session, userPin);
@@ -772,7 +803,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         ValidateCopyObjectRequest(request);
 
         HsmDeviceProfile device = await RequireDeviceAsync(deviceId, cancellationToken);
-        using Pkcs11Module module = CreateInitializedModule(device);
+        using AdminPkcs11ModuleLease moduleLease = CreateInitializedModuleLease(device);
+        Pkcs11Module module = moduleLease.Module;
         using Pkcs11Session session = module.OpenSession(new Pkcs11SlotId(slotIdValue), readWrite: true);
         RequireUserPin(userPin, "copy objects");
         LoginUserToleratingAlreadyLoggedIn(session, userPin);
@@ -2695,12 +2727,8 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             Pkcs11ObjectAttribute.Bytes(Pkcs11AttributeTypes.Id, id)
         ];
 
-    private Pkcs11Module CreateInitializedModule(HsmDeviceProfile device)
-    {
-        Pkcs11Module module = Pkcs11Module.Load(device.ModulePath, pkcs11Telemetry?.CreateListener(device));
-        module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
-        return module;
-    }
+    private AdminPkcs11ModuleLease CreateInitializedModuleLease(HsmDeviceProfile device)
+        => pkcs11Runtime.Acquire(device, pkcs11Telemetry?.CreateListener(device));
 
     private static bool RequiresDependentStateReconciliation(HsmDeviceProfile? existing, HsmDeviceProfile updated)
         => existing is not null && (!string.Equals(existing.ModulePath, updated.ModulePath, StringComparison.Ordinal) || existing.IsEnabled != updated.IsEnabled);
