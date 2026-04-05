@@ -20,6 +20,10 @@
 
 - `linux-softhsm-benchmarks` (weekly/manual benchmark lane plus targeted push/PR validation for benchmark/reporting and performance-sensitive source changes)
 
+`.github/workflows/crypto-api-performance.yml` defines:
+
+- `linux-crypto-api-performance` (manual Crypto API throughput/latency regression lane for sign/random/mixed workloads across single-instance and multi-instance topologies)
+
 Triggers:
 
 - push to `main` and `master`
@@ -38,6 +42,11 @@ Benchmark workflow triggers:
 - push to `main` / `master` when benchmark workflow/reporting inputs change
 - pull requests that change benchmark workflow/reporting inputs
 - targeted source changes in `benchmarks/**`, `src/Pkcs11Wrapper/**`, `src/Pkcs11Wrapper.Native/**`, `tests/Pkcs11Wrapper.Native.Tests/**`, `samples/Pkcs11Wrapper.Smoke/**`, benchmark scripts, and committed benchmark baselines
+
+Crypto API performance workflow triggers:
+
+- `workflow_dispatch` only
+- no push/PR auto-trigger, by design, because the service-level lane is heavier and intended for deliberate reruns instead of always-on CI noise
 
 Workflow-level behavior:
 
@@ -147,6 +156,14 @@ Benchmark coverage from `benchmarks.yml` guarantees that, whenever the workflow 
 - the latest benchmark run emits a GitHub-friendly job summary with date, environment, headline numbers, allocation figures, and optional committed-baseline deltas
 - the latest benchmark summary plus raw BenchmarkDotNet exports/logs are published as an Actions artifact
 - performance tracking stays repeatable instead of ad-hoc
+
+Crypto API performance coverage from `crypto-api-performance.yml` guarantees that, whenever the workflow is manually dispatched:
+
+- the committed Crypto API perf harness still restores and executes on the pinned SDK
+- a real SoftHSM fixture plus temporary PostgreSQL shared state can still be provisioned for service-level measurement
+- the latest run still exercises sign/random/mixed workloads against both direct single-instance and gateway-fronted multi-instance topologies
+- throughput and latency summaries are emitted as markdown + JSON artifacts instead of another ad-hoc console capture
+- heavier service-level performance checks stay available without forcing every push through them
 
 ## Fixture behavior in CI
 
@@ -262,6 +279,18 @@ If you want to refresh the committed Linux baseline after reviewing the new numb
 
 ```bash
 ./eng/run-benchmarks.sh --update-docs
+```
+
+Local Crypto API performance equivalent:
+
+```bash
+./eng/run-cryptoapi-perf.sh --profile=baseline
+```
+
+If you want to refresh the committed Crypto API baseline after reviewing the new numbers:
+
+```bash
+./eng/run-cryptoapi-perf.sh --profile=baseline --update-docs
 ```
 
 Windows local equivalent:
