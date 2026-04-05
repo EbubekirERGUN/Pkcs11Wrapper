@@ -33,16 +33,13 @@
     </div>
 </section>
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
-{
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="keys-status">@_statusMessage</div>
-}
+<StatusAnnouncement Message="@_statusMessage" IsError="@_statusIsError" TestId="keys-status" />
 
 <div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-lg-3">
             <label class="form-label">Device</label>
-            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync" data-testid="keys-device">
+            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync" aria-label="Keys device" data-testid="keys-device">
                 <option value="">Select device...</option>
                 @foreach (HsmDeviceProfile device in _devices)
                 {
@@ -52,7 +49,7 @@
         </div>
         <div class="col-lg-2">
             <label class="form-label">Slot</label>
-            <select class="form-select" @bind="_selectedSlotId" @bind:after="OnSelectedSlotChangedAsync" data-testid="keys-slot">
+            <select class="form-select" @bind="_selectedSlotId" @bind:after="OnSelectedSlotChangedAsync" aria-label="Keys slot" data-testid="keys-slot">
                 <option value="">Select slot...</option>
                 @foreach (HsmSlotSummary slot in _slots)
                 {
@@ -62,15 +59,17 @@
         </div>
         <div class="col-lg-2">
             <label class="form-label">Load-time Label Filter</label>
-            <input class="form-control" @bind="_labelFilter" data-testid="keys-label-filter" />
+            <input class="form-control" @bind="_labelFilter" aria-label="Load-time label filter" data-testid="keys-label-filter" />
             <div class="form-text">Sent to the server-side PKCS#11 search before the object list is loaded.</div>
         </div>
         <div class="col-lg-2">
             <label class="form-label">User PIN</label>
-            <input class="form-control" type="password" @bind="_userPin" data-testid="keys-user-pin" />
+            <input class="form-control" type="password" @bind="_userPin" aria-label="User PIN" data-testid="keys-user-pin" />
             <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" @bind="_rememberPin" />
-                <label class="form-check-label">Remember in protected local storage</label>
+                <label class="form-check-label d-inline-flex align-items-center gap-2">
+                    <input class="form-check-input m-0" type="checkbox" @bind="_rememberPin" aria-label="Remember PIN in protected local storage" />
+                    <span>Remember in protected local storage</span>
+                </label>
             </div>
         </div>
         <div class="col-lg-3 d-flex gap-2">
@@ -133,15 +132,15 @@
                 @RenderOperationWarnings(GetAesWarnings())
                 <div class="col-md-6">
                     <label class="form-label">Label</label>
-                    <input class="form-control" @bind="_aesRequest.Label" />
+                    <input class="form-control" @bind="_aesRequest.Label" aria-label="AES key label" />
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">ID (hex)</label>
-                    <input class="form-control" @bind="_aesRequest.IdHex" />
+                    <input class="form-control" @bind="_aesRequest.IdHex" aria-label="AES key identifier in hex" />
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Size</label>
-                    <select class="form-select" @bind="_aesRequest.SizeBytes">
+                    <select class="form-select" @bind="_aesRequest.SizeBytes" aria-label="AES key size">
                         <option value="16">128-bit</option>
                         <option value="24">192-bit</option>
                         <option value="32">256-bit</option>
@@ -175,15 +174,15 @@
                 @RenderOperationWarnings(GetImportWarnings())
                 <div class="col-md-6">
                     <label class="form-label">Label</label>
-                    <input class="form-control" @bind="_importAesRequest.Label" />
+                    <input class="form-control" @bind="_importAesRequest.Label" aria-label="Imported AES key label" />
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">ID (hex)</label>
-                    <input class="form-control" @bind="_importAesRequest.IdHex" />
+                    <input class="form-control" @bind="_importAesRequest.IdHex" aria-label="Imported AES key identifier in hex" />
                 </div>
                 <div class="col-12">
                     <label class="form-label">Key Value (hex)</label>
-                    <textarea class="form-control font-monospace" rows="4" @bind="_importAesRequest.ValueHex"></textarea>
+                    <textarea class="form-control font-monospace" rows="4" @bind="_importAesRequest.ValueHex" aria-label="AES key value in hex"></textarea>
                     <div class="form-text">Raw key import uses <code>C_CreateObject</code> with AES secret-key attributes. Keep this field local and short-lived.</div>
                 </div>
                 <div class="col-12 d-flex flex-wrap gap-3 align-items-center">
@@ -212,15 +211,15 @@
                 @RenderOperationWarnings(GetRsaWarnings())
                 <div class="col-md-6">
                     <label class="form-label">Label</label>
-                    <input class="form-control" @bind="_rsaRequest.Label" />
+                    <input class="form-control" @bind="_rsaRequest.Label" aria-label="RSA key pair label" />
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">ID (hex)</label>
-                    <input class="form-control" @bind="_rsaRequest.IdHex" />
+                    <input class="form-control" @bind="_rsaRequest.IdHex" aria-label="RSA key pair identifier in hex" />
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Modulus bits</label>
-                    <select class="form-select" @bind="_rsaRequest.ModulusBits">
+                    <select class="form-select" @bind="_rsaRequest.ModulusBits" aria-label="RSA modulus bits">
                         <option value="1024">1024</option>
                         <option value="2048">2048</option>
                         <option value="3072">3072</option>
@@ -229,7 +228,7 @@
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Public exponent</label>
-                    <input class="form-control" @bind="_rsaRequest.PublicExponentHex" />
+                    <input class="form-control" @bind="_rsaRequest.PublicExponentHex" aria-label="RSA public exponent in hex" />
                 </div>
                 <div class="col-md-4 d-flex align-items-end">
                     @CapabilityCheckbox(() => _rsaRequest.Token, value => _rsaRequest.Token = value, "Token objects")
@@ -291,11 +290,11 @@
         <div class="card-body row g-3 align-items-end">
             <div class="col-xl-4 col-lg-5 col-md-6">
                 <label class="form-label">Search</label>
-                <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnKeyViewChangedAsync" placeholder="handle, label, id, class, key type..." />
+                <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnKeyViewChangedAsync" aria-label="Search loaded keys and objects" placeholder="handle, label, id, class, key type..." />
             </div>
             <div class="col-xl-2 col-lg-3 col-md-6">
                 <label class="form-label">Class</label>
-                <select class="form-select" @bind="_classFilter" @bind:after="OnKeyViewChangedAsync">
+                <select class="form-select" @bind="_classFilter" @bind:after="OnKeyViewChangedAsync" aria-label="Object class filter">
                     <option value="all">All classes</option>
                     <option value="secretkey">Secret Key</option>
                     <option value="privatekey">Private Key</option>
@@ -305,7 +304,7 @@
             </div>
             <div class="col-xl-2 col-lg-4 col-md-6">
                 <label class="form-label">Capability</label>
-                <select class="form-select" @bind="_capabilityFilter" @bind:after="OnKeyViewChangedAsync">
+                <select class="form-select" @bind="_capabilityFilter" @bind:after="OnKeyViewChangedAsync" aria-label="Capability filter">
                     <option value="all">All capabilities</option>
                     <option value="encrypt">Encrypt</option>
                     <option value="decrypt">Decrypt</option>
@@ -317,7 +316,7 @@
             </div>
             <div class="col-xl-2 col-lg-4 col-md-6">
                 <label class="form-label">Sort</label>
-                <select class="form-select" @bind="_sortMode" @bind:after="OnKeyViewChangedAsync">
+                <select class="form-select" @bind="_sortMode" @bind:after="OnKeyViewChangedAsync" aria-label="Keys sort order">
                     <option value="handle">Handle</option>
                     <option value="label">Label</option>
                     <option value="class">Class</option>
@@ -326,7 +325,7 @@
             </div>
             <div class="col-xl-2 col-lg-4 col-md-6">
                 <label class="form-label">Page size</label>
-                <select class="form-select" @bind="_pageSize" @bind:after="OnPageSizeChangedAsync">
+                <select class="form-select" @bind="_pageSize" @bind:after="OnPageSizeChangedAsync" aria-label="Keys page size">
                     <option value="10">10</option>
                     <option value="25">25</option>
                     <option value="50">50</option>
@@ -351,15 +350,16 @@
             {
                 <div class="table-responsive table-shell">
                     <table class="table table-striped table-hover align-middle" data-testid="keys-table">
+                        <caption class="visually-hidden">Loaded PKCS#11 objects for the selected device and slot, including handles, labels, identifiers, object classes, key types, capability summaries, and actions.</caption>
                         <thead>
                             <tr>
-                                <th>Handle</th>
-                                <th>Label</th>
-                                <th>ID</th>
-                                <th>Class</th>
-                                <th>Key Type</th>
-                                <th>Capabilities</th>
-                                <th class="text-end">Actions</th>
+                                <th scope="col">Handle</th>
+                                <th scope="col">Label</th>
+                                <th scope="col">ID</th>
+                                <th scope="col">Class</th>
+                                <th scope="col">Key Type</th>
+                                <th scope="col">Capabilities</th>
+                                <th scope="col" class="text-end">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -525,11 +525,11 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">New Label</label>
-                            <input class="form-control" @bind="_editRequest.Label" />
+                            <input class="form-control" @bind="_editRequest.Label" aria-label="Updated object label" />
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">ID (hex)</label>
-                            <input class="form-control" @bind="_editRequest.IdHex" />
+                            <input class="form-control" @bind="_editRequest.IdHex" aria-label="Updated object identifier in hex" />
                         </div>
                         <div class="col-12">
                             <div class="alert alert-warning small mb-0">Only attributes supported by both PKCS#11 and the token are updated. Disabled toggles below are obviously unsupported for the selected object type or because the object is not modifiable.</div>
@@ -575,11 +575,11 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">New Label</label>
-                            <input class="form-control" @bind="_copyRequest.Label" />
+                            <input class="form-control" @bind="_copyRequest.Label" aria-label="Copied object label" />
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">ID (hex)</label>
-                            <input class="form-control" @bind="_copyRequest.IdHex" />
+                            <input class="form-control" @bind="_copyRequest.IdHex" aria-label="Copied object identifier in hex" />
                         </div>
                         <div class="col-12">
                             <div class="alert alert-info small mb-0">This uses PKCS#11 <code>C_CopyObject</code>. The token still decides which attributes may be overridden during the copy.</div>
@@ -620,12 +620,14 @@
                         </ul>
                         <div class="mb-3">
                             <label class="form-label">Type exact confirmation text</label>
-                            <input class="form-control" @bind="_destroyRequest.ConfirmationText" />
+                            <input class="form-control" @bind="_destroyRequest.ConfirmationText" aria-label="Destroy confirmation text" />
                             <div class="form-text"><code>@DestroyConfirmationText</code></div>
                         </div>
                         <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" @bind="_destroyRequest.AcknowledgePermanentDeletion" />
-                            <label class="form-check-label">I understand this deletion is permanent.</label>
+                            <label class="form-check-label d-inline-flex align-items-center gap-2">
+                                <input class="form-check-input m-0" type="checkbox" @bind="_destroyRequest.AcknowledgePermanentDeletion" aria-label="Acknowledge that deletion is permanent" />
+                                <span>I understand this deletion is permanent.</span>
+                            </label>
                         </div>
                         <div class="d-flex gap-2">
                             <button class="btn btn-danger" @onclick="DestroyAsync" disabled="@(!_isOperator)">Destroy Now</button>

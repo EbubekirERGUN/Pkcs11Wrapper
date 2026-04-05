@@ -32,7 +32,7 @@
 
 @if (_integrity is not null)
 {
-    <div class="alert @(_integrity.IsValid ? "alert-success" : "alert-danger")">
+    <div class="alert @(_integrity.IsValid ? "alert-success" : "alert-danger")" role="@(_integrity.IsValid ? "status" : "alert")" aria-live="@(_integrity.IsValid ? "polite" : "assertive")" aria-atomic="true">
         <div class="fw-semibold">Audit integrity</div>
         <div>@_integrity.Summary</div>
         @if (!string.IsNullOrWhiteSpace(_integrity.FailureReason))
@@ -84,11 +84,11 @@
         </div>
         <div class="col-xl-4 col-lg-5 col-md-6">
             <label class="form-label">Search</label>
-            <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="actor, action, target, details..." />
+            <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnFiltersChanged" aria-label="Search audit logs" placeholder="actor, action, target, details..." />
         </div>
         <div class="col-xl-2 col-lg-4 col-md-6">
             <label class="form-label">Category</label>
-            <select class="form-select" @bind="_categoryFilter" @bind:after="OnFiltersChanged">
+            <select class="form-select" @bind="_categoryFilter" @bind:after="OnFiltersChanged" aria-label="Audit category filter">
                 <option value="">All categories</option>
                 @foreach (string category in AvailableCategories)
                 {
@@ -98,7 +98,7 @@
         </div>
         <div class="col-xl-2 col-lg-4 col-md-6">
             <label class="form-label">Outcome</label>
-            <select class="form-select" @bind="_outcomeFilter" @bind:after="OnFiltersChanged">
+            <select class="form-select" @bind="_outcomeFilter" @bind:after="OnFiltersChanged" aria-label="Audit outcome filter">
                 <option value="all">All outcomes</option>
                 <option value="success">Success only</option>
                 <option value="failure">Non-success only</option>
@@ -106,7 +106,7 @@
         </div>
         <div class="col-xl-2 col-lg-4 col-md-6">
             <label class="form-label">Page size</label>
-            <select class="form-select" @bind="_pageSize" @bind:after="OnPageSizeChanged">
+            <select class="form-select" @bind="_pageSize" @bind:after="OnPageSizeChanged" aria-label="Audit page size">
                 <option value="25">25</option>
                 <option value="50">50</option>
                 <option value="100">100</option>
@@ -135,16 +135,17 @@ else
 
     <div class="table-responsive table-shell">
         <table class="table table-striped align-middle">
+            <caption class="visually-hidden">Filtered audit log entries including timestamp, actor, roles, category, action, target, outcome, and details.</caption>
             <thead>
                 <tr>
-                    <th>When</th>
-                    <th>Actor</th>
-                    <th>Roles</th>
-                    <th>Category</th>
-                    <th>Action</th>
-                    <th>Target</th>
-                    <th>Outcome</th>
-                    <th>Details</th>
+                    <th scope="col">When</th>
+                    <th scope="col">Actor</th>
+                    <th scope="col">Roles</th>
+                    <th scope="col">Category</th>
+                    <th scope="col">Action</th>
+                    <th scope="col">Target</th>
+                    <th scope="col">Outcome</th>
+                    <th scope="col">Details</th>
                 </tr>
             </thead>
             <tbody>

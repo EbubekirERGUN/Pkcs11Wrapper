@@ -35,16 +35,13 @@
     </div>
 </section>
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
-{
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="slots-status">@_statusMessage</div>
-}
+<StatusAnnouncement Message="@_statusMessage" IsError="@_statusIsError" TestId="slots-status" />
 
 <div class="card shadow-sm mb-4 panel-toolbar-card feature-card">
     <div class="card-body row g-3 align-items-end">
         <div class="col-lg-4">
             <label class="form-label">Device</label>
-            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync" data-testid="slots-device">
+            <select class="form-select" @bind="_selectedDeviceId" @bind:after="OnSelectedDeviceChangedAsync" aria-label="Slot device" data-testid="slots-device">
                 <option value="">Select device...</option>
                 @foreach (HsmDeviceProfile device in _devices)
                 {
@@ -54,10 +51,12 @@
         </div>
         <div class="col-lg-4">
             <label class="form-label">Optional User PIN</label>
-            <input class="form-control" type="password" @bind="_userPin" data-testid="slots-user-pin" />
+            <input class="form-control" type="password" @bind="_userPin" aria-label="Optional user PIN" data-testid="slots-user-pin" />
             <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" @bind="_rememberPin" />
-                <label class="form-check-label">Remember this PIN in protected local storage</label>
+                <label class="form-check-label d-inline-flex align-items-center gap-2">
+                    <input class="form-check-input m-0" type="checkbox" @bind="_rememberPin" aria-label="Remember this PIN in protected local storage" />
+                    <span>Remember this PIN in protected local storage</span>
+                </label>
             </div>
         </div>
         <div class="col-lg-4 d-flex gap-2">
@@ -112,11 +111,11 @@
         <div class="card-body row g-3 align-items-end">
             <div class="col-lg-5">
                 <label class="form-label">Search</label>
-                <input class="form-control" @bind="_searchText" @bind:event="oninput" placeholder="slot description, token label, serial..." />
+                <input class="form-control" @bind="_searchText" @bind:event="oninput" aria-label="Search loaded slots" placeholder="slot description, token label, serial..." />
             </div>
             <div class="col-lg-3 col-md-6">
                 <label class="form-label">Token filter</label>
-                <select class="form-select" @bind="_tokenFilter">
+                <select class="form-select" @bind="_tokenFilter" aria-label="Token presence filter">
                     <option value="all">All slots</option>
                     <option value="present">Token present</option>
                     <option value="missing">No token</option>
@@ -124,7 +123,7 @@
             </div>
             <div class="col-lg-4 col-md-6">
                 <label class="form-label">Sort</label>
-                <select class="form-select" @bind="_sortMode">
+                <select class="form-select" @bind="_sortMode" aria-label="Slot sort order">
                     <option value="slot">Slot id</option>
                     <option value="token">Token label</option>
                     <option value="mechanisms">Mechanism count</option>
@@ -142,14 +141,15 @@
     {
         <div class="table-responsive table-shell">
             <table class="table table-striped align-middle" data-testid="slots-table">
+                <caption class="visually-hidden">Loaded slots for the selected device, including token presence, slot flags, supported mechanism counts, and direct slot actions.</caption>
                 <thead>
                     <tr>
-                        <th>Slot</th>
-                        <th>Description</th>
-                        <th>Token</th>
-                        <th>Flags</th>
-                        <th>Mechanisms</th>
-                        <th class="text-end">Actions</th>
+                        <th scope="col">Slot</th>
+                        <th scope="col">Description</th>
+                        <th scope="col">Token</th>
+                        <th scope="col">Flags</th>
+                        <th scope="col">Mechanisms</th>
+                        <th scope="col" class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -214,15 +214,16 @@
         </div>
         <div class="table-responsive table-shell">
         <table class="table table-sm table-bordered align-middle">
+            <caption class="visually-hidden">Tracked sessions that belong to the currently selected device, including mode, state, health, last operation, and close actions.</caption>
             <thead>
                 <tr>
-                    <th>Session</th>
-                    <th>Slot</th>
-                    <th>Mode</th>
-                    <th>State</th>
-                    <th>Health</th>
-                    <th>Last Operation</th>
-                    <th></th>
+                    <th scope="col">Session</th>
+                    <th scope="col">Slot</th>
+                    <th scope="col">Mode</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Health</th>
+                    <th scope="col">Last Operation</th>
+                    <th scope="col"></th>
                 </tr>
             </thead>
             <tbody>

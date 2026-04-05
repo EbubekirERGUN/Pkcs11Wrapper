@@ -54,8 +54,14 @@ h6 {
     letter-spacing: -0.03em;
 }
 
-h1:focus {
-    outline: none;
+h1:focus,
+h1:focus-visible,
+a:focus-visible,
+[tabindex="-1"]:focus,
+[tabindex="-1"]:focus-visible {
+    outline: 3px solid rgba(37, 99, 235, 0.42);
+    outline-offset: 0.3rem;
+    border-radius: 0.6rem;
 }
 
 p,

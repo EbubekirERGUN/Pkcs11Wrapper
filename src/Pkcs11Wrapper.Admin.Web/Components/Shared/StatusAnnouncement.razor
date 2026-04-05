@@ -1,0 +1,23 @@
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="alert @(IsError ? "alert-danger" : "alert-success")" role="@(IsError ? "alert" : "status")" aria-live="@(IsError ? "assertive" : "polite")" aria-atomic="true" @attributes="AdditionalAttributes">@Message</div>
+}
+
+@code {
+    [Parameter]
+    public string? Message { get; set; }
+
+    [Parameter]
+    public bool IsError { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    private IReadOnlyDictionary<string, object>? AdditionalAttributes
+        => string.IsNullOrWhiteSpace(TestId)
+            ? null
+            : new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                ["data-testid"] = TestId
+            };
+}

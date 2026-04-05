@@ -35,10 +35,7 @@
     </div>
 </section>
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
-{
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="devices-status">@_statusMessage</div>
-}
+<StatusAnnouncement Message="@_statusMessage" IsError="@_statusIsError" TestId="devices-status" />
 
 @if (_devices.Count != 0)
 {
@@ -91,19 +88,19 @@
 
                     <div class="mb-3">
                         <label class="form-label">Name</label>
-                        <InputText class="form-control" @bind-Value="_input.Name" data-testid="device-name" />
+                        <InputText class="form-control" @bind-Value="_input.Name" aria-label="Device name" data-testid="device-name" />
                     </div>
                     <div class="mb-3">
                         <label class="form-label">PKCS#11 Module Path</label>
-                        <InputText class="form-control" @bind-Value="_input.ModulePath" data-testid="device-module-path" />
+                        <InputText class="form-control" @bind-Value="_input.ModulePath" aria-label="PKCS#11 module path" data-testid="device-module-path" />
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Default Token Label</label>
-                        <InputText class="form-control" @bind-Value="_input.DefaultTokenLabel" data-testid="device-token-label" />
+                        <InputText class="form-control" @bind-Value="_input.DefaultTokenLabel" aria-label="Default token label" data-testid="device-token-label" />
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Vendor profile</label>
-                        <select class="form-select" @bind="_vendorSelection" @bind:after="OnVendorSelectionChanged" data-testid="device-vendor-profile">
+                        <select class="form-select" @bind="_vendorSelection" @bind:after="OnVendorSelectionChanged" aria-label="Vendor profile" data-testid="device-vendor-profile">
                             <option value="@DeviceVendorProfileCatalog.VendorNeutralSelectionId">Vendor-neutral / generic</option>
                             @foreach (DeviceVendorProfileDefinition profile in DeviceVendorProfileCatalog.Profiles)
                             {
@@ -126,11 +123,11 @@
                         <div class="row g-3 mb-3">
                             <div class="col-12">
                                 <label class="form-label">Vendor name</label>
-                                <InputText class="form-control" @bind-Value="_input.VendorName" data-testid="device-vendor-name" />
+                                <InputText class="form-control" @bind-Value="_input.VendorName" aria-label="Vendor name" data-testid="device-vendor-name" />
                             </div>
                             <div class="col-12">
                                 <label class="form-label">Vendor profile label</label>
-                                <InputText class="form-control" @bind-Value="_input.VendorProfileName" data-testid="device-vendor-profile-name" />
+                                <InputText class="form-control" @bind-Value="_input.VendorProfileName" aria-label="Vendor profile label" data-testid="device-vendor-profile-name" />
                                 <div class="form-text">Optional label such as client family, module wrapper, or standard PKCS#11 track for this vendor.</div>
                             </div>
                         </div>
@@ -138,11 +135,13 @@
 
                     <div class="mb-3">
                         <label class="form-label">Notes</label>
-                        <InputTextArea class="form-control" @bind-Value="_input.Notes" data-testid="device-notes" />
+                        <InputTextArea class="form-control" @bind-Value="_input.Notes" aria-label="Device notes" data-testid="device-notes" />
                     </div>
                     <div class="form-check mb-3">
-                        <InputCheckbox class="form-check-input" @bind-Value="_input.IsEnabled" />
-                        <label class="form-check-label">Enabled</label>
+                        <label class="form-check-label d-inline-flex align-items-center gap-2">
+                            <InputCheckbox class="form-check-input m-0" @bind-Value="_input.IsEnabled" aria-label="Enabled" />
+                            <span>Enabled</span>
+                        </label>
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary" disabled="@(!_isAdmin)" data-testid="device-save">Save</button>
@@ -168,11 +167,11 @@
             <div class="card-body border-bottom row g-3 align-items-end">
                 <div class="col-lg-5">
                     <label class="form-label">Search</label>
-                    <input class="form-control" @bind="_searchText" @bind:event="oninput" placeholder="name, path, token, vendor, notes..." />
+                    <input class="form-control" @bind="_searchText" @bind:event="oninput" aria-label="Search devices" placeholder="name, path, token, vendor, notes..." />
                 </div>
                 <div class="col-lg-3 col-md-6">
                     <label class="form-label">Status</label>
-                    <select class="form-select" @bind="_statusFilter">
+                    <select class="form-select" @bind="_statusFilter" aria-label="Device status filter">
                         <option value="all">All devices</option>
                         <option value="enabled">Enabled</option>
                         <option value="disabled">Disabled</option>
@@ -180,7 +179,7 @@
                 </div>
                 <div class="col-lg-4 col-md-6">
                     <label class="form-label">Sort</label>
-                    <select class="form-select" @bind="_sortMode">
+                    <select class="form-select" @bind="_sortMode" aria-label="Device sort order">
                         <option value="name">Name (A-Z)</option>
                         <option value="updated">Recently updated</option>
                         <option value="created">Recently created</option>
@@ -202,15 +201,16 @@
                 {
                     <div class="table-responsive table-shell">
                         <table class="table table-striped align-middle" data-testid="devices-table">
+                            <caption class="visually-hidden">Configured HSM devices with module path, default token label, vendor details, profile status, last update time, and available actions.</caption>
                             <thead>
                                 <tr>
-                                    <th>Name</th>
-                                    <th>Module Path</th>
-                                    <th>Token</th>
-                                    <th>Vendor</th>
-                                    <th>Status</th>
-                                    <th>Updated</th>
-                                    <th class="text-end">Actions</th>
+                                    <th scope="col">Name</th>
+                                    <th scope="col">Module Path</th>
+                                    <th scope="col">Token</th>
+                                    <th scope="col">Vendor</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Updated</th>
+                                    <th scope="col" class="text-end">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>

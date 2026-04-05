@@ -76,6 +76,16 @@
     box-shadow: 0 14px 24px rgba(2, 6, 23, 0.18);
 }
 
+.app-nav-item ::deep a.app-nav-link:focus-visible,
+.app-login-button:focus-visible,
+.app-logout-button:focus-visible {
+    outline: 3px solid rgba(191, 219, 254, 0.92);
+    outline-offset: 3px;
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(191, 219, 254, 0.42);
+    box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.18);
+}
+
 .app-nav-item ::deep a.app-nav-link.active {
     background: linear-gradient(135deg, rgba(37, 99, 235, 0.22) 0%, rgba(79, 70, 229, 0.24) 100%);
     border-color: rgba(96, 165, 250, 0.28);

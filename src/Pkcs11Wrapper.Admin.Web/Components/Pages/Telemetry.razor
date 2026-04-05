@@ -140,11 +140,11 @@
         </div>
         <div class="col-xl-4 col-lg-5 col-md-6">
             <label class="form-label">Search</label>
-            <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="device, native op, return value, actor, trace, field..." data-testid="telemetry-search" />
+            <input class="form-control" @bind="_searchText" @bind:event="oninput" @bind:after="OnFiltersChanged" aria-label="Search telemetry entries" placeholder="device, native op, return value, actor, trace, field..." data-testid="telemetry-search" />
         </div>
         <div class="col-xl-2 col-lg-4 col-md-6">
             <label class="form-label">Device</label>
-            <select class="form-select" @bind="_deviceFilter" @bind:after="OnFiltersChanged" data-testid="telemetry-device-filter">
+            <select class="form-select" @bind="_deviceFilter" @bind:after="OnFiltersChanged" aria-label="Telemetry device filter" data-testid="telemetry-device-filter">
                 <option value="">All devices</option>
                 @foreach (string device in AvailableDevices)
                 {
@@ -154,7 +154,7 @@
         </div>
         <div class="col-xl-2 col-lg-4 col-md-6">
             <label class="form-label">Operation</label>
-            <select class="form-select" @bind="_operationFilter" @bind:after="OnFiltersChanged">
+            <select class="form-select" @bind="_operationFilter" @bind:after="OnFiltersChanged" aria-label="Telemetry operation filter">
                 <option value="">All operations</option>
                 @foreach (string operation in AvailableOperations)
                 {
@@ -164,19 +164,19 @@
         </div>
         <div class="col-xl-2 col-lg-3 col-md-6">
             <label class="form-label">Slot</label>
-            <input class="form-control" @bind="_slotFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="decimal or hex" />
+            <input class="form-control" @bind="_slotFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" aria-label="Telemetry slot filter" placeholder="decimal or hex" />
         </div>
         <div class="col-xl-2 col-lg-3 col-md-6">
             <label class="form-label">Mechanism</label>
-            <input class="form-control" @bind="_mechanismFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" placeholder="0x1082 or 4226" />
+            <input class="form-control" @bind="_mechanismFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" aria-label="Telemetry mechanism filter" placeholder="0x1082 or 4226" />
         </div>
         <div class="col-xl-2 col-lg-3 col-md-6">
             <label class="form-label">Min duration (ms)</label>
-            <input class="form-control" @bind="_minDurationFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" inputmode="decimal" placeholder="250" data-testid="telemetry-min-duration" />
+            <input class="form-control" @bind="_minDurationFilter" @bind:event="oninput" @bind:after="OnFiltersChanged" aria-label="Minimum telemetry duration in milliseconds" inputmode="decimal" placeholder="250" data-testid="telemetry-min-duration" />
         </div>
         <div class="col-xl-2 col-lg-4 col-md-6">
             <label class="form-label">Status</label>
-            <select class="form-select" @bind="_statusFilter" @bind:after="OnFiltersChanged">
+            <select class="form-select" @bind="_statusFilter" @bind:after="OnFiltersChanged" aria-label="Telemetry status filter">
                 <option value="all">All statuses</option>
                 <option value="success">Success only</option>
                 <option value="non-success">Non-success</option>
@@ -186,7 +186,7 @@
         </div>
         <div class="col-xl-2 col-lg-3 col-md-6">
             <label class="form-label">Time range</label>
-            <select class="form-select" @bind="_timeRangeFilter" @bind:after="OnFiltersChanged">
+            <select class="form-select" @bind="_timeRangeFilter" @bind:after="OnFiltersChanged" aria-label="Telemetry time range filter">
                 <option value="all">All loaded</option>
                 <option value="1h">Last hour</option>
                 <option value="6h">Last 6 hours</option>
@@ -196,7 +196,7 @@
         </div>
         <div class="col-xl-2 col-lg-3 col-md-6">
             <label class="form-label">Page size</label>
-            <select class="form-select" @bind="_pageSize" @bind:after="OnPageSizeChanged">
+            <select class="form-select" @bind="_pageSize" @bind:after="OnPageSizeChanged" aria-label="Telemetry page size">
                 <option value="25">25</option>
                 <option value="50">50</option>
                 <option value="100">100</option>
@@ -266,13 +266,14 @@ else
                     {
                         <div class="table-responsive table-shell">
                             <table class="table table-striped align-middle mb-0" data-testid="telemetry-top-operations">
+                                <caption class="visually-hidden">Top telemetry operations in the current view with call counts, non-success counts, duration summaries, and focus actions.</caption>
                                 <thead>
                                     <tr>
-                                        <th>Operation</th>
-                                        <th>Calls</th>
-                                        <th>Non-success</th>
-                                        <th>Avg / max</th>
-                                        <th>Focus</th>
+                                        <th scope="col">Operation</th>
+                                        <th scope="col">Calls</th>
+                                        <th scope="col">Non-success</th>
+                                        <th scope="col">Avg / max</th>
+                                        <th scope="col">Focus</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -321,12 +322,13 @@ else
                     {
                         <div class="table-responsive table-shell">
                             <table class="table table-striped align-middle mb-0" data-testid="telemetry-failure-hotspots">
+                                <caption class="visually-hidden">Telemetry failure hotspots grouped by operation, device, and failure signature, with count, latest occurrence, and investigation actions.</caption>
                                 <thead>
                                     <tr>
-                                        <th>Failure slice</th>
-                                        <th>Count</th>
-                                        <th>Latest</th>
-                                        <th>Focus</th>
+                                        <th scope="col">Failure slice</th>
+                                        <th scope="col">Count</th>
+                                        <th scope="col">Latest</th>
+                                        <th scope="col">Focus</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -367,16 +369,17 @@ else
 
     <div class="table-responsive table-shell">
         <table class="table table-striped align-middle" data-testid="telemetry-table">
+            <caption class="visually-hidden">Filtered PKCS#11 telemetry entries with timestamp, device, operation, slot, mechanism, status, duration, and redacted details.</caption>
             <thead>
                 <tr>
-                    <th>When</th>
-                    <th>Device</th>
-                    <th>Operation</th>
-                    <th>Slot</th>
-                    <th>Mechanism</th>
-                    <th>Status</th>
-                    <th>Duration</th>
-                    <th>Details</th>
+                    <th scope="col">When</th>
+                    <th scope="col">Device</th>
+                    <th scope="col">Operation</th>
+                    <th scope="col">Slot</th>
+                    <th scope="col">Mechanism</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Duration</th>
+                    <th scope="col">Details</th>
                 </tr>
             </thead>
             <tbody>

@@ -31,10 +31,7 @@
     </div>
 </section>
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
-{
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="users-status">@_statusMessage</div>
-}
+<StatusAnnouncement Message="@_statusMessage" IsError="@_statusIsError" TestId="users-status" />
 
 @if (_snapshot is null)
 {
@@ -103,11 +100,11 @@ else
                 <div class="card-body row g-3">
                     <div class="col-12">
                         <label class="form-label">Username</label>
-                        <input class="form-control" @bind="_createUserName" @bind:event="oninput" placeholder="operator1" data-testid="users-create-username" />
+                        <input class="form-control" @bind="_createUserName" @bind:event="oninput" aria-label="Username" placeholder="operator1" data-testid="users-create-username" />
                     </div>
                     <div class="col-12">
                         <label class="form-label">Initial password</label>
-                        <input class="form-control" type="password" @bind="_createPassword" @bind:event="oninput" data-testid="users-create-password" />
+                        <input class="form-control" type="password" @bind="_createPassword" @bind:event="oninput" aria-label="Initial password" data-testid="users-create-password" />
                         <div class="form-text">At least 12 characters.</div>
                     </div>
                     <div class="col-12">
@@ -157,7 +154,7 @@ else
 
                         <div class="col-12">
                             <label class="form-label">Rotate password</label>
-                            <input class="form-control" type="password" @bind="_rotatePassword" @bind:event="oninput" data-testid="users-rotate-password" />
+                            <input class="form-control" type="password" @bind="_rotatePassword" @bind:event="oninput" aria-label="Rotate password" data-testid="users-rotate-password" />
                             <div class="form-text">Set a new password for this local user.</div>
                         </div>
                         <div class="col-12 d-flex gap-2 flex-wrap">
@@ -168,7 +165,7 @@ else
 
                         <div class="col-12">
                             <label class="form-label">Delete confirmation</label>
-                            <input class="form-control" @bind="_deleteConfirmation" @bind:event="oninput" placeholder="Type username to confirm" disabled="@_selectedUser.IsCurrentUser" />
+                            <input class="form-control" @bind="_deleteConfirmation" @bind:event="oninput" aria-label="Delete confirmation" placeholder="Type username to confirm" disabled="@_selectedUser.IsCurrentUser" />
                             <div class="form-text">Type <code>@_selectedUser.Username</code> to delete this user.</div>
                         </div>
                         <div class="col-12 d-flex gap-2 flex-wrap">
@@ -192,11 +189,11 @@ else
                 <div class="card-body border-bottom row g-3 align-items-end">
                     <div class="col-lg-5">
                         <label class="form-label">Search</label>
-                        <input class="form-control" @bind="_userSearchText" @bind:event="oninput" placeholder="username or role..." />
+                        <input class="form-control" @bind="_userSearchText" @bind:event="oninput" aria-label="Search local users" placeholder="username or role..." />
                     </div>
                     <div class="col-lg-3 col-md-6">
                         <label class="form-label">Role filter</label>
-                        <select class="form-select" @bind="_roleFilter">
+                        <select class="form-select" @bind="_roleFilter" aria-label="Local user role filter">
                             <option value="all">All users</option>
                             <option value="admin">Admin</option>
                             <option value="operator">Operator</option>
@@ -206,7 +203,7 @@ else
                     </div>
                     <div class="col-lg-4 col-md-6">
                         <label class="form-label">Sort</label>
-                        <select class="form-select" @bind="_sortMode">
+                        <select class="form-select" @bind="_sortMode" aria-label="Local user sort order">
                             <option value="username">Username (A-Z)</option>
                             <option value="newest">Newest first</option>
                             <option value="oldest">Oldest first</option>
@@ -223,12 +220,13 @@ else
                     {
                         <div class="table-responsive table-shell">
                             <table class="table table-hover align-middle mb-0">
+                                <caption class="visually-hidden">Local admin users with assigned roles, creation time, current-session markers, bootstrap status markers, and management actions.</caption>
                                 <thead>
                                     <tr>
-                                        <th>User</th>
-                                        <th>Roles</th>
-                                        <th>Created</th>
-                                        <th></th>
+                                        <th scope="col">User</th>
+                                        <th scope="col">Roles</th>
+                                        <th scope="col">Created</th>
+                                        <th scope="col"></th>
                                     </tr>
                                 </thead>
                                 <tbody>

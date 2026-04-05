@@ -32,10 +32,7 @@
     </div>
 </section>
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
-{
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
-}
+<StatusAnnouncement Message="@_statusMessage" IsError="@_statusIsError" TestId="sessions-status" />
 
 @if (_sessions.Count != 0)
 {
@@ -100,11 +97,11 @@
         </div>
         <div class="col-xl-3 col-lg-4 col-md-6">
             <label class="form-label">Search</label>
-            <input class="form-control" @bind="_searchText" @bind:event="oninput" placeholder="session id, device, slot, operation..." />
+            <input class="form-control" @bind="_searchText" @bind:event="oninput" aria-label="Search tracked sessions" placeholder="session id, device, slot, operation..." />
         </div>
         <div class="col-xl-2 col-lg-3 col-md-6">
             <label class="form-label">Health</label>
-            <select class="form-select" @bind="_healthFilter">
+            <select class="form-select" @bind="_healthFilter" aria-label="Session health filter">
                 <option value="all">All health states</option>
                 <option value="healthy">Healthy only</option>
                 <option value="invalidated">Invalidated only</option>
@@ -112,7 +109,7 @@
         </div>
         <div class="col-xl-2 col-lg-3 col-md-6">
             <label class="form-label">Device</label>
-            <select class="form-select" @bind="_deviceFilter">
+            <select class="form-select" @bind="_deviceFilter" aria-label="Session device filter">
                 <option value="">All devices</option>
                 @foreach (string deviceName in AvailableDevices)
                 {
@@ -122,7 +119,7 @@
         </div>
         <div class="col-xl-3 col-lg-5 col-md-12">
             <label class="form-label">Sort</label>
-            <select class="form-select" @bind="_sortMode">
+            <select class="form-select" @bind="_sortMode" aria-label="Session sort order">
                 <option value="lastTouched">Last touched (newest)</option>
                 <option value="opened">Opened (newest)</option>
                 <option value="slot">Device / slot</option>
@@ -241,14 +238,15 @@
                                 </div>
                                 <div class="table-responsive table-shell">
                                     <table class="table table-sm align-middle mb-0">
+                                        <caption class="visually-hidden">Bulk cleanup review sessions for @deviceGroup.DeviceName grouped by health, including slot, mode, status, review note, and keep-open action.</caption>
                                         <thead>
                                             <tr>
-                                                <th>Session Id</th>
-                                                <th>Slot</th>
-                                                <th>Mode</th>
-                                                <th>Status</th>
-                                                <th>Review note</th>
-                                                <th></th>
+                                                <th scope="col">Session Id</th>
+                                                <th scope="col">Slot</th>
+                                                <th scope="col">Mode</th>
+                                                <th scope="col">Status</th>
+                                                <th scope="col">Review note</th>
+                                                <th scope="col"></th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -288,13 +286,14 @@
                     </div>
                     <div class="table-responsive table-shell">
                         <table class="table table-sm align-middle mb-0">
+                            <caption class="visually-hidden">Tracked sessions excluded from the pending cleanup review, including device, health status, reason kept open, and restore action.</caption>
                             <thead>
                                 <tr>
-                                    <th>Device</th>
-                                    <th>Session Id</th>
-                                    <th>Status</th>
-                                    <th>Reason kept open</th>
-                                    <th></th>
+                                    <th scope="col">Device</th>
+                                    <th scope="col">Session Id</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Reason kept open</th>
+                                    <th scope="col"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -324,7 +323,7 @@
                 {
                     <div class="mb-3">
                         <label class="form-label">Large batch confirmation</label>
-                        <input class="form-control" @bind="_cleanupConfirmationText" @bind:event="oninput" placeholder="Type exact confirmation text" />
+                        <input class="form-control" @bind="_cleanupConfirmationText" @bind:event="oninput" aria-label="Large batch cleanup confirmation text" placeholder="Type exact confirmation text" />
                         <div class="form-text">Type <code>@plan.ConfirmationText</code> to execute this larger cleanup batch.</div>
                     </div>
                 }
@@ -377,15 +376,16 @@ else
                     </div>
                     <div class="table-responsive table-shell">
                         <table class="table table-striped align-middle mb-0">
+                            <caption class="visually-hidden">Tracked sessions grouped by device, including slot, mode, state, last operation, health status, and actions.</caption>
                             <thead>
                                 <tr>
-                                    <th>Session Id</th>
-                                    <th>Slot</th>
-                                    <th>Mode</th>
-                                    <th>State</th>
-                                    <th>Last Operation</th>
-                                    <th>Status</th>
-                                    <th></th>
+                                    <th scope="col">Session Id</th>
+                                    <th scope="col">Slot</th>
+                                    <th scope="col">Mode</th>
+                                    <th scope="col">State</th>
+                                    <th scope="col">Last Operation</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -462,10 +462,12 @@ else
                         <div class="row g-3">
                             <div class="col-12">
                                 <label class="form-label">User PIN</label>
-                                <input class="form-control" type="password" @bind="_userPin" />
+                                <input class="form-control" type="password" @bind="_userPin" aria-label="Tracked session user PIN" />
                                 <div class="form-check mt-2">
-                                    <input class="form-check-input" type="checkbox" @bind="_rememberPin" />
-                                    <label class="form-check-label">Remember PIN in protected local storage</label>
+                                    <label class="form-check-label d-inline-flex align-items-center gap-2">
+                                        <input class="form-check-input m-0" type="checkbox" @bind="_rememberPin" aria-label="Remember PIN in protected local storage" />
+                                        <span>Remember PIN in protected local storage</span>
+                                    </label>
                                 </div>
                                 <div class="form-text">Login/logout operates on the tracked session itself so you can watch state transitions immediately. Once invalidated, only close/refresh remain meaningful.</div>
                             </div>
