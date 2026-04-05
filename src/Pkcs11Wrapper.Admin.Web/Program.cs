@@ -66,6 +66,8 @@ builder.Services.AddOptions<CryptoApiSharedPersistenceOptions>()
         static options => CryptoApiSharedPersistenceDefaults.IsSupportedProvider(options.Provider),
         $"Crypto API shared persistence supports '{CryptoApiSharedPersistenceDefaults.PostgresProvider}' only.")
     .ValidateOnStart();
+builder.Services.AddOptions<AdminCryptoApiRouteRuntimeOptions>()
+    .Bind(builder.Configuration.GetSection(AdminCryptoApiRouteRuntimeOptions.SectionName));
 
 AdminStorageOptions adminStorage = builder.Configuration.GetSection("AdminStorage").Get<AdminStorageOptions>() ?? new();
 adminStorage.DataRoot = AdminHostDefaults.ResolveStorageRoot(adminStorage.DataRoot, builder.Environment.ContentRootPath);
