@@ -9,15 +9,21 @@ public sealed class AdminSessionRegistry(AdminSessionRegistryOptions? options = 
     private readonly TimeSpan _idleTimeout = (options ?? new()).IdleTimeout <= TimeSpan.Zero ? TimeSpan.FromMinutes(20) : (options ?? new()).IdleTimeout;
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
 
-    public AdminSessionSnapshot Register(Guid deviceId, string deviceName, Pkcs11Module module, Pkcs11Session session, bool isReadWrite, string notes)
+    public AdminSessionSnapshot Register(Guid deviceId, string deviceName, Pkcs11Module module, Pkcs11Session session, bool isReadWrite, string notes, Action? releaseAction = null)
     {
         DateTimeOffset now = _clock();
         Guid id = Guid.NewGuid();
-        TrackedSession tracked = new(id, deviceId, deviceName, session.SlotId.Value, module, session, isReadWrite, now, now, "Opened", notes, () =>
+        TrackedSession tracked = new(id, deviceId, deviceName, session.SlotId.Value, module, session, isReadWrite, now, now, "Opened", notes, releaseAction ?? (() =>
         {
-            session.Dispose();
-            module.Dispose();
-        });
+            try
+            {
+                session.Dispose();
+            }
+            finally
+            {
+                module.Dispose();
+            }
+        }));
         _sessions[id] = tracked;
         return UpdateSnapshot(tracked);
     }

@@ -19,7 +19,7 @@ public sealed class HsmAdminServiceReconciliationTests
         AdminSessionRegistry registry = new(new AdminSessionRegistryOptions { IdleTimeout = TimeSpan.FromHours(1) });
         AdminSessionSnapshot tracked = registry.RegisterSyntheticForTesting(deviceId, existing.Name, 1, isReadWrite: true, notes: "tracked");
         FakeDependencyCleanupService cleanup = new();
-        HsmAdminService service = new(deviceProfiles, new AuditLogService(auditStore, new TestActorContext()), registry, new AllowAllAuthorizationService(), cleanup);
+        HsmAdminService service = new(deviceProfiles, new AuditLogService(auditStore, new TestActorContext()), registry, new AllowAllAuthorizationService(), new AdminPkcs11Runtime(), cleanup);
 
         await service.SaveDeviceAsync(deviceId, new HsmDeviceProfileInput
         {
@@ -63,7 +63,7 @@ public sealed class HsmAdminServiceReconciliationTests
     {
         cleanup = new FakeDependencyCleanupService();
         registry = new AdminSessionRegistry(new AdminSessionRegistryOptions { IdleTimeout = TimeSpan.FromHours(1) });
-        return new HsmAdminService(new DeviceProfileService(new InMemoryDeviceProfileStore(devices)), new AuditLogService(new InMemoryAuditLogStore(), new TestActorContext()), registry, new AllowAllAuthorizationService(), cleanup);
+        return new HsmAdminService(new DeviceProfileService(new InMemoryDeviceProfileStore(devices)), new AuditLogService(new InMemoryAuditLogStore(), new TestActorContext()), registry, new AllowAllAuthorizationService(), new AdminPkcs11Runtime(), cleanup);
     }
 
     private static HsmDeviceProfile CreateProfile(Guid id, string name, string modulePath, bool isEnabled)

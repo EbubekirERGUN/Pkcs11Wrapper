@@ -109,7 +109,7 @@ public sealed class ConfigurationTransferTests
         InMemoryDeviceProfileStore deviceStore = new(devices);
         DeviceProfileService deviceProfiles = new(deviceStore);
         AuditLogService auditLog = new(new InMemoryAuditLogStore(), new TestActorContext());
-        return new HsmAdminService(deviceProfiles, auditLog, new AdminSessionRegistry(), new AllowAllAuthorizationService());
+        return new HsmAdminService(deviceProfiles, auditLog, new AdminSessionRegistry(), new AllowAllAuthorizationService(), new AdminPkcs11Runtime());
     }
 
     private static HsmDeviceProfile CreateProfile(Guid id, string name, string modulePath, HsmDeviceVendorMetadata? vendor = null)
