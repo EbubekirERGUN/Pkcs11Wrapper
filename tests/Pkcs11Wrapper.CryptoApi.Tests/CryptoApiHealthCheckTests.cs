@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Configuration;
@@ -10,14 +11,35 @@ namespace Pkcs11Wrapper.CryptoApi.Tests;
 public sealed class CryptoApiHealthCheckTests
 {
     [Fact]
-    public async Task ReadinessReportsUnhealthyWhenModulePathIsMissing()
+    public async Task ReadinessReportsUnhealthyWhenDefaultBackendModulePathIsMissing()
     {
         CryptoApiModuleReadinessHealthCheck healthCheck = CreateHealthCheck(modulePath: null);
 
         HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
-        Assert.Equal("Crypto API PKCS#11 module path is not configured.", result.Description);
+        Assert.Equal("Crypto API PKCS#11 module path is not configured for backend 'default'.", result.Description);
+        Assert.NotNull(result.Exception);
+    }
+
+    [Fact]
+    public async Task ReadinessReportsUnhealthyWhenNamedBackendAndFallbackModulePathsAreMissing()
+    {
+        CryptoApiModuleReadinessHealthCheck healthCheck = CreateHealthCheck(
+            modulePath: null,
+            backends:
+            [
+                new CryptoApiRuntimeBackendOptions
+                {
+                    Name = "tenant-eu",
+                    ModulePath = null
+                }
+            ]);
+
+        HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
+
+        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+        Assert.Equal("Crypto API PKCS#11 module path is not configured for backend 'tenant-eu'.", result.Description);
         Assert.NotNull(result.Exception);
     }
 
@@ -46,6 +68,12 @@ public sealed class CryptoApiHealthCheckTests
         Assert.Equal("Shared persistence is optional and not configured.", result.Description);
     }
 
-    private static CryptoApiModuleReadinessHealthCheck CreateHealthCheck(string? modulePath)
-        => new(new CryptoApiPkcs11Runtime(Options.Create(new CryptoApiRuntimeOptions { ModulePath = modulePath })));
+    private static CryptoApiModuleReadinessHealthCheck CreateHealthCheck(
+        string? modulePath,
+        IEnumerable<CryptoApiRuntimeBackendOptions>? backends = null)
+        => new(new CryptoApiPkcs11Runtime(Options.Create(new CryptoApiRuntimeOptions
+        {
+            ModulePath = modulePath,
+            Backends = backends is null ? [] : [.. backends]
+        })));
 }
