@@ -1,8 +1,10 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Navigation
 
+<a class="skip-link" href="#admin-main-content">Skip to main content</a>
+
 <div class="admin-shell">
-    <aside class="admin-sidebar">
+    <aside class="admin-sidebar" aria-label="Admin console branding and primary navigation">
         <div class="admin-brand">
             <div class="admin-brand-mark">P11</div>
             <div>
@@ -27,7 +29,7 @@
         <header class="admin-topbar">
             <div>
                 <div class="admin-topbar-eyebrow">Operations workspace</div>
-                <div class="admin-topbar-title">@CurrentSectionTitle</div>
+                <div class="admin-topbar-title" id="admin-section-title">@CurrentSectionTitle</div>
             </div>
 
             <div class="admin-topbar-meta">
@@ -37,13 +39,13 @@
             </div>
         </header>
 
-        <main class="admin-page-host">
+        <main class="admin-page-host" id="admin-main-content" tabindex="-1" aria-labelledby="admin-section-title">
             @Body
         </main>
     </div>
 </div>
 
-<div id="blazor-error-ui" data-nosnippet>
+<div id="blazor-error-ui" data-nosnippet role="alert" aria-live="assertive" aria-atomic="true">
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>

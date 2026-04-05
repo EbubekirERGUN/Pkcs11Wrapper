@@ -33,7 +33,7 @@
 
         @if (_showError)
         {
-            <div class="alert alert-danger">@_errorMessage</div>
+            <div class="alert alert-danger" role="alert" aria-live="assertive" aria-atomic="true">@_errorMessage</div>
         }
 
         @if (!_interactiveReady)
@@ -46,11 +46,11 @@
         <fieldset disabled="@(!_interactiveReady)">
             <div class="mb-3">
                 <label class="form-label">Username</label>
-                <input class="form-control" name="username" autocomplete="username" data-testid="login-username" />
+                <input class="form-control" name="username" autocomplete="username" aria-label="Username" data-testid="login-username" />
             </div>
             <div class="mb-3">
                 <label class="form-label">Password</label>
-                <input class="form-control" type="password" name="password" autocomplete="current-password" data-testid="login-password" />
+                <input class="form-control" type="password" name="password" autocomplete="current-password" aria-label="Password" data-testid="login-password" />
             </div>
 
             <button class="btn btn-primary w-100" type="submit" data-testid="login-submit">Sign in</button>

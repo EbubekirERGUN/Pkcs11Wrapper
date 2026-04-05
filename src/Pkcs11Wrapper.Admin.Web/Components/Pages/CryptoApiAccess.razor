@@ -38,15 +38,12 @@
     </div>
 </section>
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
-{
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")" data-testid="crypto-api-access-status">@_statusMessage</div>
-}
+<StatusAnnouncement Message="@_statusMessage" IsError="@_statusIsError" TestId="crypto-api-access-status" />
 
 @if (_revealedKey is not null)
 {
-    <div class="alert alert-warning" data-testid="crypto-api-access-secret">
-        <div class="fw-semibold">New API key secret — copy it now</div>
+        <div class="alert alert-warning" role="alert" aria-live="assertive" aria-atomic="true" data-testid="crypto-api-access-secret">
+            <div class="fw-semibold">New API key secret — copy it now</div>
         <div class="small mt-2">Key identifier</div>
         <code>@_revealedKey.KeyIdentifier</code>
         <div class="small mt-3">Secret</div>
@@ -124,7 +121,7 @@ else
                 <div class="card-body row g-3">
                     <div class="col-12">
                         <label class="form-label">Client name</label>
-                        <input class="form-control" @bind="_createClientName" @bind:event="oninput" placeholder="payments-gateway" data-testid="crypto-api-client-name" />
+                        <input class="form-control" @bind="_createClientName" @bind:event="oninput" aria-label="Client name" placeholder="payments-gateway" data-testid="crypto-api-client-name" />
                         <div class="form-text">Stable machine-facing identifier.</div>
                     </div>
                     <div class="col-12">
@@ -167,8 +164,8 @@ else
                         </div>
                         <div class="col-12"><hr class="my-1" /></div>
                         <div class="col-12">
-                            <label class="form-label">New API key name</label>
-                            <input class="form-control" @bind="_newKeyName" @bind:event="oninput" placeholder="primary" data-testid="crypto-api-key-name" />
+                        <label class="form-label">New API key name</label>
+                            <input class="form-control" @bind="_newKeyName" @bind:event="oninput" aria-label="New API key name" placeholder="primary" data-testid="crypto-api-key-name" />
                         </div>
                         <div class="col-12">
                             <label class="form-label">Expire after days (optional)</label>
@@ -220,12 +217,12 @@ else
                 <div class="card-body row g-3">
                     <div class="col-12">
                         <label class="form-label">Alias name</label>
-                        <input class="form-control" @bind="_createAliasName" @bind:event="oninput" placeholder="payments-signer" data-testid="crypto-api-alias-name" />
+                        <input class="form-control" @bind="_createAliasName" @bind:event="oninput" aria-label="Alias name" placeholder="payments-signer" data-testid="crypto-api-alias-name" />
                         <div class="form-text">Customer-facing alias used by the Crypto API request payload.</div>
                     </div>
                     <div class="col-12">
                         <label class="form-label">Route group (preferred)</label>
-                        <input class="form-control" @bind="_createAliasRouteGroupName" @bind:event="oninput" placeholder="payments-signers" data-testid="crypto-api-alias-route-group" />
+                        <input class="form-control" @bind="_createAliasRouteGroupName" @bind:event="oninput" aria-label="Alias route group" placeholder="payments-signers" data-testid="crypto-api-alias-route-group" />
                         <div class="form-text">Preferred routing mode: map the alias to a configured backend pool / route group on the Crypto API host.</div>
                     </div>
                     <div class="col-md-6">
@@ -234,7 +231,7 @@ else
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Legacy slot id (optional)</label>
-                        <input class="form-control" @bind="_createAliasSlotId" @bind:event="oninput" placeholder="0" data-testid="crypto-api-alias-slot-id" />
+                        <input class="form-control" @bind="_createAliasSlotId" @bind:event="oninput" aria-label="Legacy slot id" placeholder="0" data-testid="crypto-api-alias-slot-id" />
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Object id hex (optional)</label>
@@ -242,7 +239,7 @@ else
                     </div>
                     <div class="col-12">
                         <label class="form-label">Object label</label>
-                        <input class="form-control" @bind="_createAliasObjectLabel" @bind:event="oninput" placeholder="Payments signing key" data-testid="crypto-api-alias-object-label" />
+                        <input class="form-control" @bind="_createAliasObjectLabel" @bind:event="oninput" aria-label="Alias object label" placeholder="Payments signing key" data-testid="crypto-api-alias-object-label" />
                         <div class="form-text">Provide object label and/or object id hex. When route group is set, the host selects a backend from that pool; otherwise the legacy device-route/slot mapping is used.</div>
                     </div>
                     <div class="col-12">
@@ -336,7 +333,7 @@ else
                 <div class="card-body row g-3">
                     <div class="col-12">
                         <label class="form-label">Policy name</label>
-                        <input class="form-control" @bind="_createPolicyName" @bind:event="oninput" placeholder="payments-signing" data-testid="crypto-api-policy-name" />
+                        <input class="form-control" @bind="_createPolicyName" @bind:event="oninput" aria-label="Policy name" placeholder="payments-signing" data-testid="crypto-api-policy-name" />
                         <div class="form-text">Stable machine-facing identifier for shared authorization rules.</div>
                     </div>
                     <div class="col-12">
@@ -345,7 +342,7 @@ else
                     </div>
                     <div class="col-12">
                         <label class="form-label">Allowed operations</label>
-                        <textarea class="form-control" rows="3" @bind="_createPolicyOperations" placeholder="sign, verify, random" data-testid="crypto-api-policy-operations"></textarea>
+                        <textarea class="form-control" rows="3" @bind="_createPolicyOperations" aria-label="Allowed operations" placeholder="sign, verify, random" data-testid="crypto-api-policy-operations"></textarea>
                         <div class="form-text">Use comma, semicolon, or newline separators. <code>*</code> is allowed.</div>
                     </div>
                     <div class="col-12">

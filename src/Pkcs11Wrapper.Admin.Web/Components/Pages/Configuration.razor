@@ -30,10 +30,7 @@
     </div>
 </section>
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
-{
-    <div class="alert @(_statusIsError ? "alert-danger" : "alert-success")">@_statusMessage</div>
-}
+<StatusAnnouncement Message="@_statusMessage" IsError="@_statusIsError" TestId="configuration-status" />
 
 <div class="row g-3 mb-4">
     <div class="col-xl-3 col-md-6">
@@ -119,7 +116,7 @@
                 <div>
                     <div class="mb-3">
                         <label class="form-label">Configuration file</label>
-                        <InputFile @key="_filePickerKey" class="form-control" OnChange="OnFileChangedAsync" accept=".json,application/json" />
+                        <InputFile @key="_filePickerKey" class="form-control" OnChange="OnFileChangedAsync" aria-label="Configuration import file" accept=".json,application/json" />
                         @if (_selectedFile is not null)
                         {
                             <div class="form-text">Selected: @_selectedFile.Name (@FormatSize(_selectedFile.Size))</div>
@@ -128,7 +125,7 @@
 
                     <div class="mb-3">
                         <label class="form-label">Import mode</label>
-                        <InputSelect class="form-select" @bind-Value="_importMode">
+                        <InputSelect class="form-select" @bind-Value="_importMode" aria-label="Configuration import mode">
                             <option value="@AdminConfigurationImportMode.Merge">Merge existing configuration</option>
                             <option value="@AdminConfigurationImportMode.ReplaceAll">Replace all existing configuration</option>
                         </InputSelect>
@@ -144,8 +141,10 @@
                         </div>
 
                         <div class="form-check mb-3">
-                            <InputCheckbox class="form-check-input" @bind-Value="_acknowledgeReplaceAll" />
-                            <label class="form-check-label">I understand that Replace All overwrites the current device configuration.</label>
+                            <label class="form-check-label d-inline-flex align-items-center gap-2">
+                                <InputCheckbox class="form-check-input m-0" @bind-Value="_acknowledgeReplaceAll" aria-label="Acknowledge that Replace All overwrites the current device configuration" />
+                                <span>I understand that Replace All overwrites the current device configuration.</span>
+                            </label>
                         </div>
                     }
 

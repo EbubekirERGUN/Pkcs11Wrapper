@@ -1,3 +1,24 @@
+.skip-link {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 2000;
+    padding: 0.75rem 1rem;
+    border-radius: 0.9rem;
+    background: #0f172a;
+    color: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    box-shadow: 0 18px 28px rgba(15, 23, 42, 0.2);
+    transform: translateY(-160%);
+    transition: transform 0.16s ease;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+    transform: translateY(0);
+    color: #f8fafc;
+}
+
 .admin-shell {
     min-height: 100vh;
     display: grid;

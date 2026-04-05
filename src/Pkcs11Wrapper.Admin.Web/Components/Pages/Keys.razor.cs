@@ -883,15 +883,18 @@ public partial class Keys
     {
         builder.OpenElement(0, "div");
         builder.AddAttribute(1, "class", "form-check");
-        builder.OpenElement(2, "input");
-        builder.AddAttribute(3, "class", "form-check-input");
-        builder.AddAttribute(4, "type", "checkbox");
-        builder.AddAttribute(5, "checked", getValue());
-        builder.AddAttribute(6, "onchange", EventCallback.Factory.CreateBinder<bool>(this, setValue, getValue()));
+        builder.OpenElement(2, "label");
+        builder.AddAttribute(3, "class", "form-check-label d-inline-flex align-items-center gap-2 mb-0");
+        builder.OpenElement(4, "input");
+        builder.AddAttribute(5, "class", "form-check-input m-0");
+        builder.AddAttribute(6, "type", "checkbox");
+        builder.AddAttribute(7, "checked", getValue());
+        builder.AddAttribute(8, "aria-label", label);
+        builder.AddAttribute(9, "onchange", EventCallback.Factory.CreateBinder<bool>(this, setValue, getValue()));
         builder.CloseElement();
-        builder.OpenElement(7, "label");
-        builder.AddAttribute(8, "class", "form-check-label");
-        builder.AddContent(9, label);
+        builder.OpenElement(10, "span");
+        builder.AddContent(11, label);
+        builder.CloseElement();
         builder.CloseElement();
         builder.CloseElement();
     };
@@ -899,18 +902,22 @@ public partial class Keys
     private RenderFragment NullableCheckbox(Func<bool?> getValue, Action<bool?> setValue, string label, bool enabled) => builder =>
     {
         bool current = getValue() == true;
+        string accessibleLabel = !enabled ? $"{label} unsupported here" : getValue() is null ? $"{label} keep existing" : label;
         builder.OpenElement(0, "div");
         builder.AddAttribute(1, "class", "form-check form-switch");
-        builder.OpenElement(2, "input");
-        builder.AddAttribute(3, "class", "form-check-input");
-        builder.AddAttribute(4, "type", "checkbox");
-        builder.AddAttribute(5, "checked", current);
-        builder.AddAttribute(6, "disabled", !enabled);
-        builder.AddAttribute(7, "onchange", EventCallback.Factory.CreateBinder<bool>(this, value => setValue(value), current));
+        builder.OpenElement(2, "label");
+        builder.AddAttribute(3, "class", "form-check-label d-inline-flex align-items-center gap-2 mb-0");
+        builder.OpenElement(4, "input");
+        builder.AddAttribute(5, "class", "form-check-input m-0");
+        builder.AddAttribute(6, "type", "checkbox");
+        builder.AddAttribute(7, "checked", current);
+        builder.AddAttribute(8, "disabled", !enabled);
+        builder.AddAttribute(9, "aria-label", accessibleLabel);
+        builder.AddAttribute(10, "onchange", EventCallback.Factory.CreateBinder<bool>(this, value => setValue(value), current));
         builder.CloseElement();
-        builder.OpenElement(8, "label");
-        builder.AddAttribute(9, "class", "form-check-label");
-        builder.AddContent(10, !enabled ? $"{label} (unsupported here)" : getValue() is null ? $"{label} (keep existing)" : label);
+        builder.OpenElement(11, "span");
+        builder.AddContent(12, !enabled ? $"{label} (unsupported here)" : getValue() is null ? $"{label} (keep existing)" : label);
+        builder.CloseElement();
         builder.CloseElement();
         builder.CloseElement();
     };
