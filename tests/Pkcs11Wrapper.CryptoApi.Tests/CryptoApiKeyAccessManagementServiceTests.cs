@@ -3,6 +3,7 @@ using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Caching;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
+using Pkcs11Wrapper.CryptoApi.Runtime;
 using Pkcs11Wrapper.CryptoApi.SharedState;
 using static Pkcs11Wrapper.CryptoApi.Tests.PostgresTestEnvironment;
 
@@ -11,10 +12,27 @@ namespace Pkcs11Wrapper.CryptoApi.Tests;
 public sealed class CryptoApiKeyAccessManagementServiceTests
 {
     [PostgresFact]
-    public async Task BoundClientAndAliasAuthorizeRequestedOperationAndResolveInternalRoute()
+    public async Task BoundClientAndAliasAuthorizeRequestedOperationAndResolveInternalRoutePlan()
     {
         await using PostgresTestScope scope = await CreateScopeAsync();
-        var services = CreateServices(scope.Options);
+        var services = CreateServices(
+            scope.Options,
+            new CryptoApiRuntimeOptions
+            {
+                RouteGroups =
+                [
+                    new CryptoApiRuntimeRouteGroupOptions
+                    {
+                        Name = "payments-signers",
+                        Backends =
+                        [
+                            new CryptoApiRuntimeRouteBackendOptions { BackendName = "hsm-eu-primary", SlotId = 7, Priority = 10 },
+                            new CryptoApiRuntimeRouteBackendOptions { BackendName = "hsm-eu-secondary", SlotId = 9, Priority = 20 }
+                        ]
+                    }
+                ]
+            });
+
         CryptoApiManagedClient client = await services.ClientManagement.CreateClientAsync(new CreateCryptoApiClientRequest(
             ClientName: "payments-gateway",
             DisplayName: "Payments Gateway",
@@ -30,8 +48,9 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
             AllowedOperations: ["sign"]));
         CryptoApiManagedKeyAlias alias = await services.AccessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
             AliasName: "payments-signer",
-            DeviceRoute: "hsm-eu-primary",
-            SlotId: 7,
+            RouteGroupName: "payments-signers",
+            DeviceRoute: null,
+            SlotId: null,
             ObjectLabel: "Payments signing key",
             ObjectIdHex: "a1-b2 c3:d4",
             Notes: "Primary outbound signing route"));
@@ -49,10 +68,21 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
         CryptoApiAuthorizedKeyOperation operation = Assert.IsType<CryptoApiAuthorizedKeyOperation>(authorized.Authorization);
         Assert.Equal("sign", operation.Operation);
         Assert.Equal(alias.AliasId, operation.AliasId);
-        Assert.Equal("hsm-eu-primary", operation.ResolvedRoute.DeviceRoute);
-        Assert.Equal((ulong)7, operation.ResolvedRoute.SlotId);
-        Assert.Equal("Payments signing key", operation.ResolvedRoute.ObjectLabel);
-        Assert.Equal("A1B2C3D4", operation.ResolvedRoute.ObjectIdHex);
+        Assert.Equal("payments-signers", operation.RoutePlan.RouteGroupName);
+        Assert.Equal("Payments signing key", operation.RoutePlan.ObjectLabel);
+        Assert.Equal("A1B2C3D4", operation.RoutePlan.ObjectIdHex);
+        Assert.Collection(
+            operation.RoutePlan.Candidates,
+            candidate =>
+            {
+                Assert.Equal("hsm-eu-primary", candidate.DeviceRoute);
+                Assert.Equal((ulong)7, candidate.SlotId);
+            },
+            candidate =>
+            {
+                Assert.Equal("hsm-eu-secondary", candidate.DeviceRoute);
+                Assert.Equal((ulong)9, candidate.SlotId);
+            });
         CryptoApiMatchedPolicy matchedPolicy = Assert.Single(operation.MatchedPolicies);
         Assert.Equal(policy.PolicyId, matchedPolicy.PolicyId);
     }
@@ -77,6 +107,7 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
             AllowedOperations: ["sign"]));
         CryptoApiManagedKeyAlias alias = await services.AccessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
             AliasName: "reporting-signer",
+            RouteGroupName: null,
             DeviceRoute: null,
             SlotId: 3,
             ObjectLabel: "Reporting key",
@@ -100,13 +131,14 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
     }
 
     [PostgresFact]
-    public async Task CreateKeyAliasRequiresSlotIdForOperationalRoute()
+    public async Task CreateKeyAliasRequiresSlotIdWhenRouteGroupIsNotConfigured()
     {
         await using PostgresTestScope scope = await CreateScopeAsync();
         var services = CreateServices(scope.Options);
 
         ArgumentException ex = await Assert.ThrowsAsync<ArgumentException>(() => services.AccessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
             AliasName: "missing-slot",
+            RouteGroupName: null,
             DeviceRoute: null,
             SlotId: null,
             ObjectLabel: "Payments signing key",
@@ -132,6 +164,7 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
             AllowedOperations: ["sign"]));
         CryptoApiManagedKeyAlias alias = await services.AccessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
             AliasName: "payments-signer",
+            RouteGroupName: null,
             DeviceRoute: "hsm-eu-primary",
             SlotId: 7,
             ObjectLabel: "Payments signing key",
@@ -144,8 +177,9 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
         CryptoApiManagedKeyAlias updatedAlias = await services.AccessManagement.UpdateKeyAliasAsync(new UpdateCryptoApiKeyAliasRequest(
             AliasId: alias.AliasId,
             AliasName: "payments-signer-v2",
-            DeviceRoute: "hsm-eu-secondary",
-            SlotId: 11,
+            RouteGroupName: "payments-signers",
+            DeviceRoute: null,
+            SlotId: null,
             ObjectLabel: "Payments signing key v2",
             ObjectIdHex: "ab:cd:ef:01",
             Notes: "Updated route"));
@@ -161,7 +195,9 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
         CryptoApiManagedPolicy policyFromSnapshot = Assert.Single(snapshot.Policies, candidate => candidate.PolicyId == policy.PolicyId);
 
         Assert.Equal("payments-signer-v2", updatedAlias.AliasName);
-        Assert.Equal((ulong)11, updatedAlias.SlotId);
+        Assert.Equal("payments-signers", updatedAlias.RouteGroupName);
+        Assert.Null(updatedAlias.DeviceRoute);
+        Assert.Null(updatedAlias.SlotId);
         Assert.Equal("ABCDEF01", updatedAlias.ObjectIdHex);
         Assert.Contains(policy.PolicyId, updatedAlias.BoundPolicyIds);
 
@@ -172,6 +208,7 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
         Assert.Contains(alias.AliasId, updatedPolicy.BoundAliasIds);
 
         Assert.Equal(updatedAlias.AliasName, aliasFromSnapshot.AliasName);
+        Assert.Equal(updatedAlias.RouteGroupName, aliasFromSnapshot.RouteGroupName);
         Assert.Equal(updatedAlias.DeviceRoute, aliasFromSnapshot.DeviceRoute);
         Assert.Equal(updatedAlias.SlotId, aliasFromSnapshot.SlotId);
         Assert.Equal(updatedAlias.ObjectLabel, aliasFromSnapshot.ObjectLabel);
@@ -187,18 +224,21 @@ public sealed class CryptoApiKeyAccessManagementServiceTests
         Assert.Equal(updatedPolicy.BoundAliasIds, policyFromSnapshot.BoundAliasIds);
     }
 
-    private static (ICryptoApiSharedStateStore Store, CryptoApiClientManagementService ClientManagement, CryptoApiClientAuthenticationService Authentication, CryptoApiKeyAccessManagementService AccessManagement, CryptoApiKeyOperationAuthorizationService Authorization) CreateServices(CryptoApiSharedPersistenceOptions options)
+    private static (ICryptoApiSharedStateStore Store, CryptoApiClientManagementService ClientManagement, CryptoApiClientAuthenticationService Authentication, CryptoApiKeyAccessManagementService AccessManagement, CryptoApiKeyOperationAuthorizationService Authorization) CreateServices(
+        CryptoApiSharedPersistenceOptions options,
+        CryptoApiRuntimeOptions? runtimeOptions = null)
     {
         ICryptoApiSharedStateStore store = new PostgresCryptoApiSharedStateStore(Options.Create(options));
         ICryptoApiDistributedHotPathCache distributedHotPathCache = new NoOpCryptoApiDistributedHotPathCache();
         CryptoApiClientSecretGenerator generator = new();
         CryptoApiClientSecretHasher hasher = new();
         TimeProvider timeProvider = TimeProvider.System;
+        ICryptoApiRouteRegistry routeRegistry = new CryptoApiConfiguredRouteRegistry(Options.Create(runtimeOptions ?? new CryptoApiRuntimeOptions()));
         return (
             Store: store,
             ClientManagement: new CryptoApiClientManagementService(store, generator, hasher, timeProvider),
             Authentication: new CryptoApiClientAuthenticationService(store, distributedHotPathCache, hasher, timeProvider),
             AccessManagement: new CryptoApiKeyAccessManagementService(store, timeProvider),
-            Authorization: new CryptoApiKeyOperationAuthorizationService(store, distributedHotPathCache, timeProvider));
+            Authorization: new CryptoApiKeyOperationAuthorizationService(store, distributedHotPathCache, timeProvider, hasher, new CryptoApiRequestPathCache(timeProvider), routeRegistry));
     }
 }

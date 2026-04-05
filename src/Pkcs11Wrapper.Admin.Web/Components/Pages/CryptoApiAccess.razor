@@ -216,11 +216,16 @@ else
                         <div class="form-text">Customer-facing alias used by the Crypto API request payload.</div>
                     </div>
                     <div class="col-12">
-                        <label class="form-label">Device route (optional)</label>
+                        <label class="form-label">Route group (preferred)</label>
+                        <input class="form-control" @bind="_createAliasRouteGroupName" @bind:event="oninput" placeholder="payments-signers" data-testid="crypto-api-alias-route-group" />
+                        <div class="form-text">Preferred routing mode: map the alias to a configured backend pool / route group on the Crypto API host.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Legacy device route (optional)</label>
                         <input class="form-control" @bind="_createAliasDeviceRoute" @bind:event="oninput" placeholder="hsm-eu-primary" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Slot id</label>
+                        <label class="form-label">Legacy slot id (optional)</label>
                         <input class="form-control" @bind="_createAliasSlotId" @bind:event="oninput" placeholder="0" data-testid="crypto-api-alias-slot-id" />
                     </div>
                     <div class="col-md-6">
@@ -230,7 +235,7 @@ else
                     <div class="col-12">
                         <label class="form-label">Object label</label>
                         <input class="form-control" @bind="_createAliasObjectLabel" @bind:event="oninput" placeholder="Payments signing key" data-testid="crypto-api-alias-object-label" />
-                        <div class="form-text">Current runtime execution requires a slot id plus an object label and/or object id hex.</div>
+                        <div class="form-text">Provide object label and/or object id hex. When route group is set, the host selects a backend from that pool; otherwise the legacy device-route/slot mapping is used.</div>
                     </div>
                     <div class="col-12">
                         <label class="form-label">Notes</label>
@@ -255,11 +260,15 @@ else
                             <input class="form-control" @bind="_selectedAliasName" @bind:event="oninput" />
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Device route (optional)</label>
+                            <label class="form-label">Route group (preferred)</label>
+                            <input class="form-control" @bind="_selectedAliasRouteGroupName" @bind:event="oninput" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Legacy device route (optional)</label>
                             <input class="form-control" @bind="_selectedAliasDeviceRoute" @bind:event="oninput" />
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Slot id</label>
+                            <label class="form-label">Legacy slot id (optional)</label>
                             <input class="form-control" @bind="_selectedAliasSlotId" @bind:event="oninput" />
                         </div>
                         <div class="col-md-6">
@@ -521,7 +530,11 @@ else
                                                 }
                                             </td>
                                             <td class="small text-muted">
-                                                <div>slot=@(alias.SlotId?.ToString(CultureInfo.InvariantCulture) ?? "missing")</div>
+                                                @if (!string.IsNullOrWhiteSpace(alias.RouteGroupName))
+                                                {
+                                                    <div>group=@alias.RouteGroupName</div>
+                                                }
+                                                <div>slot=@(alias.SlotId?.ToString(CultureInfo.InvariantCulture) ?? "pool")</div>
                                                 @if (!string.IsNullOrWhiteSpace(alias.DeviceRoute))
                                                 {
                                                     <div>device=@alias.DeviceRoute</div>
@@ -624,6 +637,7 @@ else
     private int? _newKeyExpiresInDays;
 
     private string _createAliasName = string.Empty;
+    private string _createAliasRouteGroupName = string.Empty;
     private string _createAliasDeviceRoute = string.Empty;
     private string _createAliasSlotId = string.Empty;
     private string _createAliasObjectLabel = string.Empty;
@@ -631,6 +645,7 @@ else
     private string _createAliasNotes = string.Empty;
 
     private string _selectedAliasName = string.Empty;
+    private string _selectedAliasRouteGroupName = string.Empty;
     private string _selectedAliasDeviceRoute = string.Empty;
     private string _selectedAliasSlotId = string.Empty;
     private string _selectedAliasObjectLabel = string.Empty;
@@ -751,6 +766,7 @@ else
     private void LoadAliasEditor(CryptoApiManagedKeyAlias alias)
     {
         _selectedAliasName = alias.AliasName;
+        _selectedAliasRouteGroupName = alias.RouteGroupName ?? string.Empty;
         _selectedAliasDeviceRoute = alias.DeviceRoute ?? string.Empty;
         _selectedAliasSlotId = alias.SlotId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         _selectedAliasObjectLabel = alias.ObjectLabel ?? string.Empty;
@@ -761,6 +777,7 @@ else
     private void ResetAliasEditor()
     {
         _selectedAliasName = string.Empty;
+        _selectedAliasRouteGroupName = string.Empty;
         _selectedAliasDeviceRoute = string.Empty;
         _selectedAliasSlotId = string.Empty;
         _selectedAliasObjectLabel = string.Empty;
@@ -910,6 +927,7 @@ else
         {
             CryptoApiManagedKeyAlias created = await KeyAccess.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
                 AliasName: _createAliasName,
+                RouteGroupName: EmptyToNull(_createAliasRouteGroupName),
                 DeviceRoute: EmptyToNull(_createAliasDeviceRoute),
                 SlotId: ParseOptionalSlotId(_createAliasSlotId),
                 ObjectLabel: EmptyToNull(_createAliasObjectLabel),
@@ -917,6 +935,7 @@ else
                 Notes: EmptyToNull(_createAliasNotes)));
 
             _createAliasName = string.Empty;
+            _createAliasRouteGroupName = string.Empty;
             _createAliasDeviceRoute = string.Empty;
             _createAliasSlotId = string.Empty;
             _createAliasObjectLabel = string.Empty;
@@ -943,6 +962,7 @@ else
             CryptoApiManagedKeyAlias updated = await KeyAccess.UpdateKeyAliasAsync(new UpdateCryptoApiKeyAliasRequest(
                 AliasId: _selectedAlias.AliasId,
                 AliasName: _selectedAliasName,
+                RouteGroupName: EmptyToNull(_selectedAliasRouteGroupName),
                 DeviceRoute: EmptyToNull(_selectedAliasDeviceRoute),
                 SlotId: ParseOptionalSlotId(_selectedAliasSlotId),
                 ObjectLabel: EmptyToNull(_selectedAliasObjectLabel),

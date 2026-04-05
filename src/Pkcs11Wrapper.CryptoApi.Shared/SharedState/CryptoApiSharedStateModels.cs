@@ -62,6 +62,7 @@ public sealed record CryptoApiClientKeyRecord(
 public sealed record CryptoApiKeyAliasRecord(
     Guid AliasId,
     string AliasName,
+    string? RouteGroupName,
     string? DeviceRoute,
     ulong? SlotId,
     string? ObjectLabel,

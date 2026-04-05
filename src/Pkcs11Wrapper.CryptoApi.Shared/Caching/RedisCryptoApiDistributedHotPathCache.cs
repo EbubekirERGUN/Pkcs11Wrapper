@@ -193,7 +193,7 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
                 Operation: payload.Operation,
                 AliasId: payload.AliasId,
                 AliasName: payload.AliasName,
-                ResolvedRoute: payload.ResolvedRoute,
+                RoutePlan: payload.RoutePlan,
                 MatchedPolicies: payload.MatchedPolicies,
                 AuthorizedAtUtc: now);
         }
@@ -222,7 +222,7 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
             authorization.Operation,
             authorization.AliasId,
             authorization.AliasName,
-            authorization.ResolvedRoute,
+            authorization.RoutePlan,
             authorization.MatchedPolicies);
 
         try
@@ -354,6 +354,6 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         string Operation,
         Guid AliasId,
         string AliasName,
-        CryptoApiResolvedKeyRoute ResolvedRoute,
+        CryptoApiRoutePlan RoutePlan,
         IReadOnlyList<CryptoApiMatchedPolicy> MatchedPolicies);
 }

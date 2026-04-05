@@ -193,8 +193,9 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
             AllowedOperations: ["sign", "verify", "random"]));
         CryptoApiManagedKeyAlias alias = await accessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
             AliasName: context.AliasName,
-            DeviceRoute: "softhsm-test",
-            SlotId: (ulong)context.SlotId.Value,
+            RouteGroupName: "softhsm-signers",
+            DeviceRoute: null,
+            SlotId: null,
             ObjectLabel: context.ObjectLabel,
             ObjectIdHex: context.ObjectIdHex,
             Notes: null));
@@ -217,6 +218,9 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
                         ["CryptoApiRuntime:DisableHttpsRedirection"] = "true",
                         ["CryptoApiRuntime:ModulePath"] = context.ModulePath,
                         ["CryptoApiRuntime:UserPin"] = context.UserPin,
+                        ["CryptoApiRuntime:RouteGroups:0:Name"] = "softhsm-signers",
+                        ["CryptoApiRuntime:RouteGroups:0:Backends:0:BackendName"] = "softhsm-test",
+                        ["CryptoApiRuntime:RouteGroups:0:Backends:0:SlotId"] = context.SlotId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         ["CryptoApiSharedPersistence:Provider"] = sharedPersistenceOptions.Provider,
                         ["CryptoApiSharedPersistence:ConnectionString"] = sharedPersistenceOptions.ConnectionString,
                         ["CryptoApiSharedPersistence:AutoInitialize"] = sharedPersistenceOptions.AutoInitialize ? "true" : "false"

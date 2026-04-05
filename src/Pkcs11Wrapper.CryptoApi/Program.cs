@@ -34,7 +34,12 @@ builder.Services.AddOptions<CryptoApiRuntimeOptions>()
     {
         options.ModulePath = options.ModulePath?.Trim();
         options.UserPin = options.UserPin?.Trim();
-    });
+    })
+    .Services.AddSingleton<IValidateOptions<CryptoApiRuntimeOptions>, CryptoApiRuntimeOptionsValidator>();
+
+builder.Services.AddOptions<CryptoApiRuntimeOptions>()
+    .Validate(static options => options.RouteFailureCooldownSeconds >= 0, "Crypto API route failure cooldown must be zero or greater.")
+    .ValidateOnStart();
 
 builder.Services.AddOptions<CryptoApiSecurityOptions>()
     .Bind(builder.Configuration.GetSection(CryptoApiSecurityOptions.SectionName));
@@ -96,12 +101,20 @@ builder.Services.AddSingleton<ICryptoApiDistributedHotPathCache>(sp =>
 });
 builder.Services.AddSingleton<CryptoApiRuntimeDescriptorProvider>();
 builder.Services.AddSingleton<CryptoApiPkcs11Runtime>();
+builder.Services.AddSingleton<ICryptoApiRouteRegistry, CryptoApiConfiguredRouteRegistry>();
 builder.Services.AddSingleton<CryptoApiClientSecretGenerator>();
 builder.Services.AddSingleton<CryptoApiClientSecretHasher>();
 builder.Services.AddSingleton<CryptoApiClientManagementService>();
 builder.Services.AddSingleton<CryptoApiClientAuthenticationService>();
 builder.Services.AddSingleton<CryptoApiKeyAccessManagementService>();
-builder.Services.AddSingleton<CryptoApiKeyOperationAuthorizationService>();
+builder.Services.AddSingleton<CryptoApiRouteDispatchService>();
+builder.Services.AddSingleton<CryptoApiKeyOperationAuthorizationService>(sp => new CryptoApiKeyOperationAuthorizationService(
+    sp.GetRequiredService<ICryptoApiSharedStateStore>(),
+    sp.GetRequiredService<ICryptoApiDistributedHotPathCache>(),
+    sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<CryptoApiClientSecretHasher>(),
+    sp.GetRequiredService<CryptoApiRequestPathCache>(),
+    sp.GetRequiredService<ICryptoApiRouteRegistry>()));
 builder.Services.AddSingleton<ICryptoApiCustomerOperationService, CryptoApiPkcs11CustomerOperationService>();
 builder.Services.AddCryptoApiSharedStateStore();
 

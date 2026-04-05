@@ -12,19 +12,22 @@ public sealed class CryptoApiKeyOperationAuthorizationService
     private readonly TimeProvider _timeProvider;
     private readonly CryptoApiClientSecretHasher _secretHasher;
     private readonly CryptoApiRequestPathCache _requestPathCache;
+    private readonly ICryptoApiRouteRegistry _routeRegistry;
 
     public CryptoApiKeyOperationAuthorizationService(
         ICryptoApiSharedStateStore sharedStateStore,
         ICryptoApiDistributedHotPathCache distributedHotPathCache,
         TimeProvider timeProvider,
         CryptoApiClientSecretHasher? secretHasher = null,
-        CryptoApiRequestPathCache? requestPathCache = null)
+        CryptoApiRequestPathCache? requestPathCache = null,
+        ICryptoApiRouteRegistry? routeRegistry = null)
     {
         _sharedStateStore = sharedStateStore;
         _distributedHotPathCache = distributedHotPathCache;
         _timeProvider = timeProvider;
         _secretHasher = secretHasher ?? new CryptoApiClientSecretHasher();
         _requestPathCache = requestPathCache ?? new CryptoApiRequestPathCache(timeProvider);
+        _routeRegistry = routeRegistry ?? new CryptoApiLegacyRouteRegistry();
     }
 
     public async Task<CryptoApiRequestAuthorizationResult> AuthorizeRequestAsync(
@@ -60,42 +63,18 @@ public sealed class CryptoApiKeyOperationAuthorizationService
         }
         else
         {
-            CryptoApiAuthenticatedClient? distributedClient = await _distributedHotPathCache.GetAuthenticatedClientAsync(
-                authStateRevision,
-                normalizedKeyIdentifier,
-                secretFingerprint,
-                now,
-                cancellationToken);
-            if (distributedClient is not null)
+            CryptoApiAuthenticatedClient? resolvedClient = await AuthenticateClientAsync(authStateRevision, normalizedKeyIdentifier, normalizedSecret, secretFingerprint, now, cancellationToken);
+            if (resolvedClient is null)
             {
-                authenticatedClient = distributedClient;
-                _requestPathCache.SetAuthenticatedClient(authStateRevision, normalizedKeyIdentifier, secretFingerprint, authenticatedClient, now);
+                return AuthenticationFailed("API key id or secret is invalid.");
             }
-            else
-            {
-                CryptoApiClientAuthenticationState? authenticationState = await _sharedStateStore.GetClientAuthenticationStateAsync(normalizedKeyIdentifier, cancellationToken);
-                AuthenticatedClientAuthenticationResult authentication = AuthenticateClient(authenticationState, normalizedSecret, now);
-                if (!authentication.Succeeded || authentication.Template is null)
-                {
-                    return AuthenticationFailed(authentication.FailureReason ?? "The provided API credentials were rejected.");
-                }
 
-                authenticatedClient = authentication.Template.Client;
-                await RefreshLastUsedIfNeededAsync(authStateRevision, authentication.Template.Key, normalizedKeyIdentifier, secretFingerprint, now, cancellationToken);
-                _requestPathCache.SetAuthenticatedClient(authStateRevision, normalizedKeyIdentifier, secretFingerprint, authenticatedClient, now);
-                await _distributedHotPathCache.SetAuthenticatedClientAsync(authStateRevision, normalizedKeyIdentifier, secretFingerprint, authenticatedClient, cancellationToken);
-            }
+            authenticatedClient = resolvedClient;
         }
-
-        await RefreshLastUsedIfNeededAsync(authStateRevision, authenticatedClient.ClientKeyId, normalizedKeyIdentifier, secretFingerprint, now, cancellationToken);
 
         if (_requestPathCache.TryGetAuthorizedOperation(authStateRevision, authenticatedClient.ClientId, normalizedAliasName, normalizedOperation, authenticatedClient, now, out CryptoApiAuthorizedKeyOperation cachedAuthorization))
         {
-            return new CryptoApiRequestAuthorizationResult(
-                Succeeded: true,
-                FailureStatusCode: null,
-                FailureReason: null,
-            Authorization: cachedAuthorization);
+            return Success(cachedAuthorization);
         }
 
         CryptoApiAuthorizedKeyOperation? distributedAuthorization = await _distributedHotPathCache.GetAuthorizedOperationAsync(
@@ -106,36 +85,127 @@ public sealed class CryptoApiKeyOperationAuthorizationService
             authenticatedClient,
             now,
             cancellationToken);
+
         if (distributedAuthorization is not null)
         {
             _requestPathCache.SetAuthorizedOperation(authStateRevision, authenticatedClient.ClientId, distributedAuthorization);
-            return new CryptoApiRequestAuthorizationResult(
-                Succeeded: true,
-                FailureStatusCode: null,
-                FailureReason: null,
-                Authorization: distributedAuthorization);
+            return Success(distributedAuthorization);
         }
 
-        CryptoApiKeyAuthorizationState authorizationState = await _sharedStateStore.GetKeyAuthorizationStateAsync(authenticatedClient.ClientId, normalizedAliasName, cancellationToken);
-        CryptoApiKeyOperationAuthorizationResult authorization = Authorize(authorizationState, authenticatedClient, normalizedOperation);
+        CryptoApiKeyOperationAuthorizationResult authorization = await AuthorizeKeyOperationAsync(authenticatedClient, normalizedAliasName, normalizedOperation, cancellationToken);
         if (!authorization.Succeeded || authorization.Authorization is null)
         {
-            return AuthorizationFailed(authorization.FailureReason ?? "The caller is not allowed to use the requested key alias or operation.");
+            return AuthorizationFailed(authorization.FailureReason ?? "Authorization failed.");
         }
 
         _requestPathCache.SetAuthorizedOperation(authStateRevision, authenticatedClient.ClientId, authorization.Authorization);
-        await _distributedHotPathCache.SetAuthorizedOperationAsync(authStateRevision, authenticatedClient.ClientId, authorization.Authorization, cancellationToken);
-        return new CryptoApiRequestAuthorizationResult(
-            Succeeded: true,
-            FailureStatusCode: null,
-            FailureReason: null,
-            Authorization: authorization.Authorization);
+        await _distributedHotPathCache.SetAuthorizedOperationAsync(
+            authStateRevision,
+            authenticatedClient.ClientId,
+            authorization.Authorization,
+            cancellationToken);
+
+        return Success(authorization.Authorization);
     }
 
-    public async Task<CryptoApiKeyOperationAuthorizationResult> AuthorizeAsync(
+    public Task<CryptoApiKeyOperationAuthorizationResult> AuthorizeAsync(
         CryptoApiAuthenticatedClient authenticatedClient,
-        string? aliasName,
-        string? operation,
+        string aliasName,
+        string operation,
+        CancellationToken cancellationToken = default)
+        => AuthorizeKeyOperationAsync(authenticatedClient, aliasName, operation, cancellationToken);
+
+    private async Task<CryptoApiAuthenticatedClient?> AuthenticateClientAsync(
+        long authStateRevision,
+        string keyIdentifier,
+        string secret,
+        string secretFingerprint,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        CryptoApiAuthenticatedClient? distributedClient = await _distributedHotPathCache.GetAuthenticatedClientAsync(
+            authStateRevision,
+            keyIdentifier,
+            secretFingerprint,
+            now,
+            cancellationToken);
+
+        if (distributedClient is not null)
+        {
+            _requestPathCache.SetAuthenticatedClient(authStateRevision, keyIdentifier, secretFingerprint, distributedClient, distributedClient.AuthenticatedAtUtc);
+            return distributedClient;
+        }
+
+        CryptoApiClientAuthenticationState? state = await _sharedStateStore.GetClientAuthenticationStateAsync(keyIdentifier, cancellationToken);
+        if (state is null)
+        {
+            return null;
+        }
+
+        if (!state.Client.IsEnabled || !state.Key.IsEnabled)
+        {
+            return null;
+        }
+
+        if (state.Key.RevokedAtUtc is not null)
+        {
+            return null;
+        }
+
+        if (state.Key.ExpiresAtUtc is DateTimeOffset expiresAtUtc && expiresAtUtc <= now)
+        {
+            return null;
+        }
+
+        if (!_secretHasher.VerifySecret(secret, state.Key.SecretHash))
+        {
+            return null;
+        }
+
+        bool refreshed = false;
+        if (_requestPathCache.ShouldRefreshLastUsed(authStateRevision, keyIdentifier, secretFingerprint, now))
+        {
+            refreshed = await TryRefreshLastUsedAsync(state.Key.ClientKeyId, now, cancellationToken);
+            if (refreshed)
+            {
+                _requestPathCache.RecordLastUsedRefresh(authStateRevision, keyIdentifier, secretFingerprint, now);
+            }
+        }
+
+        CryptoApiAuthenticatedClient authenticatedClient = new(
+            ClientId: state.Client.ClientId,
+            ClientName: state.Client.ClientName,
+            DisplayName: state.Client.DisplayName,
+            ApplicationType: state.Client.ApplicationType,
+            AuthenticationMode: state.Client.AuthenticationMode,
+            ClientKeyId: state.Key.ClientKeyId,
+            KeyIdentifier: state.Key.KeyIdentifier,
+            CredentialType: state.Key.CredentialType,
+            BoundPolicyIds: state.BoundPolicyIds,
+            AuthenticatedAtUtc: now,
+            ExpiresAtUtc: state.Key.ExpiresAtUtc);
+
+        _requestPathCache.SetAuthenticatedClient(authStateRevision, keyIdentifier, secretFingerprint, authenticatedClient, now);
+        await _distributedHotPathCache.SetAuthenticatedClientAsync(authStateRevision, keyIdentifier, secretFingerprint, authenticatedClient, cancellationToken);
+        return authenticatedClient;
+    }
+
+    private async Task<bool> TryRefreshLastUsedAsync(Guid clientKeyId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        TimeSpan minimumInterval = _requestPathCache.LastUsedWriteInterval;
+        bool? leaseAcquired = await _distributedHotPathCache.TryAcquireLastUsedRefreshLeaseAsync(clientKeyId, now, minimumInterval, cancellationToken);
+        if (leaseAcquired == false)
+        {
+            return false;
+        }
+
+        return await _sharedStateStore.TryTouchClientKeyLastUsedAsync(clientKeyId, now, minimumInterval, cancellationToken);
+    }
+
+    public async Task<CryptoApiKeyOperationAuthorizationResult> AuthorizeKeyOperationAsync(
+        CryptoApiAuthenticatedClient authenticatedClient,
+        string aliasName,
+        string operation,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(authenticatedClient);
@@ -143,158 +213,20 @@ public sealed class CryptoApiKeyOperationAuthorizationService
         string normalizedAliasName = NormalizeAliasName(aliasName, nameof(aliasName));
         string normalizedOperation = CryptoApiOperationPolicyDocumentCodec.NormalizeOperation(operation, nameof(operation));
 
-        long authStateRevision = await _sharedStateStore.GetAuthStateRevisionAsync(cancellationToken);
-        if (authStateRevision <= 0)
-        {
-            return Failed("Shared persistence is not configured.");
-        }
-
-        DateTimeOffset now = _timeProvider.GetUtcNow();
-        if (_requestPathCache.TryGetAuthorizedOperation(authStateRevision, authenticatedClient.ClientId, normalizedAliasName, normalizedOperation, authenticatedClient, now, out CryptoApiAuthorizedKeyOperation cachedAuthorization))
-        {
-            return new CryptoApiKeyOperationAuthorizationResult(
-                Succeeded: true,
-                FailureReason: null,
-            Authorization: cachedAuthorization);
-        }
-
-        CryptoApiAuthorizedKeyOperation? distributedAuthorization = await _distributedHotPathCache.GetAuthorizedOperationAsync(
-            authStateRevision,
+        CryptoApiKeyAuthorizationState authorizationState = await _sharedStateStore.GetKeyAuthorizationStateAsync(
             authenticatedClient.ClientId,
             normalizedAliasName,
-            normalizedOperation,
-            authenticatedClient,
-            now,
             cancellationToken);
-        if (distributedAuthorization is not null)
+
+        CryptoApiClientRecord? client = authorizationState.Client;
+        if (client is null)
         {
-            _requestPathCache.SetAuthorizedOperation(authStateRevision, authenticatedClient.ClientId, distributedAuthorization);
-            return new CryptoApiKeyOperationAuthorizationResult(
-                Succeeded: true,
-                FailureReason: null,
-                Authorization: distributedAuthorization);
+            return Failed("Authenticated client was not found in shared persistence.");
         }
-
-        CryptoApiKeyAuthorizationState authorizationState = await _sharedStateStore.GetKeyAuthorizationStateAsync(authenticatedClient.ClientId, normalizedAliasName, cancellationToken);
-        CryptoApiKeyOperationAuthorizationResult authorization = Authorize(authorizationState, authenticatedClient, normalizedOperation);
-        if (authorization.Succeeded && authorization.Authorization is not null)
-        {
-            _requestPathCache.SetAuthorizedOperation(authStateRevision, authenticatedClient.ClientId, authorization.Authorization);
-            await _distributedHotPathCache.SetAuthorizedOperationAsync(authStateRevision, authenticatedClient.ClientId, authorization.Authorization, cancellationToken);
-        }
-
-        return authorization;
-    }
-
-    private AuthenticatedClientAuthenticationResult AuthenticateClient(
-        CryptoApiClientAuthenticationState? authenticationState,
-        string normalizedSecret,
-        DateTimeOffset now)
-    {
-        if (authenticationState is null)
-        {
-            return new AuthenticatedClientAuthenticationResult(false, "API key was not found.", null);
-        }
-
-        CryptoApiClientRecord client = authenticationState.Client;
-        CryptoApiClientKeyRecord key = authenticationState.Key;
 
         if (!client.IsEnabled)
         {
-            return new AuthenticatedClientAuthenticationResult(false, "API client is disabled.", null);
-        }
-
-        if (key.RevokedAtUtc is not null)
-        {
-            return new AuthenticatedClientAuthenticationResult(false, "API key has been revoked.", null);
-        }
-
-        if (!key.IsEnabled)
-        {
-            return new AuthenticatedClientAuthenticationResult(false, "API key is disabled.", null);
-        }
-
-        if (key.ExpiresAtUtc is DateTimeOffset expiresAtUtc && expiresAtUtc <= now)
-        {
-            return new AuthenticatedClientAuthenticationResult(false, "API key has expired.", null);
-        }
-
-        if (!_secretHasher.VerifySecret(normalizedSecret, key.SecretHash))
-        {
-            return new AuthenticatedClientAuthenticationResult(false, "API key secret is invalid.", null);
-        }
-
-        return new AuthenticatedClientAuthenticationResult(
-            true,
-            null,
-            new AuthenticatedClientTemplate(
-                new CryptoApiAuthenticatedClient(
-                ClientId: client.ClientId,
-                ClientName: client.ClientName,
-                DisplayName: client.DisplayName,
-                ApplicationType: client.ApplicationType,
-                AuthenticationMode: client.AuthenticationMode,
-                ClientKeyId: key.ClientKeyId,
-                KeyIdentifier: key.KeyIdentifier,
-                CredentialType: key.CredentialType,
-                AuthenticatedAtUtc: now,
-                ExpiresAtUtc: key.ExpiresAtUtc,
-                BoundPolicyIds: authenticationState.BoundPolicyIds),
-                key));
-    }
-
-    private async Task RefreshLastUsedIfNeededAsync(
-        long authStateRevision,
-        CryptoApiClientKeyRecord key,
-        string normalizedKeyIdentifier,
-        string secretFingerprint,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
-    {
-        if (key.LastUsedAtUtc is DateTimeOffset lastUsedAtUtc && now - lastUsedAtUtc < _requestPathCache.LastUsedWriteInterval)
-        {
-            return;
-        }
-
-        await RefreshLastUsedIfNeededAsync(authStateRevision, key.ClientKeyId, normalizedKeyIdentifier, secretFingerprint, now, cancellationToken);
-    }
-
-    private async Task RefreshLastUsedIfNeededAsync(
-        long authStateRevision,
-        Guid clientKeyId,
-        string normalizedKeyIdentifier,
-        string secretFingerprint,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
-    {
-        if (!_requestPathCache.ShouldRefreshLastUsed(authStateRevision, normalizedKeyIdentifier, secretFingerprint, now))
-        {
-            return;
-        }
-
-        if (_distributedHotPathCache.Enabled)
-        {
-            bool? leaseAcquired = await _distributedHotPathCache.TryAcquireLastUsedRefreshLeaseAsync(clientKeyId, now, _requestPathCache.LastUsedWriteInterval, cancellationToken);
-            if (leaseAcquired is false)
-            {
-                _requestPathCache.RecordLastUsedRefresh(authStateRevision, normalizedKeyIdentifier, secretFingerprint, now);
-                return;
-            }
-        }
-
-        _ = await _sharedStateStore.TryTouchClientKeyLastUsedAsync(clientKeyId, now, _requestPathCache.LastUsedWriteInterval, cancellationToken);
-        _requestPathCache.RecordLastUsedRefresh(authStateRevision, normalizedKeyIdentifier, secretFingerprint, now);
-    }
-
-    private CryptoApiKeyOperationAuthorizationResult Authorize(
-        CryptoApiKeyAuthorizationState authorizationState,
-        CryptoApiAuthenticatedClient authenticatedClient,
-        string normalizedOperation)
-    {
-        CryptoApiClientRecord? client = authorizationState.Client;
-        if (client is null || !client.IsEnabled)
-        {
-            return Failed("Authenticated Crypto API client is no longer enabled.");
+            return Failed("Authenticated client is disabled.");
         }
 
         CryptoApiKeyAliasRecord? alias = authorizationState.Alias;
@@ -342,6 +274,12 @@ public sealed class CryptoApiKeyOperationAuthorizationService
             return Failed("Requested operation is not allowed for this key alias.");
         }
 
+        CryptoApiRoutePlanResolutionResult routePlanResult = _routeRegistry.Resolve(alias);
+        if (!routePlanResult.Succeeded || routePlanResult.RoutePlan is null)
+        {
+            return Failed(routePlanResult.FailureReason ?? "No route plan could be resolved for the requested key alias.");
+        }
+
         return new CryptoApiKeyOperationAuthorizationResult(
             Succeeded: true,
             FailureReason: null,
@@ -350,11 +288,7 @@ public sealed class CryptoApiKeyOperationAuthorizationService
                 Operation: normalizedOperation,
                 AliasId: alias.AliasId,
                 AliasName: alias.AliasName,
-                ResolvedRoute: new CryptoApiResolvedKeyRoute(
-                    DeviceRoute: alias.DeviceRoute,
-                    SlotId: alias.SlotId,
-                    ObjectLabel: alias.ObjectLabel,
-                    ObjectIdHex: alias.ObjectIdHex),
+                RoutePlan: routePlanResult.RoutePlan,
                 MatchedPolicies: matchedPolicies.OrderBy(policy => policy.PolicyName, StringComparer.OrdinalIgnoreCase).ToArray(),
                 AuthorizedAtUtc: _timeProvider.GetUtcNow()));
     }
@@ -372,6 +306,13 @@ public sealed class CryptoApiKeyOperationAuthorizationService
             FailureStatusCode: 403,
             FailureReason: reason,
             Authorization: null);
+
+    private static CryptoApiRequestAuthorizationResult Success(CryptoApiAuthorizedKeyOperation authorization)
+        => new(
+            Succeeded: true,
+            FailureStatusCode: null,
+            FailureReason: null,
+            Authorization: authorization);
 
     private static CryptoApiKeyOperationAuthorizationResult Failed(string reason)
         => new(
@@ -395,13 +336,4 @@ public sealed class CryptoApiKeyOperationAuthorizationService
 
         return normalized;
     }
-
-    private sealed record AuthenticatedClientTemplate(
-        CryptoApiAuthenticatedClient Client,
-        CryptoApiClientKeyRecord Key);
-
-    private sealed record AuthenticatedClientAuthenticationResult(
-        bool Succeeded,
-        string? FailureReason,
-        AuthenticatedClientTemplate? Template);
 }

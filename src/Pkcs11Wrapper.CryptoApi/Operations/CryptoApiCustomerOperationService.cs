@@ -31,6 +31,7 @@ public sealed record CryptoApiRandomOperationResult(
 
 public sealed class CryptoApiPkcs11CustomerOperationService(
     CryptoApiPkcs11Runtime pkcs11Runtime,
+    CryptoApiRouteDispatchService routeDispatchService,
     TimeProvider timeProvider) : ICryptoApiCustomerOperationService
 {
     private const int MaxPayloadBytes = 1024 * 1024;
@@ -45,24 +46,9 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
 
         SignatureAlgorithmProfile profile = SignatureAlgorithmProfile.Parse(algorithm);
         byte[] payload = ParseRequiredBase64(payloadBase64, nameof(payloadBase64), MaxPayloadBytes);
-        Pkcs11SlotId slotId = ResolveRequiredSlotId(authorization);
+        ResolvedKeyLocator locator = ResolveRequiredLocator(authorization.RoutePlan, authorization.AliasName);
 
-        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = pkcs11Runtime.RentSession(slotId);
-        Pkcs11Session session = sessionLease.Session;
-        ResolvedKeyLocator locator = ResolveRequiredLocator(authorization);
-        KeyHandleCacheKey cacheKey = CreateCacheKey(locator, profile, forSign: true);
-
-        byte[] signature = ExecuteWithKeyHandleRecovery(
-            sessionLease,
-            cacheKey,
-            () =>
-            {
-                Pkcs11ObjectHandle keyHandle = ResolveRequiredKeyHandle(session, authorization, locator, profile, forSign: true);
-                Pkcs11Mechanism mechanism = profile.CreateMechanism();
-                return SignWithRetry(session, keyHandle, mechanism, payload);
-            });
-
-        return new CryptoApiSignOperationResult(profile.Name, signature, timeProvider.GetUtcNow());
+        return routeDispatchService.Execute(authorization, route => SignOnRoute(authorization, route, locator, profile, payload));
     }
 
     public CryptoApiVerifyOperationResult Verify(CryptoApiAuthorizedKeyOperation authorization, string? algorithm, string? payloadBase64, string? signatureBase64)
@@ -72,24 +58,9 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         SignatureAlgorithmProfile profile = SignatureAlgorithmProfile.Parse(algorithm);
         byte[] payload = ParseRequiredBase64(payloadBase64, nameof(payloadBase64), MaxPayloadBytes);
         byte[] signature = ParseRequiredBase64(signatureBase64, nameof(signatureBase64), MaxPayloadBytes);
-        Pkcs11SlotId slotId = ResolveRequiredSlotId(authorization);
+        ResolvedKeyLocator locator = ResolveRequiredLocator(authorization.RoutePlan, authorization.AliasName);
 
-        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = pkcs11Runtime.RentSession(slotId);
-        Pkcs11Session session = sessionLease.Session;
-        ResolvedKeyLocator locator = ResolveRequiredLocator(authorization);
-        KeyHandleCacheKey cacheKey = CreateCacheKey(locator, profile, forSign: false);
-
-        bool verified = ExecuteWithKeyHandleRecovery(
-            sessionLease,
-            cacheKey,
-            () =>
-            {
-                Pkcs11ObjectHandle keyHandle = ResolveRequiredKeyHandle(session, authorization, locator, profile, forSign: false);
-                Pkcs11Mechanism mechanism = profile.CreateMechanism();
-                return session.Verify(keyHandle, mechanism, payload, signature);
-            });
-
-        return new CryptoApiVerifyOperationResult(profile.Name, verified, timeProvider.GetUtcNow());
+        return routeDispatchService.Execute(authorization, route => VerifyOnRoute(authorization, route, locator, profile, payload, signature));
     }
 
     public CryptoApiRandomOperationResult GenerateRandom(CryptoApiAuthorizedKeyOperation authorization, int length)
@@ -98,42 +69,125 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(length, MaxRandomLength);
 
-        Pkcs11SlotId slotId = ResolveRequiredSlotId(authorization);
-        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = pkcs11Runtime.RentSession(slotId);
-
-        byte[] buffer = new byte[length];
-        sessionLease.Session.GenerateRandom(buffer);
-        return new CryptoApiRandomOperationResult(buffer, timeProvider.GetUtcNow());
+        return routeDispatchService.Execute(authorization, route => GenerateRandomOnRoute(authorization, route, length));
     }
 
-    private static Pkcs11SlotId ResolveRequiredSlotId(CryptoApiAuthorizedKeyOperation authorization)
+    private CryptoApiSignOperationResult SignOnRoute(
+        CryptoApiAuthorizedKeyOperation authorization,
+        CryptoApiResolvedKeyRoute route,
+        ResolvedKeyLocator locator,
+        SignatureAlgorithmProfile profile,
+        byte[] payload)
     {
-        ulong? slotId = authorization.ResolvedRoute.SlotId;
-        if (!slotId.HasValue)
+        Pkcs11SlotId slotId = new((nuint)route.SlotId);
+        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = RentCandidateSession(route, slotId);
+        Pkcs11Session session = sessionLease.Session;
+        KeyHandleCacheKey cacheKey = CreateCacheKey(locator, profile, forSign: true);
+
+        try
         {
-            throw new CryptoApiOperationConfigurationException($"Key alias '{authorization.AliasName}' does not define a PKCS#11 slot route.");
-        }
+            byte[] signature = ExecuteWithKeyHandleRecovery(
+                sessionLease,
+                cacheKey,
+                () =>
+                {
+                    Pkcs11ObjectHandle keyHandle = ResolveRequiredKeyHandle(session, authorization.AliasName, locator, profile, forSign: true);
+                    Pkcs11Mechanism mechanism = profile.CreateMechanism();
+                    return SignWithRetry(session, keyHandle, mechanism, payload);
+                });
 
-        return new Pkcs11SlotId((nuint)slotId.Value);
+            return new CryptoApiSignOperationResult(profile.Name, signature, timeProvider.GetUtcNow());
+        }
+        catch (Exception ex) when (IsRecoverableCandidateFailure(ex))
+        {
+            sessionLease.MarkBroken();
+            throw CreateRouteCandidateUnavailable(route, authorization, ex);
+        }
     }
 
-    private static ResolvedKeyLocator ResolveRequiredLocator(CryptoApiAuthorizedKeyOperation authorization)
+    private CryptoApiVerifyOperationResult VerifyOnRoute(
+        CryptoApiAuthorizedKeyOperation authorization,
+        CryptoApiResolvedKeyRoute route,
+        ResolvedKeyLocator locator,
+        SignatureAlgorithmProfile profile,
+        byte[] payload,
+        byte[] signature)
     {
-        byte[] objectId = ParseOptionalHex(authorization.ResolvedRoute.ObjectIdHex);
-        byte[] objectLabel = string.IsNullOrWhiteSpace(authorization.ResolvedRoute.ObjectLabel)
+        Pkcs11SlotId slotId = new((nuint)route.SlotId);
+        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = RentCandidateSession(route, slotId);
+        Pkcs11Session session = sessionLease.Session;
+        KeyHandleCacheKey cacheKey = CreateCacheKey(locator, profile, forSign: false);
+
+        try
+        {
+            bool verified = ExecuteWithKeyHandleRecovery(
+                sessionLease,
+                cacheKey,
+                () =>
+                {
+                    Pkcs11ObjectHandle keyHandle = ResolveRequiredKeyHandle(session, authorization.AliasName, locator, profile, forSign: false);
+                    Pkcs11Mechanism mechanism = profile.CreateMechanism();
+                    return session.Verify(keyHandle, mechanism, payload, signature);
+                });
+
+            return new CryptoApiVerifyOperationResult(profile.Name, verified, timeProvider.GetUtcNow());
+        }
+        catch (Exception ex) when (IsRecoverableCandidateFailure(ex))
+        {
+            sessionLease.MarkBroken();
+            throw CreateRouteCandidateUnavailable(route, authorization, ex);
+        }
+    }
+
+    private CryptoApiRandomOperationResult GenerateRandomOnRoute(CryptoApiAuthorizedKeyOperation authorization, CryptoApiResolvedKeyRoute route, int length)
+    {
+        Pkcs11SlotId slotId = new((nuint)route.SlotId);
+        using CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease sessionLease = RentCandidateSession(route, slotId);
+
+        try
+        {
+            byte[] buffer = new byte[length];
+            sessionLease.Session.GenerateRandom(buffer);
+            return new CryptoApiRandomOperationResult(buffer, timeProvider.GetUtcNow());
+        }
+        catch (Exception ex) when (IsRecoverableCandidateFailure(ex))
+        {
+            sessionLease.MarkBroken();
+            throw CreateRouteCandidateUnavailable(route, authorization, ex);
+        }
+    }
+
+    private CryptoApiPkcs11Runtime.CryptoApiPooledSessionLease RentCandidateSession(CryptoApiResolvedKeyRoute route, Pkcs11SlotId slotId)
+    {
+        try
+        {
+            return pkcs11Runtime.RentSession(route.DeviceRoute, slotId);
+        }
+        catch (Exception ex) when (ex is CryptoApiOperationConfigurationException or Pkcs11Exception or InvalidOperationException)
+        {
+            throw new CryptoApiRouteCandidateUnavailableException(
+                $"Backend '{route.DeviceRoute ?? "default"}' slot '{route.SlotId}' could not open a PKCS#11 session.",
+                ex);
+        }
+    }
+
+    private static ResolvedKeyLocator ResolveRequiredLocator(CryptoApiRoutePlan routePlan, string aliasName)
+    {
+        byte[] objectId = ParseOptionalHex(routePlan.ObjectIdHex);
+        byte[] objectLabel = string.IsNullOrWhiteSpace(routePlan.ObjectLabel)
             ? []
-            : Encoding.UTF8.GetBytes(authorization.ResolvedRoute.ObjectLabel.Trim());
+            : Encoding.UTF8.GetBytes(routePlan.ObjectLabel.Trim());
 
         if (objectId.Length == 0 && objectLabel.Length == 0)
         {
-            throw new CryptoApiOperationConfigurationException($"Key alias '{authorization.AliasName}' does not define a PKCS#11 object locator.");
+            throw new CryptoApiOperationConfigurationException($"Key alias '{aliasName}' does not define a PKCS#11 object locator.");
         }
 
         return new ResolvedKeyLocator(
             ObjectId: objectId,
             ObjectIdHex: objectId.Length == 0 ? null : Convert.ToHexString(objectId),
             ObjectLabel: objectLabel,
-            ObjectLabelText: objectLabel.Length == 0 ? null : authorization.ResolvedRoute.ObjectLabel?.Trim());
+            ObjectLabelText: objectLabel.Length == 0 ? null : routePlan.ObjectLabel?.Trim());
     }
 
     private T ExecuteWithKeyHandleRecovery<T>(
@@ -153,13 +207,13 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
         catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrSessionHandleInvalid)
         {
             sessionLease.MarkBroken();
-            throw new CryptoApiOperationExecutionException("The PKCS#11 session became invalid during execution. Retry the request.", ex);
+            throw new CryptoApiRouteCandidateUnavailableException("The PKCS#11 session became invalid during execution.", ex);
         }
     }
 
     private Pkcs11ObjectHandle ResolveRequiredKeyHandle(
         Pkcs11Session session,
-        CryptoApiAuthorizedKeyOperation authorization,
+        string aliasName,
         ResolvedKeyLocator locator,
         SignatureAlgorithmProfile profile,
         bool forSign)
@@ -183,7 +237,8 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
 
             if (result.Ambiguous)
             {
-                throw new CryptoApiOperationExecutionException($"Key alias '{authorization.AliasName}' resolved to multiple PKCS#11 objects for {(forSign ? "signing" : "verification")}.");
+                throw new CryptoApiRouteCandidateUnavailableException(
+                    $"Key alias '{aliasName}' resolved to multiple PKCS#11 objects for {(forSign ? "signing" : "verification")}.");
             }
         }
 
@@ -198,11 +253,13 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
 
             if (result.Ambiguous)
             {
-                throw new CryptoApiOperationExecutionException($"Key alias '{authorization.AliasName}' resolved to multiple PKCS#11 objects for {(forSign ? "signing" : "verification")}.");
+                throw new CryptoApiRouteCandidateUnavailableException(
+                    $"Key alias '{aliasName}' resolved to multiple PKCS#11 objects for {(forSign ? "signing" : "verification")}.");
             }
         }
 
-        throw new CryptoApiOperationExecutionException($"Key alias '{authorization.AliasName}' could not be resolved to a PKCS#11 object for {(forSign ? "signing" : "verification")}.");
+        throw new CryptoApiRouteCandidateUnavailableException(
+            $"Key alias '{aliasName}' could not be resolved to a PKCS#11 object for {(forSign ? "signing" : "verification")}.");
     }
 
     private SessionKeyHandleCache GetOrCreateSessionKeyHandleCache(Pkcs11Session session)
@@ -262,13 +319,13 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
 
         if (written <= 0)
         {
-            throw new CryptoApiOperationExecutionException("The PKCS#11 module did not return a signature output buffer.");
+            throw new CryptoApiRouteCandidateUnavailableException("The PKCS#11 module did not return a signature output buffer.");
         }
 
         byte[] retryBuffer = new byte[written];
         if (!session.TrySign(keyHandle, mechanism, payload, retryBuffer, out int retryWritten))
         {
-            throw new CryptoApiOperationExecutionException("The PKCS#11 module did not return a signature output buffer.");
+            throw new CryptoApiRouteCandidateUnavailableException("The PKCS#11 module did not return a signature output buffer.");
         }
 
         return retryBuffer.AsSpan(0, retryWritten).ToArray();
@@ -313,6 +370,22 @@ public sealed class CryptoApiPkcs11CustomerOperationService(
             throw new CryptoApiOperationConfigurationException($"Configured object ID hex '{value}' is not valid.", ex);
         }
     }
+
+    private static CryptoApiRouteCandidateUnavailableException CreateRouteCandidateUnavailable(
+        CryptoApiResolvedKeyRoute route,
+        CryptoApiAuthorizedKeyOperation authorization,
+        Exception ex)
+        => ex as CryptoApiRouteCandidateUnavailableException
+            ?? new CryptoApiRouteCandidateUnavailableException(
+                $"Backend '{route.DeviceRoute ?? "default"}' slot '{route.SlotId}' failed while executing '{authorization.Operation}' for alias '{authorization.AliasName}'.",
+                ex);
+
+    private static bool IsRecoverableCandidateFailure(Exception ex)
+        => ex is CryptoApiRouteCandidateUnavailableException
+            or CryptoApiOperationExecutionException
+            or CryptoApiOperationConfigurationException
+            or InvalidOperationException
+            or Pkcs11Exception;
 
     private readonly record struct ResolvedKeyLocator(
         byte[] ObjectId,

@@ -414,6 +414,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             INSERT INTO crypto_api_key_aliases (
                 alias_id,
                 alias_name,
+                route_group_name,
                 device_route,
                 slot_id,
                 object_label,
@@ -425,6 +426,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             VALUES (
                 @aliasId,
                 @aliasName,
+                @routeGroupName,
                 @deviceRoute,
                 @slotId,
                 @objectLabel,
@@ -435,6 +437,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
                 @updatedAtUtc)
             ON CONFLICT (alias_id) DO UPDATE SET
                 alias_name = EXCLUDED.alias_name,
+                route_group_name = EXCLUDED.route_group_name,
                 device_route = EXCLUDED.device_route,
                 slot_id = EXCLUDED.slot_id,
                 object_label = EXCLUDED.object_label,
@@ -445,6 +448,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             """;
         AddGuid(command, "@aliasId", keyAlias.AliasId);
         AddText(command, "@aliasName", keyAlias.AliasName);
+        AddNullableText(command, "@routeGroupName", keyAlias.RouteGroupName);
         AddNullableText(command, "@deviceRoute", keyAlias.DeviceRoute);
         AddNullableInt64(command, "@slotId", keyAlias.SlotId is null ? null : checked((long)keyAlias.SlotId.Value));
         AddNullableText(command, "@objectLabel", keyAlias.ObjectLabel);
@@ -842,6 +846,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             CREATE TABLE IF NOT EXISTS crypto_api_key_aliases (
                 alias_id UUID PRIMARY KEY,
                 alias_name TEXT NOT NULL UNIQUE,
+                route_group_name TEXT NULL,
                 device_route TEXT NULL,
                 slot_id BIGINT NULL,
                 object_label TEXT NULL,
@@ -905,6 +910,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "revoked_at_utc", "TIMESTAMPTZ NULL", cancellationToken);
         await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "revoked_reason", "TEXT NULL", cancellationToken);
         await EnsureColumnExistsAsync(connection, "crypto_api_client_keys", "last_used_at_utc", "TIMESTAMPTZ NULL", cancellationToken);
+        await EnsureColumnExistsAsync(connection, "crypto_api_key_aliases", "route_group_name", "TEXT NULL", cancellationToken);
         await EnsureColumnExistsAsync(connection, "crypto_api_key_aliases", "device_route", "TEXT NULL", cancellationToken);
 
         await using NpgsqlCommand metadata = connection.CreateCommand();
@@ -1017,7 +1023,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
     {
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT alias_id, alias_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
+            SELECT alias_id, alias_name, route_group_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
             FROM crypto_api_key_aliases
             WHERE lower(alias_name) = lower(@aliasName)
             LIMIT 1;
@@ -1033,14 +1039,15 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         return new CryptoApiKeyAliasRecord(
             AliasId: reader.GetGuid(0),
             AliasName: reader.GetString(1),
-            DeviceRoute: reader.IsDBNull(2) ? null : reader.GetString(2),
-            SlotId: reader.IsDBNull(3) ? null : checked((ulong)reader.GetInt64(3)),
-            ObjectLabel: reader.IsDBNull(4) ? null : reader.GetString(4),
-            ObjectIdHex: reader.IsDBNull(5) ? null : reader.GetString(5),
-            Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
-            IsEnabled: reader.GetBoolean(7),
-            CreatedAtUtc: ReadTimestamp(reader, 8),
-            UpdatedAtUtc: ReadTimestamp(reader, 9));
+            RouteGroupName: reader.IsDBNull(2) ? null : reader.GetString(2),
+            DeviceRoute: reader.IsDBNull(3) ? null : reader.GetString(3),
+            SlotId: reader.IsDBNull(4) ? null : checked((ulong)reader.GetInt64(4)),
+            ObjectLabel: reader.IsDBNull(5) ? null : reader.GetString(5),
+            ObjectIdHex: reader.IsDBNull(6) ? null : reader.GetString(6),
+            Notes: reader.IsDBNull(7) ? null : reader.GetString(7),
+            IsEnabled: reader.GetBoolean(8),
+            CreatedAtUtc: ReadTimestamp(reader, 9),
+            UpdatedAtUtc: ReadTimestamp(reader, 10));
     }
 
     private static async Task<IReadOnlyList<CryptoApiPolicyRecord>> ReadSharedPoliciesAsync(NpgsqlConnection connection, Guid clientId, Guid aliasId, CancellationToken cancellationToken)
@@ -1223,7 +1230,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
         List<CryptoApiKeyAliasRecord> aliases = [];
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT alias_id, alias_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
+            SELECT alias_id, alias_name, route_group_name, device_route, slot_id, object_label, object_id_hex, notes, is_enabled, created_at_utc, updated_at_utc
             FROM crypto_api_key_aliases
             ORDER BY alias_name;
             """;
@@ -1233,14 +1240,15 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             aliases.Add(new CryptoApiKeyAliasRecord(
                 AliasId: reader.GetGuid(0),
                 AliasName: reader.GetString(1),
-                DeviceRoute: reader.IsDBNull(2) ? null : reader.GetString(2),
-                SlotId: reader.IsDBNull(3) ? null : checked((ulong)reader.GetInt64(3)),
-                ObjectLabel: reader.IsDBNull(4) ? null : reader.GetString(4),
-                ObjectIdHex: reader.IsDBNull(5) ? null : reader.GetString(5),
-                Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
-                IsEnabled: reader.GetBoolean(7),
-                CreatedAtUtc: ReadTimestamp(reader, 8),
-                UpdatedAtUtc: ReadTimestamp(reader, 9)));
+                RouteGroupName: reader.IsDBNull(2) ? null : reader.GetString(2),
+                DeviceRoute: reader.IsDBNull(3) ? null : reader.GetString(3),
+                SlotId: reader.IsDBNull(4) ? null : checked((ulong)reader.GetInt64(4)),
+                ObjectLabel: reader.IsDBNull(5) ? null : reader.GetString(5),
+                ObjectIdHex: reader.IsDBNull(6) ? null : reader.GetString(6),
+                Notes: reader.IsDBNull(7) ? null : reader.GetString(7),
+                IsEnabled: reader.GetBoolean(8),
+                CreatedAtUtc: ReadTimestamp(reader, 9),
+                UpdatedAtUtc: ReadTimestamp(reader, 10)));
         }
 
         return aliases;

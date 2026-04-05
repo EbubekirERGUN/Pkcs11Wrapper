@@ -12,85 +12,74 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
 {
     private static readonly nuint CkrFunctionFailed = 0x00000006u;
     private static readonly nuint CkrUserAlreadyLoggedIn = 0x00000100u;
-    private readonly object _sync = new();
-    private readonly ConcurrentDictionary<Pkcs11SlotId, SlotSessionPool> _sessionPools = new();
-    private Pkcs11Module? _module;
+    private readonly ConcurrentDictionary<string, BackendRuntime> _namedBackends = new(StringComparer.OrdinalIgnoreCase);
+    private readonly BackendRuntime _defaultBackend = new(new BackendConfiguration(
+        Name: "default",
+        ModulePath: runtimeOptions.Value.ModulePath?.Trim(),
+        UserPin: runtimeOptions.Value.UserPin?.Trim(),
+        MaxRetainedSessionsPerSlot: Math.Max(runtimeOptions.Value.MaxRetainedSessionsPerSlot, 0)));
     private bool _disposed;
 
-    public Pkcs11Module GetInitializedModule()
-    {
-        if (_module is not null)
-        {
-            return _module;
-        }
+    public bool HasNamedBackends
+        => runtimeOptions.Value.Backends.Any(static backend => backend.Enabled);
 
-        lock (_sync)
-        {
-            ThrowIfDisposed();
+    public IReadOnlyList<string> GetNamedBackendNames()
+        => runtimeOptions.Value.Backends
+            .Where(static backend => backend.Enabled)
+            .Select(backend => CryptoApiConfiguredRouteRegistry.NormalizeMachineName(backend.Name, nameof(backend.Name)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static backend => backend, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
-            if (_module is not null)
-            {
-                return _module;
-            }
+    public Pkcs11Module GetInitializedModule(string? deviceRoute = null)
+        => ResolveBackend(deviceRoute).GetInitializedModule();
 
-            string modulePath = runtimeOptions.Value.ModulePath?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(modulePath))
-            {
-                throw new CryptoApiOperationConfigurationException("Crypto API PKCS#11 module path is not configured.");
-            }
-
-            Pkcs11Module module = Pkcs11Module.Load(modulePath);
-            try
-            {
-                module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
-                _module = module;
-                return module;
-            }
-            catch
-            {
-                module.Dispose();
-                throw;
-            }
-        }
-    }
-
-    internal CryptoApiPooledSessionLease RentSession(Pkcs11SlotId slotId)
+    internal CryptoApiPooledSessionLease RentSession(string? deviceRoute, Pkcs11SlotId slotId)
     {
         ThrowIfDisposed();
-
-        SlotSessionPool pool = _sessionPools.GetOrAdd(slotId, static _ => new SlotSessionPool());
-        if (pool.TryRent(out Pkcs11Session? existingSession) && existingSession is not null)
-        {
-            return new CryptoApiPooledSessionLease(this, slotId, existingSession);
-        }
-
-        return new CryptoApiPooledSessionLease(this, slotId, CreateAuthenticatedSession(slotId));
+        return ResolveBackend(deviceRoute).RentSession(slotId);
     }
 
     public void Dispose()
     {
-        lock (_sync)
+        if (_disposed)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
+            return;
         }
 
-        foreach ((_, SlotSessionPool pool) in _sessionPools)
+        _disposed = true;
+
+        foreach (BackendRuntime backend in _namedBackends.Values)
         {
-            pool.Dispose();
+            backend.Dispose();
         }
 
-        _sessionPools.Clear();
+        _namedBackends.Clear();
+        _defaultBackend.Dispose();
+    }
 
-        lock (_sync)
+    private BackendRuntime ResolveBackend(string? deviceRoute)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrWhiteSpace(deviceRoute) || !HasNamedBackends)
         {
-            _module?.Dispose();
-            _module = null;
+            return _defaultBackend;
         }
+
+        string backendName = CryptoApiConfiguredRouteRegistry.NormalizeMachineName(deviceRoute, nameof(deviceRoute));
+        return _namedBackends.GetOrAdd(backendName, name =>
+        {
+            CryptoApiRuntimeBackendOptions backendOptions = runtimeOptions.Value.Backends
+                .FirstOrDefault(candidate => candidate.Enabled && string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
+                ?? throw new CryptoApiOperationConfigurationException($"Crypto API backend '{name}' is not configured on this host.");
+
+            return new BackendRuntime(new BackendConfiguration(
+                Name: name,
+                ModulePath: string.IsNullOrWhiteSpace(backendOptions.ModulePath) ? runtimeOptions.Value.ModulePath?.Trim() : backendOptions.ModulePath.Trim(),
+                UserPin: string.IsNullOrWhiteSpace(backendOptions.UserPin) ? runtimeOptions.Value.UserPin?.Trim() : backendOptions.UserPin.Trim(),
+                MaxRetainedSessionsPerSlot: Math.Max(backendOptions.MaxRetainedSessionsPerSlot ?? runtimeOptions.Value.MaxRetainedSessionsPerSlot, 0)));
+        });
     }
 
     private void ThrowIfDisposed()
@@ -101,86 +90,176 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
         }
     }
 
-    private Pkcs11Session CreateAuthenticatedSession(Pkcs11SlotId slotId)
-    {
-        Pkcs11Module module = GetInitializedModule();
-        Pkcs11Session session = OpenCompatibleSession(module, slotId);
+    private sealed record BackendConfiguration(
+        string Name,
+        string? ModulePath,
+        string? UserPin,
+        int MaxRetainedSessionsPerSlot);
 
-        try
+    private sealed class BackendRuntime(BackendConfiguration configuration) : IDisposable
+    {
+        private readonly object _sync = new();
+        private readonly ConcurrentDictionary<Pkcs11SlotId, SlotSessionPool> _sessionPools = new();
+        private Pkcs11Module? _module;
+        private bool _disposed;
+
+        public Pkcs11Module GetInitializedModule()
         {
-            LoginIfConfigured(session);
-            return session;
+            if (_module is not null)
+            {
+                return _module;
+            }
+
+            lock (_sync)
+            {
+                ThrowIfDisposed();
+
+                if (_module is not null)
+                {
+                    return _module;
+                }
+
+                string modulePath = configuration.ModulePath?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(modulePath))
+                {
+                    throw new CryptoApiOperationConfigurationException($"Crypto API PKCS#11 module path is not configured for backend '{configuration.Name}'.");
+                }
+
+                Pkcs11Module module = Pkcs11Module.Load(modulePath);
+                try
+                {
+                    module.Initialize(new Pkcs11InitializeOptions(Pkcs11InitializeFlags.UseOperatingSystemLocking));
+                    _module = module;
+                    return module;
+                }
+                catch
+                {
+                    module.Dispose();
+                    throw;
+                }
+            }
         }
-        catch
+
+        public CryptoApiPooledSessionLease RentSession(Pkcs11SlotId slotId)
         {
-            session.Dispose();
-            throw;
+            ThrowIfDisposed();
+
+            SlotSessionPool pool = _sessionPools.GetOrAdd(slotId, static _ => new SlotSessionPool());
+            if (pool.TryRent(out Pkcs11Session? existingSession) && existingSession is not null)
+            {
+                return CreateLease(slotId, existingSession);
+            }
+
+            return CreateLease(slotId, CreateAuthenticatedSession(slotId));
         }
+
+        public void Dispose()
+        {
+            lock (_sync)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+            }
+
+            foreach ((_, SlotSessionPool pool) in _sessionPools)
+            {
+                pool.Dispose();
+            }
+
+            _sessionPools.Clear();
+
+            lock (_sync)
+            {
+                _module?.Dispose();
+                _module = null;
+            }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(BackendRuntime));
+            }
+        }
+
+        private Pkcs11Session CreateAuthenticatedSession(Pkcs11SlotId slotId)
+        {
+            Pkcs11Module module = GetInitializedModule();
+            Pkcs11Session session = OpenCompatibleSession(module, slotId);
+
+            try
+            {
+                LoginIfConfigured(session);
+                return session;
+            }
+            catch
+            {
+                session.Dispose();
+                throw;
+            }
+        }
+
+        private void ReturnSession(Pkcs11SlotId slotId, Pkcs11Session session, bool broken)
+        {
+            if (_disposed || broken)
+            {
+                session.Dispose();
+                return;
+            }
+
+            SlotSessionPool pool = _sessionPools.GetOrAdd(slotId, static _ => new SlotSessionPool());
+            if (!pool.TryReturn(session, configuration.MaxRetainedSessionsPerSlot))
+            {
+                session.Dispose();
+            }
+        }
+
+        private CryptoApiPooledSessionLease CreateLease(Pkcs11SlotId slotId, Pkcs11Session session)
+            => new(session, broken => ReturnSession(slotId, session, broken));
+
+        private void LoginIfConfigured(Pkcs11Session session)
+        {
+            string userPin = configuration.UserPin?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(userPin))
+            {
+                return;
+            }
+
+            byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin);
+            try
+            {
+                session.Login(Pkcs11UserType.User, pinUtf8);
+            }
+            catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrUserAlreadyLoggedIn)
+            {
+            }
+        }
+
+        private static Pkcs11Session OpenCompatibleSession(Pkcs11Module module, Pkcs11SlotId slotId)
+        {
+            try
+            {
+                return module.OpenSession(slotId, readWrite: false);
+            }
+            catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrFunctionFailed)
+            {
+                return module.OpenSession(slotId, readWrite: true);
+            }
+        }
+
     }
 
-    private void ReturnSession(Pkcs11SlotId slotId, Pkcs11Session session, bool broken)
+    internal sealed class CryptoApiPooledSessionLease(Pkcs11Session session, Action<bool> releaseAction) : IDisposable
     {
-        if (_disposed || broken)
-        {
-            session.Dispose();
-            return;
-        }
-
-        SlotSessionPool pool = _sessionPools.GetOrAdd(slotId, static _ => new SlotSessionPool());
-        if (!pool.TryReturn(session, GetMaxRetainedSessionsPerSlot()))
-        {
-            session.Dispose();
-        }
-    }
-
-    private int GetMaxRetainedSessionsPerSlot()
-        => Math.Max(runtimeOptions.Value.MaxRetainedSessionsPerSlot, 0);
-
-    private void LoginIfConfigured(Pkcs11Session session)
-    {
-        string userPin = runtimeOptions.Value.UserPin?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(userPin))
-        {
-            return;
-        }
-
-        byte[] pinUtf8 = Encoding.UTF8.GetBytes(userPin);
-        try
-        {
-            session.Login(Pkcs11UserType.User, pinUtf8);
-        }
-        catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrUserAlreadyLoggedIn)
-        {
-        }
-    }
-
-    private static Pkcs11Session OpenCompatibleSession(Pkcs11Module module, Pkcs11SlotId slotId)
-    {
-        try
-        {
-            return module.OpenSession(slotId, readWrite: false);
-        }
-        catch (Pkcs11Exception ex) when ((nuint)ex.RawResult == CkrFunctionFailed)
-        {
-            return module.OpenSession(slotId, readWrite: true);
-        }
-    }
-
-    internal sealed class CryptoApiPooledSessionLease : IDisposable
-    {
-        private readonly CryptoApiPkcs11Runtime _runtime;
-        private readonly Pkcs11SlotId _slotId;
         private bool _broken;
         private bool _disposed;
 
-        public CryptoApiPooledSessionLease(CryptoApiPkcs11Runtime runtime, Pkcs11SlotId slotId, Pkcs11Session session)
-        {
-            _runtime = runtime;
-            _slotId = slotId;
-            Session = session;
-        }
-
-        public Pkcs11Session Session { get; }
+        public Pkcs11Session Session { get; } = session;
 
         public void MarkBroken() => _broken = true;
 
@@ -192,7 +271,7 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
             }
 
             _disposed = true;
-            _runtime.ReturnSession(_slotId, Session, _broken);
+            releaseAction(_broken);
         }
     }
 

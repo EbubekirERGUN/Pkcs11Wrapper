@@ -450,6 +450,7 @@ public sealed class CryptoApiRoutesTests
             AllowedOperations: allowedOperations));
         CryptoApiManagedKeyAlias alias = await accessManagement.CreateKeyAliasAsync(new CreateCryptoApiKeyAliasRequest(
             AliasName: aliasName,
+            RouteGroupName: null,
             DeviceRoute: "hsm-eu-primary",
             SlotId: 7,
             ObjectLabel: "Payments signing key",
