@@ -175,6 +175,67 @@ public sealed class CryptoApiCustomerOperationIntegrationTests
         Assert.Equal(3, telemetry.GetCount("C_GenerateRandom"));
     }
 
+    [PostgresFact]
+    public async Task MetricsEndpointPublishesHotPathAndPkcs11Measurements()
+    {
+        if (!SoftHsmTestContext.IsSupported())
+        {
+            return;
+        }
+
+        await using SoftHsmTestContext context = await SoftHsmTestContext.CreateAsync();
+        if (!context.CanExecuteInProcess)
+        {
+            return;
+        }
+
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        await using WebApplicationFactory<Program> factory = CreateFactory(context, scope.Options);
+
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, context);
+
+        using HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+        string payloadBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("metrics smoke"));
+
+        using (HttpResponseMessage signResponse = await httpClient.PostAsync(
+                   "/api/v1/operations/sign",
+                   CreateJsonContent($"{{\"keyAlias\":\"{context.AliasName}\",\"algorithm\":\"RS256\",\"payloadBase64\":\"{payloadBase64}\"}}")))
+        {
+            Assert.Equal(HttpStatusCode.OK, signResponse.StatusCode);
+        }
+
+        using (HttpResponseMessage secondSignResponse = await httpClient.PostAsync(
+                   "/api/v1/operations/sign",
+                   CreateJsonContent($"{{\"keyAlias\":\"{context.AliasName}\",\"algorithm\":\"RS256\",\"payloadBase64\":\"{payloadBase64}\"}}")))
+        {
+            Assert.Equal(HttpStatusCode.OK, secondSignResponse.StatusCode);
+        }
+
+        using (HttpResponseMessage randomResponse = await httpClient.PostAsync(
+                   "/api/v1/operations/random",
+                   CreateJsonContent($"{{\"keyAlias\":\"{context.AliasName}\",\"length\":32}}")))
+        {
+            Assert.Equal(HttpStatusCode.OK, randomResponse.StatusCode);
+        }
+
+        using HttpResponseMessage metricsResponse = await httpClient.GetAsync("/metrics");
+        string metrics = await metricsResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, metricsResponse.StatusCode);
+        Assert.Contains("pkcs11wrapper_crypto_api_authentication_results_total", metrics, StringComparison.Ordinal);
+        Assert.Contains("source=\"shared_state\"", metrics, StringComparison.Ordinal);
+        Assert.Contains("source=\"memory_cache\"", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_authorization_results_total", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_request_path_cache_lookups_total", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_shared_state_requests_total", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_pkcs11_operation_duration_seconds", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_pkcs11_sessions_idle", metrics, StringComparison.Ordinal);
+        Assert.Contains("pkcs11wrapper_crypto_api_shared_state_pool_max_connections", metrics, StringComparison.Ordinal);
+    }
+
     private static async Task<SeededAccess> SeedAuthorizedAccessAsync(WebApplicationFactory<Program> factory, SoftHsmTestContext context)
     {
         using IServiceScope serviceScope = factory.Services.CreateScope();

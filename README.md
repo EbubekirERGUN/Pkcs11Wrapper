@@ -87,6 +87,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - stateless, machine-facing boundary separate from the admin dashboard
 - DI/config binding for service identity, API base path, PKCS#11 runtime, and shared persistence
 - health-aware/load-balanced ingress across multiple Crypto API instances, with correlation-id propagation and practical ingress request-body limits
+- OpenTelemetry-backed Prometheus scraping endpoints plus first-slice runtime metrics for auth/authz cache behavior, shared-state pressure, PKCS#11 latency, ingress health, and admin activity
 - `/health/live` + `/health/ready` endpoints, with readiness validating the configured PKCS#11 module and shared persistence when configured
 - `/api/v1`, `/api/v1/runtime`, `/api/v1/operations`, `POST /api/v1/operations/authorize`, `/api/v1/shared-state`, and `/api/v1/auth/self` route space for the emerging machine-facing contract
 - shared persistence for multi-instance API clients/keys, key aliases, policies, and policy bindings, with PostgreSQL as the supported shared backend across local/dev/lab and production-oriented deployments
@@ -94,6 +95,7 @@ PKCS#11 integrations are powerful, but they are often awkward to consume from mo
 - admin-panel/shared-store control-plane model for Crypto API applications, aliases, policies, and bindings without turning the machine-facing host into a tenant portal
 - intended deployment model: **one admin dashboard + many stateless crypto API instances**
 - committed local/manual perf-regression workflow for sign/random/mixed Crypto API traffic so service-level regressions are easier to catch before release
+- starter runtime observability guide + Grafana dashboard seed at [docs/runtime-observability.md](docs/runtime-observability.md)
 
 ## Platform & validation status
 

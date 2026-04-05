@@ -1,16 +1,20 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Gateway.Configuration;
+using Pkcs11Wrapper.CryptoApi.Gateway.Observability;
 
 namespace Pkcs11Wrapper.CryptoApi.Gateway.Health;
 
 public sealed class GatewayBackendReadinessProbe(
     IHttpClientFactory httpClientFactory,
-    IOptions<CryptoApiGatewayOptions> options)
+    IOptions<CryptoApiGatewayOptions> options,
+    GatewayMetrics? metrics = null)
 {
     public const string HttpClientName = "GatewayBackendReadinessProbe";
 
     public async Task<GatewayBackendReadinessResult> ProbeAsync(CancellationToken cancellationToken)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
         CryptoApiGatewayOptions gatewayOptions = options.Value;
         List<GatewayDestinationProbeResult> destinationResults = [];
         int healthyDestinationCount = 0;
@@ -21,7 +25,7 @@ public sealed class GatewayBackendReadinessProbe(
         foreach (GatewayDestinationOptions destination in gatewayOptions.Destinations.Where(static destination => destination.Enabled))
         {
             string probeUrl = BuildProbeUrl(destination, gatewayOptions.HealthChecks.Active.Path, gatewayOptions.HealthChecks.Active.Query);
-            GatewayDestinationProbeResult result;
+            GatewayDestinationProbeResult probeResult;
 
             try
             {
@@ -32,7 +36,7 @@ public sealed class GatewayBackendReadinessProbe(
                     healthyDestinationCount++;
                 }
 
-                result = new GatewayDestinationProbeResult(
+                probeResult = new GatewayDestinationProbeResult(
                     destination.Name,
                     destination.Address,
                     probeUrl,
@@ -42,7 +46,7 @@ public sealed class GatewayBackendReadinessProbe(
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
-                result = new GatewayDestinationProbeResult(
+                probeResult = new GatewayDestinationProbeResult(
                     destination.Name,
                     destination.Address,
                     probeUrl,
@@ -51,10 +55,10 @@ public sealed class GatewayBackendReadinessProbe(
                     ex.Message);
             }
 
-            destinationResults.Add(result);
+            destinationResults.Add(probeResult);
         }
 
-        return new GatewayBackendReadinessResult(
+        GatewayBackendReadinessResult result = new(
             gatewayOptions.ServiceName,
             gatewayOptions.ClusterId,
             healthyDestinationCount > 0,
@@ -62,6 +66,9 @@ public sealed class GatewayBackendReadinessProbe(
             destinationResults.Count,
             destinationResults,
             DateTimeOffset.UtcNow);
+
+        metrics?.RecordBackendReadinessProbe(result, stopwatch.Elapsed);
+        return result;
     }
 
     private static string BuildProbeUrl(GatewayDestinationOptions destination, string healthPath, string? query)

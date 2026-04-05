@@ -1,8 +1,11 @@
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
 using Pkcs11Wrapper.CryptoApi.Gateway.Configuration;
 using Pkcs11Wrapper.CryptoApi.Gateway.Health;
+using Pkcs11Wrapper.CryptoApi.Gateway.Observability;
 using Pkcs11Wrapper.CryptoApi.Gateway.Runtime;
+using Pkcs11Wrapper.Observability;
 using Yarp.ReverseProxy.Transforms;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -15,7 +18,26 @@ builder.Services.AddOptions<CryptoApiGatewayOptions>()
 builder.Services.AddOptions<CryptoApiGatewayOptions>()
     .ValidateOnStart();
 
+builder.Services.AddOptions<ObservabilityOptions>()
+    .Bind(builder.Configuration.GetSection(ObservabilityOptions.SectionName))
+    .PostConfigure(ObservabilityOptions.Normalize)
+    .Validate(static options => options.MetricsPath.StartsWith("/", StringComparison.Ordinal), "Observability metrics path must start with '/'.")
+    .ValidateOnStart();
+
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<GatewayMetrics>();
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddPrometheusExporter()
+            .AddMeter(
+                "Microsoft.AspNetCore.Hosting",
+                "Microsoft.AspNetCore.Server.Kestrel",
+                "System.Net.Http",
+                "Yarp.ReverseProxy",
+                GatewayMetrics.MeterName);
+    });
 builder.Services.AddHttpClient(GatewayBackendReadinessProbe.HttpClientName);
 builder.Services.AddSingleton<CryptoApiGatewayRuntimeDescriptorProvider>();
 builder.Services.AddSingleton<GatewayBackendReadinessProbe>();
@@ -34,8 +56,10 @@ builder.Services.AddSingleton<Yarp.ReverseProxy.Configuration.IProxyConfigProvid
 
 WebApplication app = builder.Build();
 CryptoApiGatewayOptions gatewayOptions = app.Services.GetRequiredService<IOptions<CryptoApiGatewayOptions>>().Value;
+ObservabilityOptions observabilityOptions = app.Services.GetRequiredService<IOptions<ObservabilityOptions>>().Value;
 CryptoApiGatewayRuntimeDescriptorProvider descriptorProvider = app.Services.GetRequiredService<CryptoApiGatewayRuntimeDescriptorProvider>();
 GatewayBackendReadinessProbe readinessProbe = app.Services.GetRequiredService<GatewayBackendReadinessProbe>();
+GatewayMetrics gatewayMetrics = app.Services.GetRequiredService<GatewayMetrics>();
 
 if (!app.Environment.IsDevelopment())
 {
@@ -80,6 +104,7 @@ app.Use(async (context, next) =>
 
         if (context.Request.ContentLength is long contentLength && contentLength > maxRequestBodySize)
         {
+            gatewayMetrics.RecordRequestBodyRejected(maxRequestBodySize);
             context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
             await context.Response.WriteAsJsonAsync(new
             {
@@ -95,7 +120,27 @@ app.Use(async (context, next) =>
     await next(context);
 });
 
-app.MapGet("/", () => Results.Ok(descriptorProvider.Describe()));
+app.MapGet("/", () =>
+{
+    CryptoApiGatewayRuntimeDescriptor descriptor = descriptorProvider.Describe();
+    return Results.Ok(new
+    {
+        descriptor.ServiceName,
+        descriptor.InstanceId,
+        descriptor.ClusterId,
+        descriptor.ApiBasePath,
+        descriptor.DeploymentModel,
+        descriptor.LoadBalancingPolicy,
+        descriptor.CorrelationIdHeaderName,
+        descriptor.MaxRequestBodySizeBytes,
+        descriptor.ActiveHealthChecksEnabled,
+        descriptor.ConfiguredDestinationCount,
+        descriptor.StartedAtUtc,
+        descriptor.CurrentSurface,
+        descriptor.Notes,
+        Metrics = observabilityOptions.EnablePrometheusScrapingEndpoint ? observabilityOptions.MetricsPath : null
+    });
+});
 app.MapGet(CryptoApiGatewayDefaults.RuntimePath, () => Results.Ok(descriptorProvider.Describe()));
 app.MapGet(CryptoApiGatewayDefaults.HealthLivePath, () => Results.Ok(new
 {
@@ -120,6 +165,11 @@ app.MapGet(CryptoApiGatewayDefaults.HealthReadyPath, async (CancellationToken ca
 });
 
 app.MapReverseProxy();
+
+if (observabilityOptions.EnablePrometheusScrapingEndpoint)
+{
+    app.MapPrometheusScrapingEndpoint(observabilityOptions.MetricsPath);
+}
 
 app.Run();
 

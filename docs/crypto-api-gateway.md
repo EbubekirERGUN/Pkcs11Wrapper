@@ -145,6 +145,15 @@ Settings live under `CryptoApiGateway`.
 }
 ```
 
+Metrics endpoint configuration is shared with the other hosts:
+
+```json
+"Observability": {
+  "EnablePrometheusScrapingEndpoint": true,
+  "MetricsPath": "/metrics"
+}
+```
+
 Notes:
 
 - `ApiBasePath` should normally match the upstream Crypto API hosts' public base path.
@@ -175,6 +184,7 @@ Useful endpoints:
 - `/gateway/runtime`
 - `/health/live`
 - `/health/ready`
+- `/metrics` when `Observability:EnablePrometheusScrapingEndpoint=true`
 - `/api/v1/...` forwarded to healthy upstream Crypto API instances
 
 ## Deployment guidance
@@ -199,6 +209,8 @@ The gateway should **not** own:
 - alias/policy control-plane state
 - PKCS#11 execution semantics
 - tenant/global product policy beyond lightweight ingress concerns
+
+For the metric catalogue and the starter Grafana dashboard, see [docs/runtime-observability.md](docs/runtime-observability.md).
 
 ## Relationship to issue #150 HSM routing/dispatch groundwork
 

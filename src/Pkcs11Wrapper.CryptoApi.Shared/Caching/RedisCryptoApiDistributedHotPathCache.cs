@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
+using Pkcs11Wrapper.CryptoApi.Observability;
 using StackExchange.Redis;
 
 namespace Pkcs11Wrapper.CryptoApi.Caching;
@@ -19,6 +21,7 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
     private readonly CryptoApiRequestPathCachingOptions _options;
     private readonly CryptoApiRequestPathRedisOptions _redisOptions;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
+    private readonly CryptoApiMetrics? _metrics;
 
     private IConnectionMultiplexer? _connection;
     private DateTimeOffset _nextConnectAttemptUtc;
@@ -26,12 +29,14 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
     public RedisCryptoApiDistributedHotPathCache(
         IOptions<CryptoApiRequestPathCachingOptions> options,
         TimeProvider timeProvider,
-        ILogger<RedisCryptoApiDistributedHotPathCache> logger)
+        ILogger<RedisCryptoApiDistributedHotPathCache> logger,
+        CryptoApiMetrics? metrics = null)
     {
         _timeProvider = timeProvider;
         _logger = logger;
         _options = options.Value;
         _redisOptions = _options.Redis ?? new CryptoApiRequestPathRedisOptions();
+        _metrics = metrics;
     }
 
     public bool Enabled
@@ -39,9 +44,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
 
     public async Task<long?> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "miss";
         IDatabase? database = await TryGetDatabaseAsync(cancellationToken);
         if (database is null)
         {
+            _metrics?.RecordDistributedCacheRequest("get_auth_state_revision", "unavailable", stopwatch.Elapsed);
             return null;
         }
 
@@ -49,14 +57,24 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         {
             RedisValue value = await database.StringGetAsync(GetAuthStateRevisionKey()).WaitAsync(cancellationToken);
             string? text = value.IsNullOrEmpty ? null : value.ToString();
-            return string.IsNullOrWhiteSpace(text) || !long.TryParse(text, out long parsed)
-                ? null
-                : parsed;
+            if (string.IsNullOrWhiteSpace(text) || !long.TryParse(text, out long parsed))
+            {
+                result = "miss";
+                return null;
+            }
+
+            result = "hit";
+            return parsed;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            result = "error";
             LogRedisFailure(ex, "read auth-state revision");
             return null;
+        }
+        finally
+        {
+            _metrics?.RecordDistributedCacheRequest("get_auth_state_revision", result, stopwatch.Elapsed);
         }
     }
 
@@ -67,9 +85,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
             return;
         }
 
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "success";
         IDatabase? database = await TryGetDatabaseAsync(cancellationToken);
         if (database is null)
         {
+            _metrics?.RecordDistributedCacheRequest("set_auth_state_revision", "unavailable", stopwatch.Elapsed);
             return;
         }
 
@@ -83,7 +104,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            result = "error";
             LogRedisFailure(ex, "write auth-state revision");
+        }
+        finally
+        {
+            _metrics?.RecordDistributedCacheRequest("set_auth_state_revision", result, stopwatch.Elapsed);
         }
     }
 
@@ -94,9 +120,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "miss";
         IDatabase? database = await TryGetDatabaseAsync(cancellationToken);
         if (database is null)
         {
+            _metrics?.RecordDistributedCacheRequest("get_authenticated_client", "unavailable", stopwatch.Elapsed);
             return null;
         }
 
@@ -105,26 +134,35 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
             RedisValue value = await database.StringGetAsync(GetAuthenticationKey(authStateRevision, keyIdentifier, secretFingerprint)).WaitAsync(cancellationToken);
             if (value.IsNullOrEmpty)
             {
+                result = "miss";
                 return null;
             }
 
             CryptoApiAuthenticatedClient? cached = JsonSerializer.Deserialize<CryptoApiAuthenticatedClient>(value.ToString()!, SerializerOptions);
             if (cached is null)
             {
+                result = "miss";
                 return null;
             }
 
             if (cached.ExpiresAtUtc is DateTimeOffset expiresAtUtc && expiresAtUtc <= now)
             {
+                result = "expired";
                 return null;
             }
 
+            result = "hit";
             return cached with { AuthenticatedAtUtc = now };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            result = "error";
             LogRedisFailure(ex, "read distributed authenticated-client entry");
             return null;
+        }
+        finally
+        {
+            _metrics?.RecordDistributedCacheRequest("get_authenticated_client", result, stopwatch.Elapsed);
         }
     }
 
@@ -137,9 +175,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
     {
         ArgumentNullException.ThrowIfNull(authenticatedClient);
 
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "success";
         IDatabase? database = await TryGetDatabaseAsync(cancellationToken);
         if (database is null)
         {
+            _metrics?.RecordDistributedCacheRequest("set_authenticated_client", "unavailable", stopwatch.Elapsed);
             return;
         }
 
@@ -153,7 +194,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            result = "error";
             LogRedisFailure(ex, "write distributed authenticated-client entry");
+        }
+        finally
+        {
+            _metrics?.RecordDistributedCacheRequest("set_authenticated_client", result, stopwatch.Elapsed);
         }
     }
 
@@ -168,9 +214,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
     {
         ArgumentNullException.ThrowIfNull(client);
 
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "miss";
         IDatabase? database = await TryGetDatabaseAsync(cancellationToken);
         if (database is null)
         {
+            _metrics?.RecordDistributedCacheRequest("get_authorized_operation", "unavailable", stopwatch.Elapsed);
             return null;
         }
 
@@ -179,15 +228,18 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
             RedisValue value = await database.StringGetAsync(GetAuthorizationKey(authStateRevision, clientId, aliasName, operation)).WaitAsync(cancellationToken);
             if (value.IsNullOrEmpty)
             {
+                result = "miss";
                 return null;
             }
 
             AuthorizationCachePayload? payload = JsonSerializer.Deserialize<AuthorizationCachePayload>(value.ToString()!, SerializerOptions);
             if (payload is null)
             {
+                result = "miss";
                 return null;
             }
 
+            result = "hit";
             return new CryptoApiAuthorizedKeyOperation(
                 Client: client,
                 Operation: payload.Operation,
@@ -199,8 +251,13 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            result = "error";
             LogRedisFailure(ex, "read distributed authorization entry");
             return null;
+        }
+        finally
+        {
+            _metrics?.RecordDistributedCacheRequest("get_authorized_operation", result, stopwatch.Elapsed);
         }
     }
 
@@ -212,9 +269,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
     {
         ArgumentNullException.ThrowIfNull(authorization);
 
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "success";
         IDatabase? database = await TryGetDatabaseAsync(cancellationToken);
         if (database is null)
         {
+            _metrics?.RecordDistributedCacheRequest("set_authorized_operation", "unavailable", stopwatch.Elapsed);
             return;
         }
 
@@ -235,7 +295,12 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            result = "error";
             LogRedisFailure(ex, "write distributed authorization entry");
+        }
+        finally
+        {
+            _metrics?.RecordDistributedCacheRequest("set_authorized_operation", result, stopwatch.Elapsed);
         }
     }
 
@@ -245,25 +310,35 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         TimeSpan minimumInterval,
         CancellationToken cancellationToken = default)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "unavailable";
         IDatabase? database = await TryGetDatabaseAsync(cancellationToken);
         if (database is null)
         {
+            _metrics?.RecordDistributedCacheRequest("acquire_last_used_refresh_lease", "unavailable", stopwatch.Elapsed);
             return null;
         }
 
         try
         {
-            return await database.StringSetAsync(
+            bool acquired = await database.StringSetAsync(
                     GetLastUsedLeaseKey(clientKeyId),
                     now.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
                     minimumInterval,
                     when: When.NotExists)
                 .WaitAsync(cancellationToken);
+            result = acquired ? "acquired" : "denied";
+            return acquired;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            result = "error";
             LogRedisFailure(ex, "acquire last-used refresh lease");
             return null;
+        }
+        finally
+        {
+            _metrics?.RecordDistributedCacheRequest("acquire_last_used_refresh_lease", result, stopwatch.Elapsed);
         }
     }
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Pkcs11Wrapper.CryptoApi.Access;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
+using Pkcs11Wrapper.CryptoApi.Observability;
 
 namespace Pkcs11Wrapper.CryptoApi.Caching;
 
@@ -30,6 +31,14 @@ public sealed class CryptoApiRequestPathCache : IDisposable
 
     public TimeSpan LastUsedWriteInterval
         => _options.LastUsedWriteInterval;
+
+    public CryptoApiRequestPathCacheMetricsSnapshot GetMetricsSnapshot()
+        => new(
+            Enabled,
+            _authenticationCache.Count,
+            Math.Max(1, _options.AuthenticationEntryLimit),
+            _authorizationCache.Count,
+            Math.Max(1, _options.AuthorizationEntryLimit));
 
     public string CreateSecretFingerprint(string normalizedSecret)
     {

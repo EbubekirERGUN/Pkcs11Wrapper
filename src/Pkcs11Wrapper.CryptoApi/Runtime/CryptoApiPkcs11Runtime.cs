@@ -3,21 +3,24 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper;
 using Pkcs11Wrapper.CryptoApi.Configuration;
+using Pkcs11Wrapper.CryptoApi.Observability;
 using Pkcs11Wrapper.CryptoApi.Operations;
 using Pkcs11Wrapper.Native;
 
 namespace Pkcs11Wrapper.CryptoApi.Runtime;
 
-public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> runtimeOptions) : IDisposable
+public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> runtimeOptions, CryptoApiMetrics? metrics = null) : ICryptoApiPkcs11RuntimeMetricsSource, IDisposable
 {
     private static readonly nuint CkrFunctionFailed = 0x00000006u;
     private static readonly nuint CkrUserAlreadyLoggedIn = 0x00000100u;
     private readonly ConcurrentDictionary<string, BackendRuntime> _namedBackends = new(StringComparer.OrdinalIgnoreCase);
+    private readonly CryptoApiMetrics? _metrics = metrics;
     private readonly BackendRuntime _defaultBackend = new(new BackendConfiguration(
         Name: "default",
         ModulePath: runtimeOptions.Value.ModulePath?.Trim(),
         UserPin: runtimeOptions.Value.UserPin?.Trim(),
-        MaxRetainedSessionsPerSlot: Math.Max(runtimeOptions.Value.MaxRetainedSessionsPerSlot, 0)));
+        MaxRetainedSessionsPerSlot: Math.Max(runtimeOptions.Value.MaxRetainedSessionsPerSlot, 0)),
+        metrics);
     private bool _disposed;
 
     public bool HasNamedBackends
@@ -38,6 +41,19 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
     {
         ThrowIfDisposed();
         return ResolveBackend(deviceRoute).RentSession(slotId);
+    }
+
+    public IReadOnlyList<CryptoApiPkcs11SessionPoolMetricsSnapshot> GetSessionPoolMetricsSnapshots()
+    {
+        List<CryptoApiPkcs11SessionPoolMetricsSnapshot> snapshots = [];
+        snapshots.AddRange(_defaultBackend.GetSessionPoolMetricsSnapshots());
+
+        foreach (BackendRuntime backend in _namedBackends.Values.OrderBy(static backend => backend.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            snapshots.AddRange(backend.GetSessionPoolMetricsSnapshots());
+        }
+
+        return snapshots;
     }
 
     public void Dispose()
@@ -78,7 +94,8 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
                 Name: name,
                 ModulePath: string.IsNullOrWhiteSpace(backendOptions.ModulePath) ? runtimeOptions.Value.ModulePath?.Trim() : backendOptions.ModulePath.Trim(),
                 UserPin: string.IsNullOrWhiteSpace(backendOptions.UserPin) ? runtimeOptions.Value.UserPin?.Trim() : backendOptions.UserPin.Trim(),
-                MaxRetainedSessionsPerSlot: Math.Max(backendOptions.MaxRetainedSessionsPerSlot ?? runtimeOptions.Value.MaxRetainedSessionsPerSlot, 0)));
+                MaxRetainedSessionsPerSlot: Math.Max(backendOptions.MaxRetainedSessionsPerSlot ?? runtimeOptions.Value.MaxRetainedSessionsPerSlot, 0)),
+                _metrics);
         });
     }
 
@@ -96,12 +113,15 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
         string? UserPin,
         int MaxRetainedSessionsPerSlot);
 
-    private sealed class BackendRuntime(BackendConfiguration configuration) : IDisposable
+    private sealed class BackendRuntime(BackendConfiguration configuration, CryptoApiMetrics? metrics) : IDisposable
     {
         private readonly object _sync = new();
         private readonly ConcurrentDictionary<Pkcs11SlotId, SlotSessionPool> _sessionPools = new();
+        private readonly CryptoApiMetrics? _metrics = metrics;
         private Pkcs11Module? _module;
         private bool _disposed;
+
+        public string Name => configuration.Name;
 
         public Pkcs11Module GetInitializedModule()
         {
@@ -147,11 +167,28 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
             SlotSessionPool pool = _sessionPools.GetOrAdd(slotId, static _ => new SlotSessionPool());
             if (pool.TryRent(out Pkcs11Session? existingSession) && existingSession is not null)
             {
+                _metrics?.RecordPkcs11SessionLease(configuration.Name, (ulong)slotId.Value, "reused");
                 return CreateLease(slotId, existingSession);
             }
 
-            return CreateLease(slotId, CreateAuthenticatedSession(slotId));
+            pool.RecordNewLease();
+            try
+            {
+                _metrics?.RecordPkcs11SessionLease(configuration.Name, (ulong)slotId.Value, "created");
+                return CreateLease(slotId, CreateAuthenticatedSession(slotId));
+            }
+            catch
+            {
+                pool.AbortLease();
+                throw;
+            }
         }
+
+        public IReadOnlyList<CryptoApiPkcs11SessionPoolMetricsSnapshot> GetSessionPoolMetricsSnapshots()
+            => _sessionPools
+                .OrderBy(static pair => pair.Key.Value)
+                .Select(pair => pair.Value.CreateMetricsSnapshot(configuration.Name, (ulong)pair.Key.Value, configuration.MaxRetainedSessionsPerSlot))
+                .ToArray();
 
         public void Dispose()
         {
@@ -206,17 +243,24 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
 
         private void ReturnSession(Pkcs11SlotId slotId, Pkcs11Session session, bool broken)
         {
+            SlotSessionPool pool = _sessionPools.GetOrAdd(slotId, static _ => new SlotSessionPool());
+
             if (_disposed || broken)
             {
+                pool.AbortLease();
+                _metrics?.RecordPkcs11SessionReturn(configuration.Name, (ulong)slotId.Value, broken ? "broken" : "disposed");
                 session.Dispose();
                 return;
             }
 
-            SlotSessionPool pool = _sessionPools.GetOrAdd(slotId, static _ => new SlotSessionPool());
             if (!pool.TryReturn(session, configuration.MaxRetainedSessionsPerSlot))
             {
+                _metrics?.RecordPkcs11SessionReturn(configuration.Name, (ulong)slotId.Value, "disposed");
                 session.Dispose();
+                return;
             }
+
+            _metrics?.RecordPkcs11SessionReturn(configuration.Name, (ulong)slotId.Value, "pooled");
         }
 
         private CryptoApiPooledSessionLease CreateLease(Pkcs11SlotId slotId, Pkcs11Session session)
@@ -279,12 +323,14 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
     {
         private readonly ConcurrentQueue<Pkcs11Session> _idleSessions = new();
         private int _idleCount;
+        private int _inUseCount;
 
         public bool TryRent(out Pkcs11Session? session)
         {
             while (_idleSessions.TryDequeue(out session))
             {
                 _ = Interlocked.Decrement(ref _idleCount);
+                _ = Interlocked.Increment(ref _inUseCount);
                 return true;
             }
 
@@ -292,8 +338,16 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
             return false;
         }
 
+        public void RecordNewLease()
+            => _ = Interlocked.Increment(ref _inUseCount);
+
+        public void AbortLease()
+            => _ = Interlocked.Decrement(ref _inUseCount);
+
         public bool TryReturn(Pkcs11Session session, int maxRetainedSessions)
         {
+            _ = Interlocked.Decrement(ref _inUseCount);
+
             if (maxRetainedSessions <= 0)
             {
                 return false;
@@ -309,6 +363,14 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
             _idleSessions.Enqueue(session);
             return true;
         }
+
+        public CryptoApiPkcs11SessionPoolMetricsSnapshot CreateMetricsSnapshot(string backend, ulong slotId, int maxRetainedSessions)
+            => new(
+                Backend: backend,
+                SlotId: slotId,
+                IdleSessions: Math.Max(0, Volatile.Read(ref _idleCount)),
+                InUseSessions: Math.Max(0, Volatile.Read(ref _inUseCount)),
+                MaxRetainedSessions: Math.Max(0, maxRetainedSessions));
 
         public void Dispose()
         {

@@ -275,7 +275,13 @@ public sealed class CryptoApiRoutesTests
             "/api/v1/operations/sign",
             CreateJsonContent("{\"keyAlias\":\"payments-signer-2\",\"algorithm\":\"RS256\",\"payloadBase64\":\"aGVsbG8=\"}"));
 
+        using HttpResponseMessage metricsResponse = await secondClient.GetAsync("/metrics");
+        string metrics = await metricsResponse.Content.ReadAsStringAsync();
+
         Assert.Equal(HttpStatusCode.OK, secondAllowed.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, metricsResponse.StatusCode);
+        Assert.Contains("pkcs11wrapper_crypto_api_rate_limit_rejections_total", metrics, StringComparison.Ordinal);
+        Assert.Contains("scope=\"customer-operations\"", metrics, StringComparison.Ordinal);
         Assert.Equal(2, fakeOperations.Calls.Count);
         Assert.Equal("payments-signer", fakeOperations.Calls[0].AliasName);
         Assert.Equal("payments-signer-2", fakeOperations.Calls[1].AliasName);

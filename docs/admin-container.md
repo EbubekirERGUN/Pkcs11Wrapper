@@ -68,6 +68,7 @@ The admin image now exposes two unauthenticated health endpoints:
 
 - `/health/live` - lightweight liveness probe for process availability
 - `/health/ready` - readiness probe that verifies the admin storage root plus the app's writable runtime directories are present and writable
+- `/metrics` - Prometheus scraping endpoint when `Observability__EnablePrometheusScrapingEndpoint=true`
 
 The image also bakes in a Docker `HEALTHCHECK` that probes `http://127.0.0.1:8080/health/ready` from inside the container, so a plain `docker ps` / `docker inspect` workflow can see whether the container is healthy without extra operator wiring.
 
@@ -88,6 +89,8 @@ A starter env template for the standalone container path lives at:
 - `deploy/container/admin-panel.env.example`
 
 Copy it to an operator-controlled location, edit it, then pass it to `docker run --env-file ...` or your orchestrator's equivalent.
+
+The same env template now includes the optional `Observability__*` settings used to expose the Prometheus scrape endpoint on trusted operator networks.
 
 Example:
 
@@ -232,6 +235,8 @@ Why these flags are practical here:
 - `--pids-limit 256` adds a simple guardrail against runaway process creation without getting orchestration-specific
 
 If your vendor library requires additional writable client-side state, add a **separate** mount for that vendor path rather than making `/opt/pkcs11/lib` writable.
+
+For the metric catalogue and the starter Grafana dashboard, see [docs/runtime-observability.md](docs/runtime-observability.md).
 
 ## PKCS#11 library and client mount patterns
 

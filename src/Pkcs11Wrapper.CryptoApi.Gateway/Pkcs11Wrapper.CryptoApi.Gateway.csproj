@@ -12,7 +12,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.15.1-beta.1" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.1" />
     <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
+    <ProjectReference Include="..\Pkcs11Wrapper.CryptoApi.Shared\Pkcs11Wrapper.CryptoApi.Shared.csproj" />
   </ItemGroup>
 
 </Project>

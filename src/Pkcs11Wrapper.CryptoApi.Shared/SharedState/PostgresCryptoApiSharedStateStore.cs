@@ -1,10 +1,12 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Pkcs11Wrapper.CryptoApi.Configuration;
+using Pkcs11Wrapper.CryptoApi.Observability;
 
 namespace Pkcs11Wrapper.CryptoApi.SharedState;
 
-public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPersistenceOptions> options) : ICryptoApiAuthoritativeSharedStateStore, IAsyncDisposable
+public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPersistenceOptions> options, CryptoApiMetrics? metrics = null) : ICryptoApiAuthoritativeSharedStateStore, ICryptoApiSharedStateMetricsSource, IAsyncDisposable
 {
     private const string AuthStateRevisionMetadataKey = "auth_state_revision";
     private const string AuthStateRevisionNotificationChannelPrefix = "crypto_api_auth_state_";
@@ -19,6 +21,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
     private readonly SemaphoreSlim _authStateRevisionListenerGate = new(1, 1);
     private readonly CancellationTokenSource _listenerCancellationSource = new();
     private readonly string _authStateRevisionNotificationChannel = CreateAuthStateRevisionNotificationChannel(options.Value.ConnectionString);
+    private readonly CryptoApiMetrics? _metrics = metrics;
     private volatile bool _databaseInitialized;
     private volatile bool _authStateRevisionListenerStarted;
     private long _databaseInitializationCount;
@@ -37,110 +40,175 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             ? 0
             : new NpgsqlConnectionStringBuilder(_pooledConnectionString).MaxPoolSize;
 
+    public CryptoApiSharedStateMetricsSnapshot GetMetricsSnapshot()
+        => new(
+            Configured: IsConfigured(),
+            Provider: CryptoApiSharedPersistenceDefaults.PostgresProvider,
+            EffectiveMaxPoolSize: EffectiveMaxPoolSize);
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "success";
+
         if (!IsConfigured())
         {
+            _metrics?.RecordSharedStateRequest("initialize", "unconfigured", stopwatch.Elapsed);
             return;
         }
 
         if (_databaseInitialized)
         {
+            _metrics?.RecordSharedStateRequest("initialize", "already_initialized", stopwatch.Elapsed);
             return;
         }
 
-        await _initializationGate.WaitAsync(cancellationToken);
         try
         {
-            if (_databaseInitialized)
+            await _initializationGate.WaitAsync(cancellationToken);
+            try
             {
-                return;
+                if (_databaseInitialized)
+                {
+                    result = "already_initialized";
+                    return;
+                }
+
+                await using NpgsqlConnection connection = CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                if (_options.AutoInitialize)
+                {
+                    await EnsureSchemaAsync(connection, cancellationToken);
+                }
+
+                _databaseInitialized = true;
+                Interlocked.Increment(ref _databaseInitializationCount);
+                result = "initialized";
             }
-
-            await using NpgsqlConnection connection = CreateConnection();
-            await connection.OpenAsync(cancellationToken);
-
-            if (_options.AutoInitialize)
+            finally
             {
-                await EnsureSchemaAsync(connection, cancellationToken);
+                _initializationGate.Release();
             }
-
-            _databaseInitialized = true;
-            Interlocked.Increment(ref _databaseInitializationCount);
+        }
+        catch
+        {
+            result = "error";
+            throw;
         }
         finally
         {
-            _initializationGate.Release();
+            _metrics?.RecordSharedStateRequest("initialize", result, stopwatch.Elapsed);
         }
     }
 
     public async Task<CryptoApiSharedStateStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "success";
+
         if (!IsConfigured())
         {
+            _metrics?.RecordSharedStateRequest("get_status", "unconfigured", stopwatch.Elapsed);
             return CreateUnconfiguredStatus();
         }
 
-        await InitializeAsync(cancellationToken);
+        try
+        {
+            await InitializeAsync(cancellationToken);
 
-        await using NpgsqlConnection connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await EnsureSchemaAsync(connection, cancellationToken);
+            await using NpgsqlConnection connection = CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+            await EnsureSchemaAsync(connection, cancellationToken);
 
-        return new CryptoApiSharedStateStatus(
-            Configured: true,
-            Provider: CryptoApiSharedPersistenceDefaults.PostgresProvider,
-            ConnectionTarget: GetConnectionTarget(),
-            SchemaVersion: await GetSchemaVersionAsync(connection, cancellationToken),
-            ApiClientCount: await CountRowsAsync(connection, "crypto_api_clients", cancellationToken),
-            ApiClientKeyCount: await CountRowsAsync(connection, "crypto_api_client_keys", cancellationToken),
-            KeyAliasCount: await CountRowsAsync(connection, "crypto_api_key_aliases", cancellationToken),
-            PolicyCount: await CountRowsAsync(connection, "crypto_api_policies", cancellationToken),
-            ClientPolicyBindingCount: await CountRowsAsync(connection, "crypto_api_client_policy_bindings", cancellationToken),
-            KeyAliasPolicyBindingCount: await CountRowsAsync(connection, "crypto_api_key_alias_policy_bindings", cancellationToken),
-            SharedReadyAreas: CryptoApiSharedStateConstants.SharedReadyAreas);
+            return new CryptoApiSharedStateStatus(
+                Configured: true,
+                Provider: CryptoApiSharedPersistenceDefaults.PostgresProvider,
+                ConnectionTarget: GetConnectionTarget(),
+                SchemaVersion: await GetSchemaVersionAsync(connection, cancellationToken),
+                ApiClientCount: await CountRowsAsync(connection, "crypto_api_clients", cancellationToken),
+                ApiClientKeyCount: await CountRowsAsync(connection, "crypto_api_client_keys", cancellationToken),
+                KeyAliasCount: await CountRowsAsync(connection, "crypto_api_key_aliases", cancellationToken),
+                PolicyCount: await CountRowsAsync(connection, "crypto_api_policies", cancellationToken),
+                ClientPolicyBindingCount: await CountRowsAsync(connection, "crypto_api_client_policy_bindings", cancellationToken),
+                KeyAliasPolicyBindingCount: await CountRowsAsync(connection, "crypto_api_key_alias_policy_bindings", cancellationToken),
+                SharedReadyAreas: CryptoApiSharedStateConstants.SharedReadyAreas);
+        }
+        catch
+        {
+            result = "error";
+            throw;
+        }
+        finally
+        {
+            _metrics?.RecordSharedStateRequest("get_status", result, stopwatch.Elapsed);
+        }
     }
 
     public async Task<long> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default)
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "success";
+
         if (!IsConfigured())
         {
+            _metrics?.RecordSharedStateRequest("get_auth_state_revision", "unconfigured", stopwatch.Elapsed);
             return 0;
         }
 
-        await InitializeAsync(cancellationToken);
-
-        await EnsureAuthStateRevisionListenerStartedAsync(cancellationToken);
-
-        long cachedRevision = Interlocked.Read(ref _cachedAuthStateRevision);
-        if (cachedRevision > 0)
+        try
         {
-            return cachedRevision;
-        }
+            await InitializeAsync(cancellationToken);
 
-        await using NpgsqlConnection connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        long revision = await ReadAuthStateRevisionFromDatabaseAsync(connection, cancellationToken);
-        UpdateCachedAuthStateRevision(revision);
-        return revision;
+            await EnsureAuthStateRevisionListenerStartedAsync(cancellationToken);
+
+            long cachedRevision = Interlocked.Read(ref _cachedAuthStateRevision);
+            if (cachedRevision > 0)
+            {
+                result = "cached";
+                return cachedRevision;
+            }
+
+            await using NpgsqlConnection connection = CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+            long revision = await ReadAuthStateRevisionFromDatabaseAsync(connection, cancellationToken);
+            UpdateCachedAuthStateRevision(revision);
+            result = "database";
+            return revision;
+        }
+        catch
+        {
+            result = "error";
+            throw;
+        }
+        finally
+        {
+            _metrics?.RecordSharedStateRequest("get_auth_state_revision", result, stopwatch.Elapsed);
+        }
     }
 
     public async Task<CryptoApiClientAuthenticationState?> GetClientAuthenticationStateAsync(string keyIdentifier, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(keyIdentifier);
 
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "found";
+
         if (!IsConfigured())
         {
+            _metrics?.RecordSharedStateRequest("get_client_authentication_state", "unconfigured", stopwatch.Elapsed);
             return null;
         }
 
-        await EnsureConfiguredAndInitializedAsync(cancellationToken);
+        try
+        {
+            await EnsureConfiguredAndInitializedAsync(cancellationToken);
 
-        await using NpgsqlConnection connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+            await using NpgsqlConnection connection = CreateConnection();
+            await connection.OpenAsync(cancellationToken);
 
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
+            await using NpgsqlCommand command = connection.CreateCommand();
+            command.CommandText = """
             SELECT
                 c.client_id,
                 c.client_name,
@@ -170,79 +238,108 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
             WHERE k.key_identifier = @keyIdentifier
             LIMIT 1;
             """;
-        AddText(command, "@keyIdentifier", keyIdentifier);
+            AddText(command, "@keyIdentifier", keyIdentifier);
 
-        CryptoApiClientRecord client;
-        CryptoApiClientKeyRecord key;
+            CryptoApiClientRecord client;
+            CryptoApiClientKeyRecord key;
 
-        await using (NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
-        {
-            if (!await reader.ReadAsync(cancellationToken))
+            await using (NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
             {
-                return null;
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    result = "not_found";
+                    return null;
+                }
+
+                client = new CryptoApiClientRecord(
+                    ClientId: reader.GetGuid(0),
+                    ClientName: reader.GetString(1),
+                    DisplayName: reader.GetString(2),
+                    ApplicationType: reader.GetString(3),
+                    AuthenticationMode: reader.GetString(4),
+                    IsEnabled: reader.GetBoolean(5),
+                    Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
+                    CreatedAtUtc: ReadTimestamp(reader, 7),
+                    UpdatedAtUtc: ReadTimestamp(reader, 8));
+
+                key = new CryptoApiClientKeyRecord(
+                    ClientKeyId: reader.GetGuid(9),
+                    ClientId: client.ClientId,
+                    KeyName: reader.GetString(10),
+                    KeyIdentifier: reader.GetString(11),
+                    CredentialType: reader.GetString(12),
+                    SecretHashAlgorithm: reader.GetString(13),
+                    SecretHash: reader.GetString(14),
+                    SecretHint: reader.IsDBNull(15) ? null : reader.GetString(15),
+                    IsEnabled: reader.GetBoolean(16),
+                    CreatedAtUtc: ReadTimestamp(reader, 17),
+                    UpdatedAtUtc: ReadTimestamp(reader, 18),
+                    ExpiresAtUtc: ReadNullableTimestamp(reader, 19),
+                    RevokedAtUtc: ReadNullableTimestamp(reader, 20),
+                    RevokedReason: reader.IsDBNull(21) ? null : reader.GetString(21),
+                    LastUsedAtUtc: ReadNullableTimestamp(reader, 22));
             }
 
-            client = new CryptoApiClientRecord(
-                ClientId: reader.GetGuid(0),
-                ClientName: reader.GetString(1),
-                DisplayName: reader.GetString(2),
-                ApplicationType: reader.GetString(3),
-                AuthenticationMode: reader.GetString(4),
-                IsEnabled: reader.GetBoolean(5),
-                Notes: reader.IsDBNull(6) ? null : reader.GetString(6),
-                CreatedAtUtc: ReadTimestamp(reader, 7),
-                UpdatedAtUtc: ReadTimestamp(reader, 8));
-
-            key = new CryptoApiClientKeyRecord(
-                ClientKeyId: reader.GetGuid(9),
-                ClientId: client.ClientId,
-                KeyName: reader.GetString(10),
-                KeyIdentifier: reader.GetString(11),
-                CredentialType: reader.GetString(12),
-                SecretHashAlgorithm: reader.GetString(13),
-                SecretHash: reader.GetString(14),
-                SecretHint: reader.IsDBNull(15) ? null : reader.GetString(15),
-                IsEnabled: reader.GetBoolean(16),
-                CreatedAtUtc: ReadTimestamp(reader, 17),
-                UpdatedAtUtc: ReadTimestamp(reader, 18),
-                ExpiresAtUtc: ReadNullableTimestamp(reader, 19),
-                RevokedAtUtc: ReadNullableTimestamp(reader, 20),
-                RevokedReason: reader.IsDBNull(21) ? null : reader.GetString(21),
-                LastUsedAtUtc: ReadNullableTimestamp(reader, 22));
+            Guid[] boundPolicyIds = await ReadClientBoundPolicyIdsAsync(connection, client.ClientId, cancellationToken);
+            return new CryptoApiClientAuthenticationState(client, key, boundPolicyIds);
         }
-
-        Guid[] boundPolicyIds = await ReadClientBoundPolicyIdsAsync(connection, client.ClientId, cancellationToken);
-        return new CryptoApiClientAuthenticationState(client, key, boundPolicyIds);
+        catch
+        {
+            result = "error";
+            throw;
+        }
+        finally
+        {
+            _metrics?.RecordSharedStateRequest("get_client_authentication_state", result, stopwatch.Elapsed);
+        }
     }
 
     public async Task<CryptoApiKeyAuthorizationState> GetKeyAuthorizationStateAsync(Guid clientId, string aliasName, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(aliasName);
 
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "success";
+
         if (!IsConfigured())
         {
+            _metrics?.RecordSharedStateRequest("get_key_authorization_state", "unconfigured", stopwatch.Elapsed);
             return new CryptoApiKeyAuthorizationState(null, null, []);
         }
 
-        await EnsureConfiguredAndInitializedAsync(cancellationToken);
-
-        await using NpgsqlConnection connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        CryptoApiClientRecord? client = await ReadClientByIdAsync(connection, clientId, cancellationToken);
-        if (client is null)
+        try
         {
-            return new CryptoApiKeyAuthorizationState(null, null, []);
-        }
+            await EnsureConfiguredAndInitializedAsync(cancellationToken);
 
-        CryptoApiKeyAliasRecord? alias = await ReadKeyAliasByNameAsync(connection, aliasName, cancellationToken);
-        if (alias is null)
+            await using NpgsqlConnection connection = CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            CryptoApiClientRecord? client = await ReadClientByIdAsync(connection, clientId, cancellationToken);
+            if (client is null)
+            {
+                result = "client_not_found";
+                return new CryptoApiKeyAuthorizationState(null, null, []);
+            }
+
+            CryptoApiKeyAliasRecord? alias = await ReadKeyAliasByNameAsync(connection, aliasName, cancellationToken);
+            if (alias is null)
+            {
+                result = "alias_not_found";
+                return new CryptoApiKeyAuthorizationState(client, null, []);
+            }
+
+            IReadOnlyList<CryptoApiPolicyRecord> sharedPolicies = await ReadSharedPoliciesAsync(connection, clientId, alias.AliasId, cancellationToken);
+            return new CryptoApiKeyAuthorizationState(client, alias, sharedPolicies);
+        }
+        catch
         {
-            return new CryptoApiKeyAuthorizationState(client, null, []);
+            result = "error";
+            throw;
         }
-
-        IReadOnlyList<CryptoApiPolicyRecord> sharedPolicies = await ReadSharedPoliciesAsync(connection, clientId, alias.AliasId, cancellationToken);
-        return new CryptoApiKeyAuthorizationState(client, alias, sharedPolicies);
+        finally
+        {
+            _metrics?.RecordSharedStateRequest("get_key_authorization_state", result, stopwatch.Elapsed);
+        }
     }
 
     public async Task UpsertClientAsync(CryptoApiClientRecord client, CancellationToken cancellationToken = default)
@@ -381,23 +478,40 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
 
     public async Task<bool> TryTouchClientKeyLastUsedAsync(Guid clientKeyId, DateTimeOffset lastUsedAtUtc, TimeSpan minimumInterval, CancellationToken cancellationToken = default)
     {
-        await EnsureConfiguredAndInitializedAsync(cancellationToken);
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        string result = "skipped";
 
-        await using NpgsqlConnection connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        try
+        {
+            await EnsureConfiguredAndInitializedAsync(cancellationToken);
 
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE crypto_api_client_keys
-            SET last_used_at_utc = @lastUsedAtUtc
-            WHERE client_key_id = @clientKeyId
-              AND (last_used_at_utc IS NULL OR last_used_at_utc < @minimumLastUsedAtUtc);
-            """;
-        AddGuid(command, "@clientKeyId", clientKeyId);
-        AddTimestamp(command, "@lastUsedAtUtc", lastUsedAtUtc);
-        AddTimestamp(command, "@minimumLastUsedAtUtc", lastUsedAtUtc - minimumInterval);
+            await using NpgsqlConnection connection = CreateConnection();
+            await connection.OpenAsync(cancellationToken);
 
-        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+            await using NpgsqlCommand command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE crypto_api_client_keys
+                SET last_used_at_utc = @lastUsedAtUtc
+                WHERE client_key_id = @clientKeyId
+                  AND (last_used_at_utc IS NULL OR last_used_at_utc < @minimumLastUsedAtUtc);
+                """;
+            AddGuid(command, "@clientKeyId", clientKeyId);
+            AddTimestamp(command, "@lastUsedAtUtc", lastUsedAtUtc);
+            AddTimestamp(command, "@minimumLastUsedAtUtc", lastUsedAtUtc - minimumInterval);
+
+            bool applied = await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+            result = applied ? "applied" : "skipped";
+            return applied;
+        }
+        catch
+        {
+            result = "error";
+            throw;
+        }
+        finally
+        {
+            _metrics?.RecordSharedStateRequest("touch_client_key_last_used", result, stopwatch.Elapsed);
+        }
     }
 
     public async Task UpsertKeyAliasAsync(CryptoApiKeyAliasRecord keyAlias, CancellationToken cancellationToken = default)
@@ -959,6 +1073,7 @@ public sealed class PostgresCryptoApiSharedStateStore(IOptions<CryptoApiSharedPe
     private async Task<long> ReadAuthStateRevisionFromDatabaseAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _authStateRevisionDatabaseReadCount);
+        _metrics?.RecordSharedStateDatabaseRead("auth_state_revision");
 
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText = "SELECT metadata_value FROM crypto_api_metadata WHERE metadata_key = @metadataKey;";

@@ -1,11 +1,13 @@
 using Pkcs11Wrapper.Admin.Application.Services;
+using Pkcs11Wrapper.Admin.Application.Observability;
 
 namespace Pkcs11Wrapper.Admin.Web.Security;
 
 public sealed class LocalAdminLoginService(
     LocalAdminUserStore userStore,
     AuditLogService auditLog,
-    LocalAdminLoginThrottleService throttle)
+    LocalAdminLoginThrottleService throttle,
+    AdminMetrics? metrics = null)
 {
     public async Task<LocalAdminLoginResult> AttemptLoginAsync(string? userName, string? password, string? remoteIp, CancellationToken cancellationToken = default)
     {
@@ -16,6 +18,7 @@ public sealed class LocalAdminLoginService(
         {
             string details = $"Login attempt throttled until {status.LockedUntilUtc:O}.";
             await auditLog.WriteAsync("Authentication", "Login", target, "Throttled", details, actor: target, cancellationToken: cancellationToken);
+            metrics?.RecordLoginAttempt("throttled");
             return new(false, true, "locked", details, null, status.LockedUntilUtc);
         }
 
@@ -27,16 +30,21 @@ public sealed class LocalAdminLoginService(
                 ? $"Invalid credentials. Lockout active until {failureStatus.LockedUntilUtc:O}."
                 : "Invalid username or password.";
             await auditLog.WriteAsync("Authentication", "Login", target, failureStatus.IsLocked ? "Throttled" : "Failure", details, actor: target, cancellationToken: cancellationToken);
+            metrics?.RecordLoginAttempt(failureStatus.IsLocked ? "throttled" : "failure");
             return new(false, failureStatus.IsLocked, failureStatus.IsLocked ? "locked" : "invalid", details, null, failureStatus.LockedUntilUtc);
         }
 
         throttle.RecordSuccess(user.UserName, remoteIp);
         await auditLog.WriteAsync("Authentication", "Login", user.UserName, "Success", "Local admin login succeeded.", actor: user.UserName, cancellationToken: cancellationToken);
+        metrics?.RecordLoginAttempt("success");
         return new(true, false, string.Empty, "Login succeeded.", user, null);
     }
 
     public Task WriteLogoutAsync(string? userName, CancellationToken cancellationToken = default)
-        => auditLog.WriteAsync("Authentication", "Logout", NormalizeTarget(userName), "Success", "Local admin logout succeeded.", actor: NormalizeTarget(userName), cancellationToken: cancellationToken);
+    {
+        metrics?.RecordLogout("success");
+        return auditLog.WriteAsync("Authentication", "Logout", NormalizeTarget(userName), "Success", "Local admin logout succeeded.", actor: NormalizeTarget(userName), cancellationToken: cancellationToken);
+    }
 
     private static string NormalizeTarget(string? userName)
         => string.IsNullOrWhiteSpace(userName) ? "anonymous" : userName.Trim();

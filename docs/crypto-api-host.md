@@ -178,6 +178,15 @@ Current settings live under three sections:
 }
 ```
 
+Observability settings now live under a fourth section:
+
+```json
+"Observability": {
+  "EnablePrometheusScrapingEndpoint": true,
+  "MetricsPath": "/metrics"
+}
+```
+
 Notes:
 
 - if `Backends` is omitted, the top-level `ModulePath` / `UserPin` pair is treated as the default backend runtime
@@ -209,6 +218,7 @@ Notes:
 
 For the full operator deployment model, see [docs/crypto-api-deployment.md](docs/crypto-api-deployment.md).
 If you are wrapping this host in your own container or supervisor, start from `deploy/container/crypto-api.env.example`.
+For the metric catalogue and Grafana starter dashboard, see [docs/runtime-observability.md](docs/runtime-observability.md).
 
 ## Local run example
 
@@ -236,6 +246,7 @@ Useful endpoints:
 - `POST /api/v1/operations/sign` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "algorithm": "RS256", "payloadBase64": "aGVsbG8=" }`
 - `POST /api/v1/operations/verify` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "algorithm": "RS256", "payloadBase64": "aGVsbG8=", "signatureBase64": "..." }`
 - `POST /api/v1/operations/random` using `X-Api-Key-Id` + `X-Api-Key-Secret` with `{ "keyAlias": "payments-signer", "length": 32 }`
+- `/metrics` when `Observability:EnablePrometheusScrapingEndpoint=true`
 
 `/api/v1/shared-state` returns a reduced public summary by default. Detailed connection-target and count metadata stay hidden unless you explicitly enable `CryptoApiSecurity:ExposeSharedStateDetails`.
 `/api/v1/auth/self` validates the hashed shared secret, enforces disabled / revoked / expired state, updates last-used metadata, and returns the authenticated client context that future crypto operations can reuse.

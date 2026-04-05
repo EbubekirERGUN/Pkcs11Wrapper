@@ -5,6 +5,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
+using Pkcs11Wrapper.CryptoApi.Observability;
 
 namespace Pkcs11Wrapper.CryptoApi.RateLimiting;
 
@@ -14,15 +15,17 @@ public static class CryptoApiRateLimitingExtensions
     public const string OperationsPolicyName = "crypto-api-operations";
     public const string InstanceLocalMode = "instance-local";
 
-    public static RateLimiterOptions ConfigureCryptoApiPolicies(this RateLimiterOptions options, CryptoApiRateLimitingOptions settings)
+    public static RateLimiterOptions ConfigureCryptoApiPolicies(this RateLimiterOptions options, CryptoApiRateLimitingOptions settings, CryptoApiMetrics? metrics = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(settings);
 
-        options.OnRejected = static async (context, cancellationToken) =>
+        options.OnRejected = async (context, cancellationToken) =>
         {
             CryptoApiRateLimitScopeMetadata metadata = context.HttpContext.GetEndpoint()?.Metadata.GetMetadata<CryptoApiRateLimitScopeMetadata>()
                 ?? new CryptoApiRateLimitScopeMetadata("customer-api", 1L);
+
+            metrics?.RecordRateLimitRejection(metadata.Scope);
 
             Dictionary<string, object?> extensions = new(StringComparer.Ordinal)
             {
