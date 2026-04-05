@@ -6,6 +6,16 @@ namespace Pkcs11Wrapper.Admin.Application.Services;
 
 public sealed class DeviceProfileService(IDeviceProfileStore store)
 {
+    private sealed record ImportCandidate(int Index, HsmDeviceProfile SourceProfile, HsmDeviceProfile? NormalizedProfile, string? ValidationError)
+    {
+        public bool IsValid => NormalizedProfile is not null && ValidationError is null;
+    }
+
+    private sealed record ImportEvaluation(
+        IReadOnlyList<HsmDeviceProfile> ExistingProfiles,
+        IReadOnlyList<HsmDeviceProfile> ReadyProfiles,
+        AdminConfigurationImportAnalysis Analysis);
+
     public async Task<IReadOnlyList<HsmDeviceProfile>> GetAllAsync(CancellationToken cancellationToken = default)
         => (await store.GetAllAsync(cancellationToken)).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToArray();
 
@@ -67,62 +77,69 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
         return created;
     }
 
+    public async Task<AdminConfigurationImportAnalysis> AnalyzeImportAsync(IReadOnlyList<HsmDeviceProfile> importedProfiles, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(importedProfiles);
+
+        List<HsmDeviceProfile> existing = [.. await store.GetAllAsync(cancellationToken)];
+        return EvaluateImport(existing, importedProfiles).Analysis;
+    }
+
     public async Task<AdminConfigurationImportResult> ImportAsync(IReadOnlyList<HsmDeviceProfile> importedProfiles, AdminConfigurationImportMode mode, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(importedProfiles);
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        List<HsmDeviceProfile> imported = importedProfiles.Select(profile => NormalizeImported(profile, now)).ToList();
-        ValidateImportedProfiles(imported);
-
         List<HsmDeviceProfile> existing = [.. await store.GetAllAsync(cancellationToken)];
-        int added = 0;
-        int updated = 0;
-        int removed = 0;
+        ImportEvaluation evaluation = EvaluateImport(existing, importedProfiles);
+        AdminConfigurationImportImpact impact = mode switch
+        {
+            AdminConfigurationImportMode.Merge => evaluation.Analysis.MergeImpact,
+            AdminConfigurationImportMode.ReplaceAll => evaluation.Analysis.ReplaceAllImpact,
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported configuration import mode.")
+        };
+
+        if (!impact.CanImport)
+        {
+            throw new InvalidOperationException(impact.Blockers.FirstOrDefault() ?? "Configuration import is blocked by preflight validation.");
+        }
 
         switch (mode)
         {
             case AdminConfigurationImportMode.Merge:
-                foreach (HsmDeviceProfile importedProfile in imported)
+            {
+                List<HsmDeviceProfile> merged = [.. existing];
+                foreach (HsmDeviceProfile importedProfile in evaluation.ReadyProfiles)
                 {
-                    int existingIndex = existing.FindIndex(x => x.Id == importedProfile.Id);
+                    int existingIndex = merged.FindIndex(x => x.Id == importedProfile.Id);
                     if (existingIndex >= 0)
                     {
-                        existing[existingIndex] = importedProfile;
-                        updated++;
+                        merged[existingIndex] = importedProfile;
                         continue;
                     }
 
-                    HsmDeviceProfile? conflictingName = existing.FirstOrDefault(x => string.Equals(x.Name, importedProfile.Name, StringComparison.OrdinalIgnoreCase));
-                    if (conflictingName is not null)
-                    {
-                        throw new InvalidOperationException($"Import would create a conflicting device name '{importedProfile.Name}'. Rename the device or use Replace All.");
-                    }
-
-                    existing.Add(importedProfile);
-                    added++;
+                    merged.Add(importedProfile);
                 }
 
-                await store.SaveAllAsync(existing, cancellationToken);
+                await store.SaveAllAsync(merged, cancellationToken);
                 return new(
                     mode,
-                    imported.Count,
-                    added,
-                    updated,
+                    importedProfiles.Count,
+                    impact.AddedDeviceProfileCount,
+                    impact.UpdatedDeviceProfileCount,
                     0,
-                    $"Merged {imported.Count} device profile(s): {added} added, {updated} updated.",
+                    $"Merged {importedProfiles.Count} device profile(s): {impact.AddedDeviceProfileCount} added, {impact.UpdatedDeviceProfileCount} updated.",
                     []);
+            }
 
             case AdminConfigurationImportMode.ReplaceAll:
-                removed = existing.Count;
-                await store.SaveAllAsync(imported, cancellationToken);
+                await store.SaveAllAsync(evaluation.ReadyProfiles, cancellationToken);
                 return new(
                     mode,
-                    imported.Count,
-                    imported.Count,
+                    importedProfiles.Count,
+                    impact.AddedDeviceProfileCount,
                     0,
-                    removed,
-                    $"Replaced device configuration with {imported.Count} imported profile(s); removed {removed} existing profile(s).",
+                    impact.RemovedDeviceProfileCount,
+                    $"Replaced device configuration with {importedProfiles.Count} imported profile(s); removed {impact.RemovedDeviceProfileCount} existing profile(s).",
                     []);
 
             default:
@@ -141,6 +158,167 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
 
         await store.SaveAllAsync(devices, cancellationToken);
     }
+
+    private static ImportEvaluation EvaluateImport(IReadOnlyList<HsmDeviceProfile> existingProfiles, IReadOnlyList<HsmDeviceProfile> importedProfiles)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        List<ImportCandidate> candidates = [];
+        List<AdminConfigurationImportIssue> issues = [];
+        List<string> commonBlockers = [];
+
+        for (int index = 0; index < importedProfiles.Count; index++)
+        {
+            HsmDeviceProfile sourceProfile = importedProfiles[index];
+            try
+            {
+                HsmDeviceProfile normalized = NormalizeImported(sourceProfile, now);
+                candidates.Add(new(index, sourceProfile, normalized, null));
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                string profileName = GetDisplayName(sourceProfile.Name);
+                string? profileId = TryFormatProfileId(sourceProfile.Id);
+                candidates.Add(new(index, sourceProfile, null, ex.Message));
+                commonBlockers.Add(ex.Message);
+                issues.Add(new("All modes", "Error", profileName, profileId, $"Profile #{index + 1}: {ex.Message}"));
+            }
+        }
+
+        List<ImportCandidate> validCandidates = candidates.Where(candidate => candidate.IsValid).ToList();
+        HashSet<int> duplicateIndexes = [];
+
+        foreach (IGrouping<Guid, ImportCandidate> group in validCandidates.GroupBy(candidate => candidate.NormalizedProfile!.Id).Where(group => group.Count() > 1))
+        {
+            string message = $"Imported configuration contains duplicate device id '{group.Key}'.";
+            commonBlockers.Add(message);
+            foreach (ImportCandidate candidate in group)
+            {
+                duplicateIndexes.Add(candidate.Index);
+            }
+
+            string profileNames = string.Join(", ", group.Select(candidate => candidate.NormalizedProfile!.Name).Distinct(StringComparer.OrdinalIgnoreCase));
+            issues.Add(new("All modes", "Error", profileNames, group.Key.ToString(), message));
+        }
+
+        foreach (IGrouping<string, ImportCandidate> group in validCandidates.GroupBy(candidate => candidate.NormalizedProfile!.Name, StringComparer.OrdinalIgnoreCase).Where(group => group.Count() > 1))
+        {
+            string message = $"Imported configuration contains duplicate device name '{group.Key}'.";
+            commonBlockers.Add(message);
+            foreach (ImportCandidate candidate in group)
+            {
+                duplicateIndexes.Add(candidate.Index);
+            }
+
+            string profileIds = string.Join(", ", group.Select(candidate => candidate.NormalizedProfile!.Id.ToString()).Distinct(StringComparer.OrdinalIgnoreCase));
+            issues.Add(new("All modes", "Error", group.Key, profileIds, message));
+        }
+
+        List<HsmDeviceProfile> readyProfiles = validCandidates
+            .Where(candidate => !duplicateIndexes.Contains(candidate.Index))
+            .Select(candidate => candidate.NormalizedProfile!)
+            .ToList();
+
+        Dictionary<Guid, HsmDeviceProfile> existingById = existingProfiles.ToDictionary(profile => profile.Id);
+        Dictionary<string, HsmDeviceProfile> existingByName = existingProfiles.ToDictionary(profile => profile.Name, StringComparer.OrdinalIgnoreCase);
+
+        List<HsmDeviceProfile> mergeAddedProfiles = [];
+        List<HsmDeviceProfile> mergeUpdatedProfiles = [];
+        List<string> mergeBlockers = [.. commonBlockers];
+        List<HsmDeviceProfile> mergeConflictProfiles = [];
+
+        foreach (HsmDeviceProfile profile in readyProfiles)
+        {
+            if (existingById.ContainsKey(profile.Id))
+            {
+                mergeUpdatedProfiles.Add(profile);
+                continue;
+            }
+
+            if (existingByName.TryGetValue(profile.Name, out HsmDeviceProfile? conflictingName) && conflictingName.Id != profile.Id)
+            {
+                string message = $"Import would create a conflicting device name '{profile.Name}'. Rename the device or use Replace All.";
+                mergeBlockers.Add(message);
+                mergeConflictProfiles.Add(profile);
+                issues.Add(new("Merge only", "Error", profile.Name, profile.Id.ToString(), message));
+                continue;
+            }
+
+            mergeAddedProfiles.Add(profile);
+        }
+
+        List<string> replaceBlockers = [.. commonBlockers];
+
+        AdminConfigurationImportImpact mergeImpact = new(
+            AdminConfigurationImportMode.Merge,
+            mergeBlockers.Count == 0,
+            existingProfiles.Count + mergeAddedProfiles.Count,
+            mergeAddedProfiles.Count,
+            mergeUpdatedProfiles.Count,
+            0,
+            duplicateIndexes.Count + mergeConflictProfiles.Count,
+            candidates.Count(candidate => !candidate.IsValid),
+            [.. mergeAddedProfiles.Select(profile => profile.Name).OrderBy(name => name, StringComparer.OrdinalIgnoreCase)],
+            [.. mergeUpdatedProfiles.Select(profile => profile.Name).OrderBy(name => name, StringComparer.OrdinalIgnoreCase)],
+            [],
+            mergeBlockers,
+            BuildSummary(AdminConfigurationImportMode.Merge, mergeAddedProfiles.Count, mergeUpdatedProfiles.Count, 0, duplicateIndexes.Count + mergeConflictProfiles.Count, candidates.Count(candidate => !candidate.IsValid), existingProfiles.Count + mergeAddedProfiles.Count, mergeBlockers.Count == 0));
+
+        AdminConfigurationImportImpact replaceAllImpact = new(
+            AdminConfigurationImportMode.ReplaceAll,
+            replaceBlockers.Count == 0,
+            readyProfiles.Count,
+            readyProfiles.Count,
+            0,
+            existingProfiles.Count,
+            duplicateIndexes.Count,
+            candidates.Count(candidate => !candidate.IsValid),
+            [.. readyProfiles.Select(profile => profile.Name).OrderBy(name => name, StringComparer.OrdinalIgnoreCase)],
+            [],
+            [.. existingProfiles.Select(profile => profile.Name).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.OrdinalIgnoreCase)],
+            replaceBlockers,
+            BuildSummary(AdminConfigurationImportMode.ReplaceAll, readyProfiles.Count, 0, existingProfiles.Count, duplicateIndexes.Count, candidates.Count(candidate => !candidate.IsValid), readyProfiles.Count, replaceBlockers.Count == 0));
+
+        AdminConfigurationImportAnalysis analysis = new(
+            existingProfiles.Count,
+            importedProfiles.Count,
+            readyProfiles.Count,
+            duplicateIndexes.Count,
+            candidates.Count(candidate => !candidate.IsValid),
+            mergeImpact,
+            replaceAllImpact,
+            issues);
+
+        return new(existingProfiles, readyProfiles, analysis);
+    }
+
+    private static string BuildSummary(
+        AdminConfigurationImportMode mode,
+        int added,
+        int updated,
+        int removed,
+        int duplicateCount,
+        int invalidCount,
+        int finalCount,
+        bool canImport)
+    {
+        string action = mode == AdminConfigurationImportMode.Merge
+            ? $"Would add {added} and update {updated} device profile(s)."
+            : $"Would apply {added} imported device profile(s) and remove {removed} current profile(s).";
+
+        string finalState = $" Final device count: {finalCount}.";
+        if (canImport)
+        {
+            return action + finalState;
+        }
+
+        return action + finalState + $" Blocked by {duplicateCount} duplicate/conflicting and {invalidCount} invalid profile(s).";
+    }
+
+    private static string GetDisplayName(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "<unnamed>" : value.Trim();
+
+    private static string? TryFormatProfileId(Guid id)
+        => id == Guid.Empty ? null : id.ToString();
 
     private static string ValidateName(string? value)
     {
@@ -210,25 +388,6 @@ public sealed class DeviceProfileService(IDeviceProfileStore store)
             UpdatedUtc = updatedUtc,
             Vendor = NormalizeVendorMetadata(profile.Vendor)
         };
-    }
-
-    private static void ValidateImportedProfiles(IReadOnlyList<HsmDeviceProfile> profiles)
-    {
-        HashSet<Guid> ids = [];
-        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (HsmDeviceProfile profile in profiles)
-        {
-            if (!ids.Add(profile.Id))
-            {
-                throw new InvalidOperationException($"Imported configuration contains duplicate device id '{profile.Id}'.");
-            }
-
-            if (!names.Add(profile.Name))
-            {
-                throw new InvalidOperationException($"Imported configuration contains duplicate device name '{profile.Name}'.");
-            }
-        }
     }
 
     private static HsmDeviceVendorMetadata? NormalizeVendorMetadata(HsmDeviceVendorMetadata? vendor)

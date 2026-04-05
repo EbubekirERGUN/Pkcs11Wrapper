@@ -247,6 +247,55 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         }
     }
 
+    public async Task<AdminConfigurationImportPreview> PreviewConfigurationImportAsync(Stream stream, string? sourceName, CancellationToken cancellationToken = default)
+    {
+        authorization.DemandAdmin();
+        ArgumentNullException.ThrowIfNull(stream);
+
+        string importTarget = string.IsNullOrWhiteSpace(sourceName) ? "uploaded bundle" : sourceName;
+
+        try
+        {
+            AdminConfigurationExportBundle? bundle = await JsonSerializer.DeserializeAsync(stream, AdminApplicationJsonContext.Default.AdminConfigurationExportBundle, cancellationToken);
+            if (bundle is null)
+            {
+                return CreateUnreadableImportPreview(importTarget, "Configuration file was empty or unreadable.");
+            }
+
+            List<string> problems = GetConfigurationBundleProblems(bundle);
+            AdminConfigurationImportAnalysis analysis = bundle.DeviceProfiles is null
+                ? CreateEmptyImportAnalysis()
+                : await deviceProfiles.AnalyzeImportAsync(bundle.DeviceProfiles, cancellationToken);
+            List<string> warnings = GetConfigurationBundleWarnings(bundle);
+
+            if (problems.Count > 0)
+            {
+                analysis = analysis with
+                {
+                    MergeImpact = ApplyPreviewBlockers(analysis.MergeImpact, problems),
+                    ReplaceAllImpact = ApplyPreviewBlockers(analysis.ReplaceAllImpact, problems)
+                };
+            }
+
+            return new(
+                importTarget,
+                bundle.Format,
+                bundle.SchemaVersion,
+                bundle.ProductName,
+                string.IsNullOrWhiteSpace(bundle.ProductVersion) ? null : bundle.ProductVersion,
+                bundle.ExportedUtc == default ? null : bundle.ExportedUtc,
+                [.. bundle.IncludedSections],
+                [.. bundle.ExcludedSections],
+                problems,
+                warnings,
+                analysis);
+        }
+        catch (JsonException ex)
+        {
+            return CreateUnreadableImportPreview(importTarget, $"Configuration file could not be parsed: {ex.Message}");
+        }
+    }
+
     public async Task<AdminConfigurationImportResult> ImportConfigurationAsync(Stream stream, string? sourceName, AdminConfigurationImportMode mode, bool acknowledgeReplaceAll, CancellationToken cancellationToken = default)
     {
         authorization.DemandAdmin();
@@ -273,13 +322,7 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
             IReadOnlyList<HsmDeviceProfile> afterImport = await deviceProfiles.GetAllAsync(cancellationToken);
 
             DeviceDependencyCleanupSummary cleanup = await ReconcileDependentStateForImportAsync(beforeImport, afterImport, mode, cancellationToken);
-            List<string> warnings = [.. importResult.Warnings];
-            string currentVersion = GetCurrentProductVersion();
-            if (!string.IsNullOrWhiteSpace(bundle.ProductVersion) && !string.Equals(bundle.ProductVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
-            {
-                warnings.Add($"Bundle was exported from admin version {bundle.ProductVersion}; current version is {currentVersion}.");
-            }
-
+            List<string> warnings = [.. importResult.Warnings, .. GetConfigurationBundleWarnings(bundle)];
             AdminConfigurationImportResult result = warnings.Count == importResult.Warnings.Count
                 ? importResult
                 : importResult with { Warnings = warnings };
@@ -2284,22 +2327,148 @@ public sealed class HsmAdminService(DeviceProfileService deviceProfiles, AuditLo
         return capabilities.Count == 0 ? "<none>" : string.Join(", ", capabilities);
     }
 
+    private static AdminConfigurationImportPreview CreateUnreadableImportPreview(string importTarget, string problem)
+        => new(
+            importTarget,
+            null,
+            null,
+            null,
+            null,
+            null,
+            [],
+            [],
+            [problem],
+            [],
+            CreateBlockedImportAnalysis(problem));
+
+    private static AdminConfigurationImportAnalysis CreateBlockedImportAnalysis(string blocker)
+        => new(
+            0,
+            0,
+            0,
+            0,
+            0,
+            new(
+                AdminConfigurationImportMode.Merge,
+                false,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                [],
+                [],
+                [],
+                [blocker],
+                "Import preview is blocked until the configuration file can be read."),
+            new(
+                AdminConfigurationImportMode.ReplaceAll,
+                false,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                [],
+                [],
+                [],
+                [blocker],
+                "Import preview is blocked until the configuration file can be read."),
+            []);
+
+    private static AdminConfigurationImportAnalysis CreateEmptyImportAnalysis()
+        => new(
+            0,
+            0,
+            0,
+            0,
+            0,
+            new(
+                AdminConfigurationImportMode.Merge,
+                true,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                [],
+                [],
+                [],
+                [],
+                "Would add 0 and update 0 device profile(s). Final device count: 0."),
+            new(
+                AdminConfigurationImportMode.ReplaceAll,
+                true,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                [],
+                [],
+                [],
+                [],
+                "Would apply 0 imported device profile(s) and remove 0 current profile(s). Final device count: 0."),
+            []);
+
+    private static AdminConfigurationImportImpact ApplyPreviewBlockers(AdminConfigurationImportImpact impact, IReadOnlyList<string> problems)
+    {
+        List<string> blockers = [.. problems, .. impact.Blockers];
+        return impact with
+        {
+            CanImport = false,
+            Blockers = blockers,
+            Summary = blockers.Count == 0
+                ? impact.Summary
+                : $"{impact.Summary} Bundle validation also reported {problems.Count} blocking issue(s)."
+        };
+    }
+
     private static void ValidateConfigurationBundle(AdminConfigurationExportBundle bundle)
     {
+        List<string> problems = GetConfigurationBundleProblems(bundle);
+        if (problems.Count > 0)
+        {
+            throw new InvalidOperationException(problems[0]);
+        }
+    }
+
+    private static List<string> GetConfigurationBundleProblems(AdminConfigurationExportBundle bundle)
+    {
+        List<string> problems = [];
+
         if (!string.Equals(bundle.Format, ConfigurationFormat, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"Unsupported configuration format '{bundle.Format}'.");
+            problems.Add($"Unsupported configuration format '{bundle.Format}'.");
         }
 
         if (bundle.SchemaVersion != ConfigurationSchemaVersion)
         {
-            throw new InvalidOperationException($"Unsupported configuration schema version '{bundle.SchemaVersion}'.");
+            problems.Add($"Unsupported configuration schema version '{bundle.SchemaVersion}'.");
         }
 
         if (bundle.DeviceProfiles is null)
         {
-            throw new InvalidOperationException("Configuration bundle does not contain a device profile section.");
+            problems.Add("Configuration bundle does not contain a device profile section.");
         }
+
+        return problems;
+    }
+
+    private static List<string> GetConfigurationBundleWarnings(AdminConfigurationExportBundle bundle)
+    {
+        List<string> warnings = [];
+        string currentVersion = GetCurrentProductVersion();
+        if (!string.IsNullOrWhiteSpace(bundle.ProductVersion) && !string.Equals(bundle.ProductVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add($"Bundle was exported from admin version {bundle.ProductVersion}; current version is {currentVersion}.");
+        }
+
+        return warnings;
     }
 
     private static string GetCurrentProductVersion()

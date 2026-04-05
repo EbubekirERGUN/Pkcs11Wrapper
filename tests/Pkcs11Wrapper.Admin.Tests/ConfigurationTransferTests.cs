@@ -101,6 +101,97 @@ public sealed class ConfigurationTransferTests
         Assert.Contains("conflicting device name", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task PreviewConfigurationImportAsyncSummarizesMergeAndReplaceAllImpact()
+    {
+        Guid existingId = Guid.NewGuid();
+        HsmAdminService service = CreateService(
+        [
+            CreateProfile(existingId, "Primary HSM", "/usr/lib/original.so"),
+            CreateProfile(Guid.NewGuid(), "Legacy HSM", "/usr/lib/legacy.so")
+        ]);
+
+        AdminConfigurationExportBundle bundle = new()
+        {
+            ProductVersion = "0.9.0-preview",
+            DeviceProfiles =
+            [
+                CreateProfile(existingId, "Primary HSM", "/opt/updated.so"),
+                CreateProfile(Guid.NewGuid(), "Backup HSM", "/opt/backup.so")
+            ]
+        };
+
+        AdminConfigurationImportPreview preview = await service.PreviewConfigurationImportAsync(CreateBundleStream(bundle), "preview.json");
+
+        Assert.Equal("preview.json", preview.SourceName);
+        Assert.Contains("0.9.0-preview", preview.Warnings.Single());
+        Assert.Equal(2, preview.Analysis.ExistingDeviceProfileCount);
+        Assert.Equal(2, preview.Analysis.ImportedDeviceProfileCount);
+        Assert.True(preview.Analysis.MergeImpact.CanImport);
+        Assert.Equal(1, preview.Analysis.MergeImpact.AddedDeviceProfileCount);
+        Assert.Equal(1, preview.Analysis.MergeImpact.UpdatedDeviceProfileCount);
+        Assert.Equal(3, preview.Analysis.MergeImpact.FinalDeviceProfileCount);
+        Assert.True(preview.Analysis.ReplaceAllImpact.CanImport);
+        Assert.Equal(2, preview.Analysis.ReplaceAllImpact.AddedDeviceProfileCount);
+        Assert.Equal(2, preview.Analysis.ReplaceAllImpact.RemovedDeviceProfileCount);
+        Assert.Contains("Legacy HSM", preview.Analysis.ReplaceAllImpact.RemovedDeviceProfileNames);
+    }
+
+    [Fact]
+    public async Task PreviewConfigurationImportAsyncReportsInvalidDuplicateAndMergeOnlyProblems()
+    {
+        Guid existingId = Guid.NewGuid();
+        Guid duplicateId = Guid.NewGuid();
+        HsmAdminService service = CreateService(
+        [
+            CreateProfile(existingId, "Primary HSM", "/usr/lib/original.so")
+        ]);
+
+        AdminConfigurationExportBundle bundle = new()
+        {
+            DeviceProfiles =
+            [
+                CreateProfile(Guid.NewGuid(), "", "/opt/missing-name.so"),
+                CreateProfile(duplicateId, "Dup A", "/opt/dup-a.so"),
+                CreateProfile(duplicateId, "Dup B", "/opt/dup-b.so"),
+                CreateProfile(Guid.NewGuid(), "Primary HSM", "/opt/conflict.so")
+            ]
+        };
+
+        AdminConfigurationImportPreview preview = await service.PreviewConfigurationImportAsync(CreateBundleStream(bundle), "preview.json");
+
+        Assert.Equal(1, preview.Analysis.InvalidDeviceProfileCount);
+        Assert.Equal(2, preview.Analysis.DuplicateDeviceProfileCount);
+        Assert.False(preview.Analysis.MergeImpact.CanImport);
+        Assert.False(preview.Analysis.ReplaceAllImpact.CanImport);
+        Assert.Contains(preview.Analysis.MergeImpact.Blockers, blocker => blocker.Contains("conflicting device name", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(preview.Analysis.ReplaceAllImpact.Blockers, blocker => blocker.Contains("conflicting device name", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(preview.Analysis.Issues, issue => issue.Scope == "Merge only");
+        Assert.Contains(preview.Analysis.Issues, issue => issue.Message.Contains("Device name is required.", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task PreviewConfigurationImportAsyncSurfacesBundleSchemaProblemsWithoutThrowing()
+    {
+        HsmAdminService service = CreateService([]);
+        AdminConfigurationExportBundle bundle = new()
+        {
+            Format = "Unexpected.Format",
+            SchemaVersion = 99,
+            DeviceProfiles =
+            [
+                CreateProfile(Guid.NewGuid(), "Imported HSM", "/opt/imported.so")
+            ]
+        };
+
+        AdminConfigurationImportPreview preview = await service.PreviewConfigurationImportAsync(CreateBundleStream(bundle), "preview.json");
+
+        Assert.False(preview.Analysis.MergeImpact.CanImport);
+        Assert.False(preview.Analysis.ReplaceAllImpact.CanImport);
+        Assert.Contains(preview.Problems, problem => problem.Contains("Unsupported configuration format", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(preview.Problems, problem => problem.Contains("Unsupported configuration schema version", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static MemoryStream CreateBundleStream(AdminConfigurationExportBundle bundle)
         => new(JsonSerializer.SerializeToUtf8Bytes(bundle, AdminApplicationJsonContext.Default.AdminConfigurationExportBundle));
 
