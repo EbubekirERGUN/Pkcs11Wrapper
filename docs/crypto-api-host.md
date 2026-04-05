@@ -172,7 +172,10 @@ Current settings live under three sections:
       "InstanceName": "pkcs11wrapper:cryptoapi:",
       "ConnectTimeoutMilliseconds": 5000,
       "OperationTimeoutMilliseconds": 1000,
-      "AuthStateRevisionTtlSeconds": 30
+      "ReconnectCooldownSeconds": 5,
+      "AuthStateRevisionTtlSeconds": 300,
+      "AuthenticationEntryTtlSeconds": 0,
+      "AuthorizationEntryTtlSeconds": 0
     }
   }
 }
@@ -210,9 +213,15 @@ Notes:
 - `CryptoApiRequestPathCaching:Redis:Enabled=true` turns on the optional Redis-backed hot-path accelerator.
 - `CryptoApiRequestPathCaching:Redis:Configuration` is a standard StackExchange.Redis configuration string.
 - `CryptoApiRequestPathCaching:Redis:InstanceName` prefixes cache/lease keys so multiple environments can share one Redis fleet safely.
+- Redis hot-path keys now live under a versioned `hotpath:v2:` namespace beneath `InstanceName`, so cache-key format changes can roll out without pretending old entries are still valid.
+- `CryptoApiRequestPathCaching:Redis:ReconnectCooldownSeconds` bounds how quickly an instance retries Redis connection establishment after a failure, which avoids reconnect storms when Redis is unhealthy.
 - `CryptoApiRequestPathCaching:Redis:AuthStateRevisionTtlSeconds` bounds how long the shared auth-revision hint lives in Redis before the service refreshes it from the relational source of truth.
+- `CryptoApiRequestPathCaching:Redis:AuthenticationEntryTtlSeconds` and `AuthorizationEntryTtlSeconds` optionally override the shared L2 TTL for successful auth/authz entries. Leave them at `0` to follow the local request-path cache TTL, or set them explicitly when you want a different Redis sharing window.
 - When Redis acceleration is enabled, warm instances can reuse successful auth/authz decisions across the fleet and coordinate `last_used_at_utc` throttling, but correctness still comes from the shared persistence store plus the auth-state revision.
-- Repo-managed client/key/alias/policy/binding writes refresh the shared auth-state revision in Redis immediately after commit. If some external actor changes the database behind the repo's back, Redis does not become authoritative; the revision hint simply ages out and is re-read from the source of truth on the configured TTL.
+- Repo-managed client/key/alias/policy/binding writes refresh the shared auth-state revision in Redis immediately after commit, and that revision hint only moves forward. A late/stale writer cannot roll the Redis hint back to an older revision.
+- Distributed auth/authz entries stay revision-scoped and still age out naturally; the service does not try to sweep Redis with delete scans on every control-plane write.
+- Redis auth/authz TTLs are clamped to the API key expiry when one exists, so an expiring key does not outlive its own credential lifetime in the distributed cache.
+- If some external actor changes the database behind the repo's back, Redis still does not become authoritative; the revision hint simply ages out and is re-read from the source of truth on the configured TTL.
 - `CryptoApiRateLimiting` adds built-in limits for `/api/v1/auth/self` and the customer-facing `/api/v1/operations/*` POST routes.
 - The first slice is intentionally **instance-local**, not shared across the fleet. A caller can consume up to the configured budget on each Crypto API instance behind the load balancer.
 - Partitioning is keyed by the presented `X-Api-Key-Id` header when present, with remote-IP fallback when no key id is available.

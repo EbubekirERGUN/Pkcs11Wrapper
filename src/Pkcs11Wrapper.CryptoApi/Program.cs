@@ -62,8 +62,11 @@ builder.Services.AddOptions<CryptoApiRequestPathCachingOptions>()
         static options => !options.Redis.Enabled
             || (options.Redis.ConnectTimeoutMilliseconds > 0
                 && options.Redis.OperationTimeoutMilliseconds > 0
-                && options.Redis.AuthStateRevisionTtlSeconds > 0),
-        "Crypto API Redis hot-path acceleration must define positive Redis timeout and auth-state revision TTL values.")
+                && options.Redis.ReconnectCooldownSeconds > 0
+                && options.Redis.AuthStateRevisionTtlSeconds > 0
+                && options.Redis.AuthenticationEntryTtlSeconds >= 0
+                && options.Redis.AuthorizationEntryTtlSeconds >= 0),
+        "Crypto API Redis hot-path acceleration must define positive Redis timeout/reconnect values, a positive auth-state revision TTL, and non-negative Redis auth/authz TTL overrides.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<CryptoApiRateLimitingOptions>()
@@ -118,7 +121,8 @@ builder.Services.AddSingleton<ICryptoApiDistributedHotPathCache>(sp =>
         ? new RedisCryptoApiDistributedHotPathCache(
             sp.GetRequiredService<IOptions<CryptoApiRequestPathCachingOptions>>(),
             sp.GetRequiredService<TimeProvider>(),
-            sp.GetRequiredService<ILogger<RedisCryptoApiDistributedHotPathCache>>())
+            sp.GetRequiredService<ILogger<RedisCryptoApiDistributedHotPathCache>>(),
+            sp.GetRequiredService<CryptoApiMetrics>())
         : new NoOpCryptoApiDistributedHotPathCache();
 });
 builder.Services.AddSingleton<CryptoApiRuntimeDescriptorProvider>();
@@ -130,13 +134,7 @@ builder.Services.AddSingleton<CryptoApiClientManagementService>();
 builder.Services.AddSingleton<CryptoApiClientAuthenticationService>();
 builder.Services.AddSingleton<CryptoApiKeyAccessManagementService>();
 builder.Services.AddSingleton<CryptoApiRouteDispatchService>();
-builder.Services.AddSingleton<CryptoApiKeyOperationAuthorizationService>(sp => new CryptoApiKeyOperationAuthorizationService(
-    sp.GetRequiredService<ICryptoApiSharedStateStore>(),
-    sp.GetRequiredService<ICryptoApiDistributedHotPathCache>(),
-    sp.GetRequiredService<TimeProvider>(),
-    sp.GetRequiredService<CryptoApiClientSecretHasher>(),
-    sp.GetRequiredService<CryptoApiRequestPathCache>(),
-    sp.GetRequiredService<ICryptoApiRouteRegistry>()));
+builder.Services.AddSingleton<CryptoApiKeyOperationAuthorizationService>();
 builder.Services.AddSingleton<ICryptoApiCustomerOperationService, CryptoApiPkcs11CustomerOperationService>();
 builder.Services.AddCryptoApiSharedStateStore();
 

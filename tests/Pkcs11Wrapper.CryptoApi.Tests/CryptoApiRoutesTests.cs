@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Pkcs11Wrapper.CryptoApi.Access;
+using Pkcs11Wrapper.CryptoApi.Caching;
 using Pkcs11Wrapper.CryptoApi.Clients;
 using Pkcs11Wrapper.CryptoApi.Configuration;
 using Pkcs11Wrapper.CryptoApi.Operations;
@@ -428,6 +429,47 @@ public sealed class CryptoApiRoutesTests
         Assert.Single(fakeOperations.Calls);
     }
 
+    [PostgresFact]
+    public async Task MetricsEndpointPublishesRedisCacheSourceWhenDistributedCacheServesWarmAuthentication()
+    {
+        await using PostgresTestScope scope = await CreateScopeAsync();
+        MemoryDistributedHotPathCache distributedCache = new();
+        await using WebApplicationFactory<Program> factory = CreateFactory(
+            scope.Options,
+            services =>
+            {
+                services.RemoveAll<ICryptoApiDistributedHotPathCache>();
+                services.AddSingleton<ICryptoApiDistributedHotPathCache>(distributedCache);
+            },
+            new Dictionary<string, string?>
+            {
+                ["CryptoApiRequestPathCaching:Enabled"] = "false"
+            });
+
+        SeededAccess access = await SeedAuthorizedAccessAsync(factory, ["sign"], "payments-signer");
+
+        using HttpClient httpClient = factory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Id", access.Key.KeyIdentifier);
+        httpClient.DefaultRequestHeaders.Add("X-Api-Key-Secret", access.Key.Secret);
+
+        using (HttpResponseMessage firstResponse = await httpClient.GetAsync("/api/v1/auth/self"))
+        {
+            Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        }
+
+        using (HttpResponseMessage secondResponse = await httpClient.GetAsync("/api/v1/auth/self"))
+        {
+            Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
+        }
+
+        using HttpResponseMessage metricsResponse = await httpClient.GetAsync("/metrics");
+        string metrics = await metricsResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, metricsResponse.StatusCode);
+        Assert.Contains("pkcs11wrapper_crypto_api_authentication_results_total", metrics, StringComparison.Ordinal);
+        Assert.Contains("source=\"redis_cache\"", metrics, StringComparison.Ordinal);
+    }
+
     private static void ConfigureCountingSharedState(IServiceCollection services, TimeProvider timeProvider)
     {
         services.RemoveAll<TimeProvider>();
@@ -618,5 +660,141 @@ public sealed class CryptoApiRoutesTests
 
         public void Advance(TimeSpan delta)
             => _utcNow = _utcNow.Add(delta);
+    }
+
+    private sealed class MemoryDistributedHotPathCache : ICryptoApiDistributedHotPathCache
+    {
+        private readonly Dictionary<string, CryptoApiAuthenticatedClient> _authenticationCache = [];
+        private readonly Dictionary<string, CryptoApiAuthorizedKeyOperation> _authorizationCache = [];
+        private readonly Dictionary<Guid, DateTimeOffset> _lastUsedLeases = [];
+        private long? _authStateRevision;
+        private readonly Lock _gate = new();
+
+        public bool Enabled => true;
+
+        public Task<long?> GetAuthStateRevisionAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                return Task.FromResult(_authStateRevision);
+            }
+        }
+
+        public Task SetAuthStateRevisionAsync(long authStateRevision, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                if (_authStateRevision is null || authStateRevision > _authStateRevision.Value)
+                {
+                    _authStateRevision = authStateRevision;
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<CryptoApiAuthenticatedClient?> GetAuthenticatedClientAsync(
+            long authStateRevision,
+            string keyIdentifier,
+            string secretFingerprint,
+            DateTimeOffset now,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string key = $"{authStateRevision}:{keyIdentifier}:{secretFingerprint}";
+            lock (_gate)
+            {
+                if (!_authenticationCache.TryGetValue(key, out CryptoApiAuthenticatedClient? cached))
+                {
+                    return Task.FromResult<CryptoApiAuthenticatedClient?>(null);
+                }
+
+                if (cached.ExpiresAtUtc is DateTimeOffset expiresAtUtc && expiresAtUtc <= now)
+                {
+                    _authenticationCache.Remove(key);
+                    return Task.FromResult<CryptoApiAuthenticatedClient?>(null);
+                }
+
+                return Task.FromResult<CryptoApiAuthenticatedClient?>(cached with { AuthenticatedAtUtc = now });
+            }
+        }
+
+        public Task SetAuthenticatedClientAsync(
+            long authStateRevision,
+            string keyIdentifier,
+            string secretFingerprint,
+            CryptoApiAuthenticatedClient authenticatedClient,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                _authenticationCache[$"{authStateRevision}:{keyIdentifier}:{secretFingerprint}"] = authenticatedClient;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<CryptoApiAuthorizedKeyOperation?> GetAuthorizedOperationAsync(
+            long authStateRevision,
+            Guid clientId,
+            string aliasName,
+            string operation,
+            CryptoApiAuthenticatedClient client,
+            DateTimeOffset now,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string key = $"{authStateRevision}:{clientId:N}:{aliasName}:{operation}";
+            lock (_gate)
+            {
+                if (!_authorizationCache.TryGetValue(key, out CryptoApiAuthorizedKeyOperation? authorization))
+                {
+                    return Task.FromResult<CryptoApiAuthorizedKeyOperation?>(null);
+                }
+
+                return Task.FromResult<CryptoApiAuthorizedKeyOperation?>(authorization with
+                {
+                    Client = client,
+                    AuthorizedAtUtc = now
+                });
+            }
+        }
+
+        public Task SetAuthorizedOperationAsync(
+            long authStateRevision,
+            Guid clientId,
+            CryptoApiAuthorizedKeyOperation authorization,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                _authorizationCache[$"{authStateRevision}:{clientId:N}:{authorization.AliasName}:{authorization.Operation}"] = authorization;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<bool?> TryAcquireLastUsedRefreshLeaseAsync(
+            Guid clientKeyId,
+            DateTimeOffset now,
+            TimeSpan minimumInterval,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                if (_lastUsedLeases.TryGetValue(clientKeyId, out DateTimeOffset expiresAtUtc) && expiresAtUtc > now)
+                {
+                    return Task.FromResult<bool?>(false);
+                }
+
+                _lastUsedLeases[clientKeyId] = now.Add(minimumInterval);
+                return Task.FromResult<bool?>(true);
+            }
+        }
     }
 }

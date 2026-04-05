@@ -15,6 +15,24 @@ namespace Pkcs11Wrapper.CryptoApi.Caching;
 public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistributedHotPathCache, IAsyncDisposable
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private const string HotPathKeyspaceVersion = "hotpath:v2:";
+    private const string SetIfGreaterScript = """
+        local existing = redis.call('GET', KEYS[1])
+        local incoming = tonumber(ARGV[1])
+        if existing == false then
+            redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+            return 1
+        end
+
+        local current = tonumber(existing)
+        if current == nil or current < incoming then
+            redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+            return 1
+        end
+
+        redis.call('PEXPIRE', KEYS[1], ARGV[2])
+        return 0
+        """;
 
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RedisCryptoApiDistributedHotPathCache> _logger;
@@ -22,6 +40,7 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
     private readonly CryptoApiRequestPathRedisOptions _redisOptions;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly CryptoApiMetrics? _metrics;
+    private readonly string _keyPrefix;
 
     private IConnectionMultiplexer? _connection;
     private DateTimeOffset _nextConnectAttemptUtc;
@@ -37,6 +56,7 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         _options = options.Value;
         _redisOptions = _options.Redis ?? new CryptoApiRequestPathRedisOptions();
         _metrics = metrics;
+        _keyPrefix = BuildKeyPrefix(_redisOptions.InstanceName);
     }
 
     public bool Enabled
@@ -59,7 +79,13 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
             string? text = value.IsNullOrEmpty ? null : value.ToString();
             if (string.IsNullOrWhiteSpace(text) || !long.TryParse(text, out long parsed))
             {
-                result = "miss";
+                result = string.IsNullOrWhiteSpace(text) ? "miss" : "invalid";
+                return null;
+            }
+
+            if (parsed <= 0)
+            {
+                result = "invalid";
                 return null;
             }
 
@@ -96,11 +122,14 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
 
         try
         {
-            _ = await database.StringSetAsync(
+            bool updated = await SetMonotonicStringValueAsync(
+                    database,
                     GetAuthStateRevisionKey(),
                     authStateRevision.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    _redisOptions.AuthStateRevisionTtl)
-                .WaitAsync(cancellationToken);
+                    _redisOptions.AuthStateRevisionTtl,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            result = updated ? "updated" : "preserved_newer";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -186,10 +215,17 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
 
         try
         {
+            TimeSpan entryTtl = ResolveAuthenticatedClientTtl(authenticatedClient, _timeProvider.GetUtcNow());
+            if (entryTtl <= TimeSpan.Zero)
+            {
+                result = "skipped_expired";
+                return;
+            }
+
             _ = await database.StringSetAsync(
                     GetAuthenticationKey(authStateRevision, keyIdentifier, secretFingerprint),
                     JsonSerializer.Serialize(authenticatedClient, SerializerOptions),
-                    _options.EntryTtl)
+                    entryTtl)
                 .WaitAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -287,10 +323,17 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
 
         try
         {
+            TimeSpan entryTtl = ResolveAuthorizedOperationTtl(authorization, _timeProvider.GetUtcNow());
+            if (entryTtl <= TimeSpan.Zero)
+            {
+                result = "skipped_expired";
+                return;
+            }
+
             _ = await database.StringSetAsync(
                     GetAuthorizationKey(authStateRevision, clientId, authorization.AliasName, authorization.Operation),
                     JsonSerializer.Serialize(payload, SerializerOptions),
-                    _options.EntryTtl)
+                    entryTtl)
                 .WaitAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -366,6 +409,7 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         }
 
         await _connectionGate.WaitAsync(cancellationToken);
+        Stopwatch? connectStopwatch = null;
         try
         {
             connection = _connection;
@@ -377,9 +421,11 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
             DateTimeOffset now = _timeProvider.GetUtcNow();
             if (_nextConnectAttemptUtc > now)
             {
+                _metrics?.RecordDistributedCacheRequest("connect", "cooldown", TimeSpan.Zero);
                 return null;
             }
 
+            connectStopwatch = Stopwatch.StartNew();
             ConfigurationOptions configuration = ConfigurationOptions.Parse(_redisOptions.Configuration!, true);
             configuration.AbortOnConnectFail = false;
             configuration.ConnectTimeout = _redisOptions.ConnectTimeoutMilliseconds;
@@ -389,11 +435,13 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
 
             _connection = await ConnectionMultiplexer.ConnectAsync(configuration).WaitAsync(cancellationToken);
             _nextConnectAttemptUtc = DateTimeOffset.MinValue;
+            _metrics?.RecordDistributedCacheRequest("connect", "success", connectStopwatch.Elapsed);
             return _connection.GetDatabase();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _nextConnectAttemptUtc = _timeProvider.GetUtcNow().AddSeconds(5);
+            _nextConnectAttemptUtc = _timeProvider.GetUtcNow().Add(_redisOptions.ReconnectCooldown);
+            _metrics?.RecordDistributedCacheRequest("connect", "error", connectStopwatch?.Elapsed ?? TimeSpan.Zero);
             LogRedisFailure(ex, "connect to Redis hot-path cache");
             return null;
         }
@@ -407,16 +455,81 @@ public sealed class RedisCryptoApiDistributedHotPathCache : ICryptoApiDistribute
         => _logger.LogDebug(ex, "Crypto API Redis hot-path accelerator could not {Operation}; falling back to source-of-truth/shared-store behavior.", operation);
 
     private string GetAuthStateRevisionKey()
-        => $"{_redisOptions.InstanceName}auth-revision";
+        => $"{_keyPrefix}auth-state:revision";
 
     private string GetAuthenticationKey(long authStateRevision, string keyIdentifier, string secretFingerprint)
-        => $"{_redisOptions.InstanceName}auth:{authStateRevision}:{HashCompositeKey(keyIdentifier, secretFingerprint)}";
+        => $"{_keyPrefix}auth-client:{authStateRevision}:{HashCompositeKey(keyIdentifier, secretFingerprint)}";
 
     private string GetAuthorizationKey(long authStateRevision, Guid clientId, string aliasName, string operation)
-        => $"{_redisOptions.InstanceName}authorize:{authStateRevision}:{HashCompositeKey(clientId.ToString("N"), aliasName, operation)}";
+        => $"{_keyPrefix}authorize:{authStateRevision}:{HashCompositeKey(clientId.ToString("N"), aliasName, operation)}";
 
     private string GetLastUsedLeaseKey(Guid clientKeyId)
-        => $"{_redisOptions.InstanceName}last-used:{clientKeyId:N}";
+        => $"{_keyPrefix}last-used-lease:{clientKeyId:N}";
+
+    private TimeSpan ResolveAuthenticatedClientTtl(CryptoApiAuthenticatedClient authenticatedClient, DateTimeOffset now)
+        => ClampEntryTtl(
+            _redisOptions.ResolveAuthenticationEntryTtl(_options.EntryTtl),
+            authenticatedClient.ExpiresAtUtc,
+            now);
+
+    private TimeSpan ResolveAuthorizedOperationTtl(CryptoApiAuthorizedKeyOperation authorization, DateTimeOffset now)
+        => ClampEntryTtl(
+            _redisOptions.ResolveAuthorizationEntryTtl(_options.EntryTtl),
+            authorization.Client.ExpiresAtUtc,
+            now);
+
+    private static TimeSpan ClampEntryTtl(TimeSpan configuredTtl, DateTimeOffset? expiresAtUtc, DateTimeOffset now)
+    {
+        if (configuredTtl <= TimeSpan.Zero)
+        {
+            return TimeSpan.Zero;
+        }
+
+        if (expiresAtUtc is not DateTimeOffset absoluteExpiry)
+        {
+            return configuredTtl;
+        }
+
+        TimeSpan remainingLifetime = absoluteExpiry - now;
+        if (remainingLifetime <= TimeSpan.Zero)
+        {
+            return TimeSpan.Zero;
+        }
+
+        return remainingLifetime < configuredTtl
+            ? remainingLifetime
+            : configuredTtl;
+    }
+
+    private async Task<bool> SetMonotonicStringValueAsync(
+        IDatabase database,
+        RedisKey key,
+        RedisValue value,
+        TimeSpan expiry,
+        CancellationToken cancellationToken)
+    {
+        RedisResult redisResult = await database.ScriptEvaluateAsync(
+                SetIfGreaterScript,
+                [key],
+                [value, (long)Math.Ceiling(expiry.TotalMilliseconds)])
+            .WaitAsync(cancellationToken);
+
+        return (long)redisResult! == 1;
+    }
+
+    private static string BuildKeyPrefix(string? instanceName)
+    {
+        string normalized = string.IsNullOrWhiteSpace(instanceName)
+            ? "pkcs11wrapper:cryptoapi:"
+            : instanceName.Trim();
+
+        if (!normalized.EndsWith(':'))
+        {
+            normalized += ':';
+        }
+
+        return normalized + HotPathKeyspaceVersion;
+    }
 
     private static string HashCompositeKey(params string[] values)
     {
