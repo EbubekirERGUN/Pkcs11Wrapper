@@ -1,4 +1,6 @@
 .app-nav {
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 1.2rem;
@@ -130,4 +132,10 @@
     font-size: 0.78rem;
     line-height: 1.45;
     color: rgba(191, 219, 254, 0.72);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-nav-item ::deep a.app-nav-link {
+        transition: none;
+    }
 }
