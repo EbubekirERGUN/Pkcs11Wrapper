@@ -1,16 +1,31 @@
 @inherits LayoutComponentBase
+@implements IDisposable
+@using Microsoft.AspNetCore.Components.Routing
 @inject NavigationManager Navigation
 
 <a class="skip-link" href="#admin-main-content">Skip to main content</a>
 
-<div class="admin-shell">
-    <aside class="admin-sidebar" aria-label="Admin console branding and primary navigation">
-        <div class="admin-brand">
-            <div class="admin-brand-mark">P11</div>
-            <div>
-                <div class="admin-brand-eyebrow">Pkcs11Wrapper</div>
-                <div class="admin-brand-title">Admin Console</div>
+<div class="admin-shell @NavigationShellClass">
+    <button class="admin-sidebar-backdrop" type="button" @onclick="CloseNavigation" tabindex="-1" aria-hidden="true"></button>
+
+    <aside id="admin-sidebar" class="admin-sidebar" aria-label="Admin console branding and primary navigation">
+        <div class="admin-sidebar-header">
+            <div class="admin-brand">
+                <div class="admin-brand-mark">P11</div>
+                <div>
+                    <div class="admin-brand-eyebrow">Pkcs11Wrapper</div>
+                    <div class="admin-brand-title">Admin Console</div>
+                </div>
             </div>
+
+            <button class="admin-sidebar-close"
+                    type="button"
+                    @onclick="CloseNavigation"
+                    aria-controls="admin-sidebar"
+                    aria-expanded="@NavigationExpanded"
+                    aria-label="Close navigation menu">
+                <span aria-hidden="true">×</span>
+            </button>
         </div>
 
         <div class="admin-brand-copy">
@@ -27,9 +42,25 @@
 
     <div class="admin-main">
         <header class="admin-topbar">
-            <div>
-                <div class="admin-topbar-eyebrow">Operations workspace</div>
-                <div class="admin-topbar-title" id="admin-section-title">@CurrentSectionTitle</div>
+            <div class="admin-topbar-primary">
+                <button class="admin-nav-toggle"
+                        type="button"
+                        @onclick="ToggleNavigation"
+                        aria-controls="admin-sidebar"
+                        aria-expanded="@NavigationExpanded"
+                        aria-label="@NavigationToggleLabel">
+                    <span class="admin-nav-toggle-box" aria-hidden="true">
+                        <span class="admin-nav-toggle-line"></span>
+                        <span class="admin-nav-toggle-line"></span>
+                        <span class="admin-nav-toggle-line"></span>
+                    </span>
+                    <span class="admin-nav-toggle-copy">Menu</span>
+                </button>
+
+                <div>
+                    <div class="admin-topbar-eyebrow">Operations workspace</div>
+                    <div class="admin-topbar-title" id="admin-section-title">@CurrentSectionTitle</div>
+                </div>
             </div>
 
             <div class="admin-topbar-meta">
@@ -52,6 +83,14 @@
 </div>
 
 @code {
+    private bool _isNavigationOpen;
+
+    private string NavigationShellClass => _isNavigationOpen ? "admin-shell-nav-open" : string.Empty;
+
+    private string NavigationExpanded => _isNavigationOpen ? "true" : "false";
+
+    private string NavigationToggleLabel => _isNavigationOpen ? "Close navigation menu" : "Open navigation menu";
+
     private string CurrentSectionTitle
     {
         get
@@ -67,9 +106,42 @@
                 "audit" => "Audit Logs",
                 "configuration" => "Configuration Transfer",
                 "lab" => "PKCS#11 Lab",
+                "telemetry" => "PKCS#11 Telemetry",
+                "crypto-api-access" => "Crypto API Access",
                 "users" => "Local Users",
                 _ => "Admin Console"
             };
         }
+    }
+
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += HandleLocationChanged;
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= HandleLocationChanged;
+    }
+
+    private void ToggleNavigation()
+    {
+        _isNavigationOpen = !_isNavigationOpen;
+    }
+
+    private void CloseNavigation()
+    {
+        _isNavigationOpen = false;
+    }
+
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!_isNavigationOpen)
+        {
+            return;
+        }
+
+        _isNavigationOpen = false;
+        _ = InvokeAsync(StateHasChanged);
     }
 }

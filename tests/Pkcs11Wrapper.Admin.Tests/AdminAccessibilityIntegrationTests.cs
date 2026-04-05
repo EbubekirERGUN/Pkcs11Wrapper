@@ -48,6 +48,10 @@ public sealed partial class AdminAccessibilityIntegrationTests
             Assert.Contains("id=\"admin-main-content\"", html, StringComparison.Ordinal);
             Assert.Contains("aria-labelledby=\"admin-section-title\"", html, StringComparison.Ordinal);
             Assert.Contains("aria-label=\"Primary admin navigation\"", html, StringComparison.Ordinal);
+            Assert.Contains("id=\"admin-sidebar\"", html, StringComparison.Ordinal);
+            Assert.Contains("aria-controls=\"admin-sidebar\"", html, StringComparison.Ordinal);
+            Assert.Contains("aria-label=\"Open navigation menu\"", html, StringComparison.Ordinal);
+            Assert.Contains("aria-label=\"Close navigation menu\"", html, StringComparison.Ordinal);
             Assert.Contains("aria-label=\"Username\"", html, StringComparison.Ordinal);
             Assert.Contains("aria-label=\"Password\"", html, StringComparison.Ordinal);
             Assert.Contains("aria-live=\"polite\"", html, StringComparison.Ordinal);
@@ -75,6 +79,8 @@ public sealed partial class AdminAccessibilityIntegrationTests
             string devices = await GetHtmlAsync(client, "/devices");
             Assert.Contains("aria-label=\"Device name\"", devices, StringComparison.Ordinal);
             Assert.Contains("aria-label=\"Device status filter\"", devices, StringComparison.Ordinal);
+            Assert.Contains("aria-controls=\"admin-sidebar\"", devices, StringComparison.Ordinal);
+            AssertSectionTitle(devices, "Device Profiles");
 
             string users = await GetHtmlAsync(client, "/users");
             Assert.Contains("aria-label=\"Username\"", users, StringComparison.Ordinal);
@@ -96,6 +102,10 @@ public sealed partial class AdminAccessibilityIntegrationTests
             string telemetry = await GetHtmlAsync(client, "/telemetry");
             Assert.Contains("aria-label=\"Search telemetry entries\"", telemetry, StringComparison.Ordinal);
             Assert.Contains("aria-label=\"Telemetry page size\"", telemetry, StringComparison.Ordinal);
+            AssertSectionTitle(telemetry, "PKCS#11 Telemetry");
+
+            string cryptoApiAccess = await GetHtmlAsync(client, "/crypto-api-access");
+            AssertSectionTitle(cryptoApiAccess, "Crypto API Access");
 
             string audit = await GetHtmlAsync(client, "/audit");
             Assert.Contains("aria-label=\"Search audit logs\"", audit, StringComparison.Ordinal);
@@ -197,6 +207,11 @@ public sealed partial class AdminAccessibilityIntegrationTests
         {
             Directory.Delete(path, recursive: true);
         }
+    }
+
+    private static void AssertSectionTitle(string html, string title)
+    {
+        Assert.Matches($"id=\\\"admin-section-title\\\"[^>]*>\\s*{Regex.Escape(title)}\\s*<", html);
     }
 
     [GeneratedRegex("role=\"(?:status|alert)\"[^>]*aria-live=\"(?:polite|assertive)\"", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
