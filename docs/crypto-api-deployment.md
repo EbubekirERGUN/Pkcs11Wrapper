@@ -245,6 +245,10 @@ CryptoApiSharedPersistence__AutoInitialize=true
 CryptoApiRequestPathCaching__Redis__Enabled=true
 CryptoApiRequestPathCaching__Redis__Configuration=redis.internal:6379,password=<secret>,ssl=false
 CryptoApiRequestPathCaching__Redis__InstanceName=pkcs11wrapper:cryptoapi:
+CryptoApiRequestPathCaching__Redis__ReconnectCooldownSeconds=5
+CryptoApiRequestPathCaching__Redis__AuthStateRevisionTtlSeconds=300
+CryptoApiRequestPathCaching__Redis__AuthenticationEntryTtlSeconds=0
+CryptoApiRequestPathCaching__Redis__AuthorizationEntryTtlSeconds=0
 ```
 
 Important:
@@ -254,6 +258,8 @@ Important:
 - `AutoInitialize=true` is fine for first-run convenience; the schema creation path is designed to be idempotent
 - after bootstrap, `AutoInitialize=false` is a reasonable steady-state posture if you want schema drift or missing migrations to fail fast during rollout
 - Redis acceleration is optional and should be treated as a performance layer only; the relational shared persistence backend remains authoritative
+- keep `AuthenticationEntryTtlSeconds` / `AuthorizationEntryTtlSeconds` at `0` unless you intentionally want a different Redis sharing window than the in-process request-path cache TTL
+- the Redis auth-state revision hint is monotonic: repo-managed writes can move it forward, but a late/stale instance cannot push it backward
 - if Redis is unavailable, the request path falls back to the relational/shared-store behavior rather than rejecting healthy traffic
 
 ## Scaling expectations for the stateless Crypto API service

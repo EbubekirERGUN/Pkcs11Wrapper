@@ -10,6 +10,19 @@ namespace Pkcs11Wrapper.CryptoApi.Tests;
 
 public sealed class CryptoApiDistributedHotPathCacheTests
 {
+    [Fact]
+    public async Task DistributedHotCacheKeepsNewestAuthStateRevisionWhenOlderValueArrivesLater()
+    {
+        FakeDistributedHotPathCache distributedCache = new();
+
+        await distributedCache.SetAuthStateRevisionAsync(7);
+        await distributedCache.SetAuthStateRevisionAsync(5);
+
+        long? revision = await distributedCache.GetAuthStateRevisionAsync();
+
+        Assert.Equal(7, revision);
+    }
+
     [PostgresFact]
     public async Task PostgresOnlyWarmInstanceInvalidatesRevokedKeyAcrossInstancesWithoutRevisionDatabaseChurn()
     {
@@ -304,7 +317,10 @@ public sealed class CryptoApiDistributedHotPathCacheTests
             cancellationToken.ThrowIfCancellationRequested();
             lock (_gate)
             {
-                _authStateRevision = authStateRevision;
+                if (_authStateRevision is null || authStateRevision > _authStateRevision.Value)
+                {
+                    _authStateRevision = authStateRevision;
+                }
             }
 
             return Task.CompletedTask;

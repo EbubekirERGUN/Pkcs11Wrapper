@@ -80,6 +80,25 @@ Custom Crypto API metrics focus on the hot path:
 
 These cover the first slice requested for request rate/latency, sign/verify/random latency, auth/authz cache behavior, shared-state pressure, pool visibility, rate limits, and errors.
 
+For the Redis-backed L2 hot-path layer, the most useful `operation` / `result` combinations are now:
+
+- `connect`
+  - `success`, `cooldown`, `error`
+- `get_auth_state_revision`
+  - `hit`, `miss`, `invalid`, `unavailable`, `error`
+- `set_auth_state_revision`
+  - `updated`, `preserved_newer`, `unavailable`, `error`
+- `get_authenticated_client`, `set_authenticated_client`
+- `get_authorized_operation`, `set_authorized_operation`
+- `try_acquire_last_used_refresh_lease`
+
+That means operators can answer a few practical questions directly from metrics instead of guesswork:
+
+- Are instances actually using Redis, or staying on shared-state/database paths?
+- Are reconnect attempts backing off cleanly during Redis outages?
+- Are stale writers trying to republish an older auth-state revision hint?
+- Is Redis helping coordinate `last_used_at_utc` throttling across nodes?
+
 ## Gateway metrics
 
 Gateway-specific metrics focus on ingress health and operator-visible rejection behavior:
