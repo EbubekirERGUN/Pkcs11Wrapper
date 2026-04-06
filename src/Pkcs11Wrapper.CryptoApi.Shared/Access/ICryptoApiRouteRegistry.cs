@@ -7,7 +7,7 @@ public interface ICryptoApiRouteRegistry
     CryptoApiRoutePlanResolutionResult Resolve(CryptoApiKeyAliasRecord alias);
 }
 
-public sealed record CryptoApiRoutePlanResolutionResult(
+public readonly record struct CryptoApiRoutePlanResolutionResult(
     bool Succeeded,
     string? FailureReason,
     CryptoApiRoutePlan? RoutePlan)

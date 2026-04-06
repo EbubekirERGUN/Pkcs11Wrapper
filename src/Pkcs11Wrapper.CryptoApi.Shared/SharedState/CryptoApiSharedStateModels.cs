@@ -82,12 +82,12 @@ public sealed record CryptoApiPolicyRecord(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
 
-public sealed record CryptoApiClientPolicyBinding(
+public readonly record struct CryptoApiClientPolicyBinding(
     Guid ClientId,
     Guid PolicyId,
     DateTimeOffset BoundAtUtc);
 
-public sealed record CryptoApiKeyAliasPolicyBinding(
+public readonly record struct CryptoApiKeyAliasPolicyBinding(
     Guid AliasId,
     Guid PolicyId,
     DateTimeOffset BoundAtUtc);

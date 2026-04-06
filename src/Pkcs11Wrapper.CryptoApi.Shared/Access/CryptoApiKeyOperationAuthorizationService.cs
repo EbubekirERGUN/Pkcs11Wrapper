@@ -284,7 +284,7 @@ public sealed class CryptoApiKeyOperationAuthorizationService
             return Failed("No shared policy grants this client access to the requested key alias.");
         }
 
-        List<CryptoApiMatchedPolicy> matchedPolicies = [];
+        List<CryptoApiMatchedPolicy> matchedPolicies = new(authorizationState.SharedPolicies.Count);
         foreach (CryptoApiPolicyRecord policy in authorizationState.SharedPolicies)
         {
             CryptoApiOperationPolicyDocument document;
@@ -319,6 +319,7 @@ public sealed class CryptoApiKeyOperationAuthorizationService
             return Failed(routePlanResult.FailureReason ?? "No route plan could be resolved for the requested key alias.");
         }
 
+        matchedPolicies.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.PolicyName, b.PolicyName));
         return new CryptoApiKeyOperationAuthorizationResult(
             Succeeded: true,
             FailureReason: null,
@@ -328,7 +329,7 @@ public sealed class CryptoApiKeyOperationAuthorizationService
                 AliasId: alias.AliasId,
                 AliasName: alias.AliasName,
                 RoutePlan: routePlanResult.RoutePlan,
-                MatchedPolicies: matchedPolicies.OrderBy(policy => policy.PolicyName, StringComparer.OrdinalIgnoreCase).ToArray(),
+                MatchedPolicies: [.. matchedPolicies],
                 AuthorizedAtUtc: _timeProvider.GetUtcNow()));
     }
 

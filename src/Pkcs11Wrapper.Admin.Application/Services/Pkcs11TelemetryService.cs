@@ -76,6 +76,17 @@ public sealed class Pkcs11TelemetryService(IPkcs11TelemetryStore store, IAdminAc
             ? minDurationMilliseconds.Value
             : null;
 
+    private static async Task AppendEntryFireAndForgetAsync(IPkcs11TelemetryStore store, AdminPkcs11TelemetryEntry entry)
+    {
+        try
+        {
+            await store.AppendAsync(entry).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
     private sealed class AdminPkcs11TelemetryListener(IPkcs11TelemetryStore store, HsmDeviceProfile device, AdminActorInfo actor, string? activityTraceId) : IPkcs11OperationTelemetryListener
     {
         public void OnOperationCompleted(in Pkcs11OperationTelemetryEvent operationEvent)
@@ -100,16 +111,7 @@ public sealed class Pkcs11TelemetryService(IPkcs11TelemetryStore store, IAdminAc
                 string.IsNullOrWhiteSpace(activityTraceId) ? actor.SessionId : activityTraceId,
                 [.. operationEvent.Fields.Select(field => new AdminPkcs11TelemetryField(field.Name, field.Classification.ToString(), field.Value))]);
 
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await store.AppendAsync(entry);
-                }
-                catch
-                {
-                }
-            });
+            _ = AppendEntryFireAndForgetAsync(store, entry);
         }
     }
 }

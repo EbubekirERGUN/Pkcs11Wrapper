@@ -17,7 +17,6 @@ public static class Pkcs11TelemetryQueryEvaluator
             string term = query.SearchText.Trim();
             filtered = filtered.Where(item =>
                 Contains(item.DeviceName, term)
-                || Contains(item.DeviceId.ToString("D"), term)
                 || Contains(item.OperationName, term)
                 || Contains(item.NativeOperationName, term)
                 || Contains(item.Status, term)
@@ -27,13 +26,11 @@ public static class Pkcs11TelemetryQueryEvaluator
                 || Contains(item.AuthenticationType, term)
                 || Contains(item.SessionId, term)
                 || Contains(item.CorrelationId, term)
+                || Contains(item.DeviceId.ToString("D"), term)
                 || Contains(FormatDecimal(item.SlotId), term)
                 || Contains(FormatDecimal(item.SessionHandle), term)
                 || Contains(FormatMechanism(item.MechanismType), term)
-                || item.Fields.Any(field =>
-                    Contains(field.Name, term)
-                    || Contains(field.Classification, term)
-                    || Contains(field.Value, term)));
+                || FieldsContain(item.Fields, term));
         }
 
         if (!string.IsNullOrWhiteSpace(query.DeviceFilter))
@@ -63,23 +60,23 @@ public static class Pkcs11TelemetryQueryEvaluator
             filtered = filtered.Where(item => item.DurationMilliseconds >= query.MinDurationMilliseconds.Value);
         }
 
-        filtered = (query.StatusFilter ?? "all").ToLowerInvariant() switch
-        {
-            "success" => filtered.Where(IsSuccess),
-            "non-success" => filtered.Where(item => !IsSuccess(item)),
-            "returned-false" => filtered.Where(item => string.Equals(item.Status, "ReturnedFalse", StringComparison.Ordinal)),
-            "failed" => filtered.Where(item => string.Equals(item.Status, "Failed", StringComparison.Ordinal)),
-            _ => filtered
-        };
+        string statusFilter = query.StatusFilter ?? "all";
+        if (string.Equals(statusFilter, "success", StringComparison.OrdinalIgnoreCase))
+            filtered = filtered.Where(IsSuccess);
+        else if (string.Equals(statusFilter, "non-success", StringComparison.OrdinalIgnoreCase))
+            filtered = filtered.Where(item => !IsSuccess(item));
+        else if (string.Equals(statusFilter, "returned-false", StringComparison.OrdinalIgnoreCase))
+            filtered = filtered.Where(item => string.Equals(item.Status, "ReturnedFalse", StringComparison.Ordinal));
+        else if (string.Equals(statusFilter, "failed", StringComparison.OrdinalIgnoreCase))
+            filtered = filtered.Where(item => string.Equals(item.Status, "Failed", StringComparison.Ordinal));
 
-        DateTimeOffset? threshold = (query.TimeRangeFilter ?? "all").ToLowerInvariant() switch
-        {
-            "1h" => nowUtc.AddHours(-1),
-            "6h" => nowUtc.AddHours(-6),
-            "24h" => nowUtc.AddHours(-24),
-            "7d" => nowUtc.AddDays(-7),
-            _ => null
-        };
+        string timeRange = query.TimeRangeFilter ?? "all";
+        DateTimeOffset? threshold =
+            string.Equals(timeRange, "1h", StringComparison.OrdinalIgnoreCase) ? nowUtc.AddHours(-1) :
+            string.Equals(timeRange, "6h", StringComparison.OrdinalIgnoreCase) ? nowUtc.AddHours(-6) :
+            string.Equals(timeRange, "24h", StringComparison.OrdinalIgnoreCase) ? nowUtc.AddHours(-24) :
+            string.Equals(timeRange, "7d", StringComparison.OrdinalIgnoreCase) ? nowUtc.AddDays(-7) :
+            null;
 
         if (threshold.HasValue)
         {
@@ -132,4 +129,17 @@ public static class Pkcs11TelemetryQueryEvaluator
 
     private static bool Contains(string? value, string term)
         => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool FieldsContain(IReadOnlyList<AdminPkcs11TelemetryField> fields, string term)
+    {
+        for (int i = 0; i < fields.Count; i++)
+        {
+            AdminPkcs11TelemetryField field = fields[i];
+            if (Contains(field.Name, term) || Contains(field.Classification, term) || Contains(field.Value, term))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }

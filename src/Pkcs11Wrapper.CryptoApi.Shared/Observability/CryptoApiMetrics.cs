@@ -14,19 +14,19 @@ public interface ICryptoApiPkcs11RuntimeMetricsSource
     IReadOnlyList<CryptoApiPkcs11SessionPoolMetricsSnapshot> GetSessionPoolMetricsSnapshots();
 }
 
-public sealed record CryptoApiRequestPathCacheMetricsSnapshot(
+public readonly record struct CryptoApiRequestPathCacheMetricsSnapshot(
     bool Enabled,
     int AuthenticationEntryCount,
     int AuthenticationEntryLimit,
     int AuthorizationEntryCount,
     int AuthorizationEntryLimit);
 
-public sealed record CryptoApiSharedStateMetricsSnapshot(
+public readonly record struct CryptoApiSharedStateMetricsSnapshot(
     bool Configured,
     string Provider,
     int EffectiveMaxPoolSize);
 
-public sealed record CryptoApiPkcs11SessionPoolMetricsSnapshot(
+public readonly record struct CryptoApiPkcs11SessionPoolMetricsSnapshot(
     string Backend,
     ulong SlotId,
     int IdleSessions,

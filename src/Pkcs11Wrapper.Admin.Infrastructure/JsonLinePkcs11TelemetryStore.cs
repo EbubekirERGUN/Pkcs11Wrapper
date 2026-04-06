@@ -73,14 +73,26 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
         {
             await EnforceRetentionAsync(cancellationToken);
             string activePath = GetActivePath();
-            FileInfo[] retainedFiles = GetRetainedFilesNewestFirst().Select(path => new FileInfo(path)).ToArray();
-            FileInfo? activeFile = retainedFiles.FirstOrDefault(file => string.Equals(file.FullName, activePath, StringComparison.Ordinal));
+            string[] retainedPaths = GetRetainedFilesNewestFirst();
+            long activeFileBytes = 0;
+            int archivedCount = 0;
+            long retainedBytes = 0;
+            foreach (string path in retainedPaths)
+            {
+                FileInfo info = new(path);
+                if (!info.Exists) continue;
+                retainedBytes += info.Length;
+                if (string.Equals(info.FullName, activePath, StringComparison.Ordinal))
+                    activeFileBytes = info.Length;
+                else
+                    archivedCount++;
+            }
 
             return new(
-                ActiveFileBytes: activeFile?.Exists == true ? activeFile.Length : 0,
-                ArchivedFileCount: retainedFiles.Count(file => !string.Equals(file.FullName, activePath, StringComparison.Ordinal)),
-                RetainedFileCount: retainedFiles.Length,
-                RetainedBytes: retainedFiles.Where(file => file.Exists).Sum(file => file.Length),
+                ActiveFileBytes: activeFileBytes,
+                ArchivedFileCount: archivedCount,
+                RetainedFileCount: retainedPaths.Length,
+                RetainedBytes: retainedBytes,
                 ActiveFileMaxBytes: GetNormalizedActiveFileMaxBytes(),
                 RetentionDays: GetNormalizedRetentionDays(),
                 MaxArchivedFiles: GetNormalizedMaxArchivedFiles(),
@@ -149,7 +161,7 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
             return [];
         }
 
-        Queue<string> tail = new();
+        Queue<string> tail = new(take + 1);
         await foreach (string line in ReadLinesAsync(path, cancellationToken))
         {
             tail.Enqueue(line);
@@ -159,10 +171,14 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
             }
         }
 
-        return tail
-            .Reverse()
-            .Select(line => DeserializeEntry(line, path))
-            .ToArray();
+        AdminPkcs11TelemetryEntry[] entries = new AdminPkcs11TelemetryEntry[tail.Count];
+        int i = entries.Length - 1;
+        foreach (string line in tail)
+        {
+            entries[i--] = DeserializeEntry(line, path);
+        }
+
+        return entries;
     }
 
     private static async IAsyncEnumerable<string> ReadLinesAsync(string path, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
@@ -199,7 +215,7 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
         }
 
         string archivePath = CreateArchivePath();
-        await Task.Run(() => File.Move(activePath, archivePath), cancellationToken);
+        File.Move(activePath, archivePath);
     }
 
     private async Task EnforceRetentionAsync(CancellationToken cancellationToken)
@@ -214,13 +230,13 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
         int retentionDays = GetNormalizedRetentionDays();
         if (retentionDays > 0)
         {
-            DateTimeOffset cutoff = nowUtc.AddDays(-retentionDays);
+            DateTime cutoff = nowUtc.AddDays(-retentionDays).UtcDateTime;
             foreach (string path in GetRetainedFilesNewestFirst())
             {
                 FileInfo info = new(path);
-                if (info.Exists && info.LastWriteTimeUtc < cutoff.UtcDateTime)
+                if (info.Exists && info.LastWriteTimeUtc < cutoff)
                 {
-                    await Task.Run(() => info.Delete(), cancellationToken);
+                    info.Delete();
                 }
             }
         }
@@ -230,11 +246,11 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
         int maxArchivedFiles = GetNormalizedMaxArchivedFiles();
         if (archives.Length > maxArchivedFiles)
         {
-            foreach (string path in archives.Skip(maxArchivedFiles))
+            for (int i = maxArchivedFiles; i < archives.Length; i++)
             {
-                if (File.Exists(path))
+                if (File.Exists(archives[i]))
                 {
-                    await Task.Run(() => File.Delete(path), cancellationToken);
+                    File.Delete(archives[i]);
                 }
             }
         }
@@ -242,9 +258,9 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
         if (File.Exists(activePath))
         {
             FileInfo active = new(activePath);
-            if (active.Length == 0 && GetArchivePathsNewestFirst().Length > 0)
+            if (active.Length == 0 && archives.Length > 0)
             {
-                await Task.Run(() => active.Delete(), cancellationToken);
+                active.Delete();
             }
         }
     }
@@ -252,14 +268,17 @@ public sealed class JsonLinePkcs11TelemetryStore(AdminStorageOptions storageOpti
     private string[] GetRetainedFilesNewestFirst()
     {
         string activePath = GetActivePath();
-        List<string> files = [];
-        if (File.Exists(activePath))
+        string[] archives = GetArchivePathsNewestFirst();
+        bool activeExists = File.Exists(activePath);
+        if (!activeExists)
         {
-            files.Add(activePath);
+            return archives;
         }
 
-        files.AddRange(GetArchivePathsNewestFirst());
-        return [.. files];
+        string[] result = new string[archives.Length + 1];
+        result[0] = activePath;
+        archives.CopyTo(result, 1);
+        return result;
     }
 
     private string[] GetArchivePathsNewestFirst()

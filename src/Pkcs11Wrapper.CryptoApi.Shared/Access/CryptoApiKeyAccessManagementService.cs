@@ -21,38 +21,56 @@ public sealed class CryptoApiKeyAccessManagementService(
         }
 
         CryptoApiSharedStateSnapshot snapshot = await sharedStateStore.GetSnapshotAsync(cancellationToken);
-        IReadOnlyDictionary<Guid, Guid[]> boundPoliciesByAlias = snapshot.KeyAliasPolicyBindings
-            .GroupBy(binding => binding.AliasId)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Select(binding => binding.PolicyId).Distinct().OrderBy(id => id).ToArray());
+        Dictionary<Guid, HashSet<Guid>> policiesByAlias = new(snapshot.KeyAliasPolicyBindings.Count);
+        Dictionary<Guid, HashSet<Guid>> aliasesByPolicy = new(snapshot.KeyAliasPolicyBindings.Count);
+        foreach (var binding in snapshot.KeyAliasPolicyBindings)
+        {
+            if (!policiesByAlias.TryGetValue(binding.AliasId, out HashSet<Guid>? policySet))
+            {
+                policySet = [];
+                policiesByAlias[binding.AliasId] = policySet;
+            }
+            policySet.Add(binding.PolicyId);
 
-        IReadOnlyDictionary<Guid, Guid[]> boundClientsByPolicy = snapshot.ClientPolicyBindings
-            .GroupBy(binding => binding.PolicyId)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Select(binding => binding.ClientId).Distinct().OrderBy(id => id).ToArray());
+            if (!aliasesByPolicy.TryGetValue(binding.PolicyId, out HashSet<Guid>? aliasSet))
+            {
+                aliasSet = [];
+                aliasesByPolicy[binding.PolicyId] = aliasSet;
+            }
+            aliasSet.Add(binding.AliasId);
+        }
 
-        IReadOnlyDictionary<Guid, Guid[]> boundAliasesByPolicy = snapshot.KeyAliasPolicyBindings
-            .GroupBy(binding => binding.PolicyId)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Select(binding => binding.AliasId).Distinct().OrderBy(id => id).ToArray());
+        Dictionary<Guid, HashSet<Guid>> clientsByPolicy = new(snapshot.ClientPolicyBindings.Count);
+        foreach (var binding in snapshot.ClientPolicyBindings)
+        {
+            if (!clientsByPolicy.TryGetValue(binding.PolicyId, out HashSet<Guid>? clientSet))
+            {
+                clientSet = [];
+                clientsByPolicy[binding.PolicyId] = clientSet;
+            }
+            clientSet.Add(binding.ClientId);
+        }
 
-        CryptoApiManagedKeyAlias[] aliases = snapshot.KeyAliases
-            .OrderBy(alias => alias.AliasName, StringComparer.OrdinalIgnoreCase)
-            .Select(alias => MapAlias(
-                alias,
-                boundPoliciesByAlias.TryGetValue(alias.AliasId, out Guid[]? policies) ? policies : []))
-            .ToArray();
+        CryptoApiManagedKeyAlias[] aliases = new CryptoApiManagedKeyAlias[snapshot.KeyAliases.Count];
+        List<CryptoApiKeyAliasRecord> sortedAliases = [.. snapshot.KeyAliases];
+        sortedAliases.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.AliasName, b.AliasName));
+        for (int i = 0; i < sortedAliases.Count; i++)
+        {
+            CryptoApiKeyAliasRecord alias = sortedAliases[i];
+            Guid[] policyIds = policiesByAlias.TryGetValue(alias.AliasId, out HashSet<Guid>? pSet) ? ToSortedArray(pSet) : [];
+            aliases[i] = MapAlias(alias, policyIds);
+        }
 
-        CryptoApiManagedPolicy[] policies = snapshot.Policies
-            .OrderBy(policy => policy.PolicyName, StringComparer.OrdinalIgnoreCase)
-            .Select(policy => MapPolicy(
-                policy,
-                boundClientsByPolicy.TryGetValue(policy.PolicyId, out Guid[]? clientIds) ? clientIds : [],
-                boundAliasesByPolicy.TryGetValue(policy.PolicyId, out Guid[]? aliasIds) ? aliasIds : []))
-            .ToArray();
+        CryptoApiManagedPolicy[] policies = new CryptoApiManagedPolicy[snapshot.Policies.Count];
+        List<CryptoApiPolicyRecord> sortedPolicies = [.. snapshot.Policies];
+        sortedPolicies.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.PolicyName, b.PolicyName));
+        for (int i = 0; i < sortedPolicies.Count; i++)
+        {
+            CryptoApiPolicyRecord policy = sortedPolicies[i];
+            Guid[] clientIds = clientsByPolicy.TryGetValue(policy.PolicyId, out HashSet<Guid>? cSet) ? ToSortedArray(cSet) : [];
+            Guid[] aliasIds = aliasesByPolicy.TryGetValue(policy.PolicyId, out HashSet<Guid>? aSet) ? ToSortedArray(aSet) : [];
+            policies[i] = MapPolicy(policy, clientIds, aliasIds);
+        }
 
         return new CryptoApiKeyAccessSnapshot(
             SharedPersistenceConfigured: true,
@@ -269,28 +287,53 @@ public sealed class CryptoApiKeyAccessManagementService(
     }
 
     private static Guid[] GetBoundPolicyIds(CryptoApiSharedStateSnapshot snapshot, Guid aliasId)
-        => snapshot.KeyAliasPolicyBindings
-            .Where(binding => binding.AliasId == aliasId)
-            .Select(binding => binding.PolicyId)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToArray();
+    {
+        HashSet<Guid>? ids = null;
+        foreach (var binding in snapshot.KeyAliasPolicyBindings)
+        {
+            if (binding.AliasId == aliasId)
+            {
+                ids ??= [];
+                ids.Add(binding.PolicyId);
+            }
+        }
+        return ids is null ? [] : ToSortedArray(ids);
+    }
 
     private static Guid[] GetBoundClientIds(CryptoApiSharedStateSnapshot snapshot, Guid policyId)
-        => snapshot.ClientPolicyBindings
-            .Where(binding => binding.PolicyId == policyId)
-            .Select(binding => binding.ClientId)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToArray();
+    {
+        HashSet<Guid>? ids = null;
+        foreach (var binding in snapshot.ClientPolicyBindings)
+        {
+            if (binding.PolicyId == policyId)
+            {
+                ids ??= [];
+                ids.Add(binding.ClientId);
+            }
+        }
+        return ids is null ? [] : ToSortedArray(ids);
+    }
 
     private static Guid[] GetBoundAliasIds(CryptoApiSharedStateSnapshot snapshot, Guid policyId)
-        => snapshot.KeyAliasPolicyBindings
-            .Where(binding => binding.PolicyId == policyId)
-            .Select(binding => binding.AliasId)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToArray();
+    {
+        HashSet<Guid>? ids = null;
+        foreach (var binding in snapshot.KeyAliasPolicyBindings)
+        {
+            if (binding.PolicyId == policyId)
+            {
+                ids ??= [];
+                ids.Add(binding.AliasId);
+            }
+        }
+        return ids is null ? [] : ToSortedArray(ids);
+    }
+
+    private static Guid[] ToSortedArray(HashSet<Guid> set)
+    {
+        Guid[] result = [.. set];
+        Array.Sort(result);
+        return result;
+    }
 
     private static string[] NormalizeAllowedOperations(IReadOnlyCollection<string> allowedOperations, string parameterName)
     {
@@ -312,9 +355,20 @@ public sealed class CryptoApiKeyAccessManagementService(
 
     private static void EnsurePoliciesExist(CryptoApiSharedStateSnapshot snapshot, IReadOnlyCollection<Guid> policyIds)
     {
-        HashSet<Guid> knownPolicyIds = snapshot.Policies.Select(policy => policy.PolicyId).ToHashSet();
-        foreach (Guid policyId in policyIds.Distinct())
+        HashSet<Guid> knownPolicyIds = new(snapshot.Policies.Count);
+        foreach (var policy in snapshot.Policies)
         {
+            knownPolicyIds.Add(policy.PolicyId);
+        }
+
+        HashSet<Guid>? seen = policyIds.Count > 1 ? new(policyIds.Count) : null;
+        foreach (Guid policyId in policyIds)
+        {
+            if (seen is not null && !seen.Add(policyId))
+            {
+                continue;
+            }
+
             if (!knownPolicyIds.Contains(policyId))
             {
                 throw new InvalidOperationException($"Crypto API policy '{policyId}' was not found.");
@@ -389,21 +443,29 @@ public sealed class CryptoApiKeyAccessManagementService(
             return null;
         }
 
-        char[] filtered = value.Trim()
-            .Where(static c => !char.IsWhiteSpace(c) && c is not '-' and not ':')
-            .ToArray();
+        ReadOnlySpan<char> trimmed = value.AsSpan().Trim();
+        Span<char> buffer = trimmed.Length <= 256 ? stackalloc char[trimmed.Length] : new char[trimmed.Length];
+        int count = 0;
+        foreach (char c in trimmed)
+        {
+            if (!char.IsWhiteSpace(c) && c is not '-' and not ':')
+            {
+                buffer[count++] = char.ToUpperInvariant(c);
+            }
+        }
 
-        if (filtered.Length == 0)
+        if (count == 0)
         {
             return null;
         }
 
-        if (filtered.Length % 2 != 0)
+        if (count % 2 != 0)
         {
             throw new ArgumentException("Object id hex must contain an even number of hexadecimal characters.", nameof(value));
         }
 
-        foreach (char c in filtered)
+        ReadOnlySpan<char> result = buffer[..count];
+        foreach (char c in result)
         {
             if (!Uri.IsHexDigit(c))
             {
@@ -411,6 +473,6 @@ public sealed class CryptoApiKeyAccessManagementService(
             }
         }
 
-        return new string(filtered).ToUpperInvariant();
+        return new string(result);
     }
 }

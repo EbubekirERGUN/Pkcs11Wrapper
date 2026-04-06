@@ -71,7 +71,7 @@ public sealed record CryptoApiOperationPolicyDocument(
     int Version,
     IReadOnlyList<string> AllowedOperations);
 
-public sealed record CryptoApiRouteCandidate(
+public readonly record struct CryptoApiRouteCandidate(
     string? DeviceRoute,
     ulong SlotId,
     int Priority);
@@ -83,13 +83,13 @@ public sealed record CryptoApiRoutePlan(
     string? ObjectLabel,
     string? ObjectIdHex);
 
-public sealed record CryptoApiResolvedKeyRoute(
+public readonly record struct CryptoApiResolvedKeyRoute(
     string? DeviceRoute,
     ulong SlotId,
     string? ObjectLabel,
     string? ObjectIdHex);
 
-public sealed record CryptoApiMatchedPolicy(
+public readonly record struct CryptoApiMatchedPolicy(
     Guid PolicyId,
     string PolicyName,
     int Revision);
@@ -103,12 +103,12 @@ public sealed record CryptoApiAuthorizedKeyOperation(
     IReadOnlyList<CryptoApiMatchedPolicy> MatchedPolicies,
     DateTimeOffset AuthorizedAtUtc);
 
-public sealed record CryptoApiKeyOperationAuthorizationResult(
+public readonly record struct CryptoApiKeyOperationAuthorizationResult(
     bool Succeeded,
     string? FailureReason,
     CryptoApiAuthorizedKeyOperation? Authorization);
 
-public sealed record CryptoApiRequestAuthorizationResult(
+public readonly record struct CryptoApiRequestAuthorizationResult(
     bool Succeeded,
     int? FailureStatusCode,
     string? FailureReason,

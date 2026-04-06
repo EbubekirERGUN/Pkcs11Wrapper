@@ -24,15 +24,36 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
     private bool _disposed;
 
     public bool HasNamedBackends
-        => runtimeOptions.Value.Backends.Any(static backend => backend.Enabled);
+    {
+        get
+        {
+            foreach (var backend in runtimeOptions.Value.Backends)
+            {
+                if (backend.Enabled) return true;
+            }
+            return false;
+        }
+    }
 
     public IReadOnlyList<string> GetNamedBackendNames()
-        => runtimeOptions.Value.Backends
-            .Where(static backend => backend.Enabled)
-            .Select(backend => CryptoApiConfiguredRouteRegistry.NormalizeMachineName(backend.Name, nameof(backend.Name)))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(static backend => backend, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+    {
+        var backends = runtimeOptions.Value.Backends;
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        List<string> names = new(backends.Count);
+        foreach (var backend in backends)
+        {
+            if (backend.Enabled)
+            {
+                string name = CryptoApiConfiguredRouteRegistry.NormalizeMachineName(backend.Name, nameof(backend.Name));
+                if (seen.Add(name))
+                {
+                    names.Add(name);
+                }
+            }
+        }
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
 
     public Pkcs11Module GetInitializedModule(string? deviceRoute = null)
         => ResolveBackend(deviceRoute).GetInitializedModule();
@@ -139,7 +160,7 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
                     return _module;
                 }
 
-                string modulePath = configuration.ModulePath?.Trim() ?? string.Empty;
+                string modulePath = configuration.ModulePath ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(modulePath))
                 {
                     throw new CryptoApiOperationConfigurationException($"Crypto API PKCS#11 module path is not configured for backend '{configuration.Name}'.");
@@ -185,10 +206,21 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
         }
 
         public IReadOnlyList<CryptoApiPkcs11SessionPoolMetricsSnapshot> GetSessionPoolMetricsSnapshots()
-            => _sessionPools
-                .OrderBy(static pair => pair.Key.Value)
-                .Select(pair => pair.Value.CreateMetricsSnapshot(configuration.Name, (ulong)pair.Key.Value, configuration.MaxRetainedSessionsPerSlot))
-                .ToArray();
+        {
+            if (_sessionPools.IsEmpty)
+            {
+                return [];
+            }
+
+            var pairs = _sessionPools.ToArray();
+            Array.Sort(pairs, static (a, b) => a.Key.Value.CompareTo(b.Key.Value));
+            var snapshots = new CryptoApiPkcs11SessionPoolMetricsSnapshot[pairs.Length];
+            for (int i = 0; i < pairs.Length; i++)
+            {
+                snapshots[i] = pairs[i].Value.CreateMetricsSnapshot(configuration.Name, (ulong)pairs[i].Key.Value, configuration.MaxRetainedSessionsPerSlot);
+            }
+            return snapshots;
+        }
 
         public void Dispose()
         {
@@ -268,7 +300,7 @@ public sealed class CryptoApiPkcs11Runtime(IOptions<CryptoApiRuntimeOptions> run
 
         private void LoginIfConfigured(Pkcs11Session session)
         {
-            string userPin = configuration.UserPin?.Trim() ?? string.Empty;
+            string userPin = configuration.UserPin ?? string.Empty;
             if (string.IsNullOrWhiteSpace(userPin))
             {
                 return;
